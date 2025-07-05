@@ -239,7 +239,7 @@ export BRIDGE_INTERFACE="ens33"  # 替换为实际接口名
 | `GIT_PROXY` | Git 代理 | 未设置 | `http://proxy:8080` |
 | `PIP_PROXY` | Pip 代理 | 未设置 | `http://proxy:8080` |
 | `NO_PROXY` | 代理排除列表 | 未设置 | `localhost,127.0.0.1` |
-| `KUBESPRAY_DIR` | Kubespray 项目目录（固定值，不可配置） | `$(pwd)/kubespray` | 固定为 `$(pwd)/kubespray` |
+| `KUBESPRAY_DIR` | Kubespray 项目目录（固定值，不可配置） | `$(pwd)/kubespray-upm` | 固定为 `$(pwd)/kubespray-upm` |
 
 ### 脚本执行流程
 

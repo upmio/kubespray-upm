@@ -54,11 +54,11 @@ set -eE
 
 # Script metadata
 readonly SCRIPT_VERSION="3.0"
-readonly KUBESPRAY_DIR="$(pwd)/kubespray"
+readonly KUBESPRAY_DIR="$(pwd)/kubespray-upm"
 
 # Default values
 readonly DEFAULT_PYTHON_VERSION="3.12.11"
-readonly KUBESPRAY_REPO_URL="https://github.com/upmio/kubespray.git"
+readonly KUBESPRAY_REPO_URL="https://github.com/upmio/kubespray-upm.git"
 
 # Network configuration constants
 readonly DEFAULT_BRIDGE_NAME="br0"
