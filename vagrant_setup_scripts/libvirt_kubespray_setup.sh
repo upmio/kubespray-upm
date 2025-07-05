@@ -2086,7 +2086,7 @@ main() {
     setup_python_environment
     setup_kubespray_project
     
-    echo -e "\n${GREEN}🎉 Environment Setup Completed Successfully!${NC}\n"
+    echo -e "\n${GREEN}🎉 Environment Setup Completed Successfully!${NC}"
 
     show_deployment_confirmation
     

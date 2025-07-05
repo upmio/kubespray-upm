@@ -406,7 +406,7 @@ def configure_vm_network(node, ip, instance_num)
       network_options[:virtualbox__nic_type] = "virtio"
       node.vm.network :private_network, **network_options
     elsif $provider == "libvirt"
-      network_options[:libvirt__network] = "nat-200-network"
+      network_options[:libvirt__network_name] = "nat-200-network"
       node.vm.network :private_network, **network_options
     elsif $provider == "parallels"
       node.vm.network :private_network, **network_options
