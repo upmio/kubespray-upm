@@ -1713,58 +1713,6 @@ setup_kubespray_project() {
 }
 
 #######################################
-# Main Function
-#######################################
-main() {
-    # Initialize log file with proper permissions
-    touch "$LOG_FILE" 2>/dev/null || {
-        echo "Warning: Cannot create log file $LOG_FILE, logging to stdout only"
-        LOG_FILE="/dev/stdout"
-    }
-    chmod 666 "$LOG_FILE" 2>/dev/null || true
-    
-    log_info "Starting Kubespray Libvirt Environment Setup v$SCRIPT_VERSION"
-    log_info "Log file: $LOG_FILE"
-    
-    # Validate optional environment variables
-    if [[ -n "${BRIDGE_INTERFACE:-}" ]]; then
-        log_info "Using bridge interface: $BRIDGE_INTERFACE"
-        
-        # Verify the specified interface exists
-        if ! ip link show "$BRIDGE_INTERFACE" &>/dev/null; then
-            error_exit "Network interface '$BRIDGE_INTERFACE' does not exist. Available interfaces: $(ip link show | grep -E '^[0-9]+:' | grep -v 'lo:' | cut -d: -f2 | tr -d ' ' | tr '\n' ' ')"
-        fi
-    else
-        log_info "BRIDGE_INTERFACE not set - bridge network will be skipped"
-    fi
-    
-    # Variable validation
-    validate_required_variables
-    # System validation
-    check_sudo_privileges
-    check_system_requirements
-    check_ntp_synchronization
-    validate_configuration
-    test_network_connectivity
-    # Pre-installation confirmation
-    show_interactive_confirmation "setup"
-    # Installation steps
-    install_system_dependencies
-    configure_system_security
-    setup_libvirt
-    install_vagrant
-    install_vagrant_libvirt_plugin
-    setup_python_environment
-    setup_kubespray_project
-    
-    echo -e "\n${GREEN}🎉 Environment Setup Completed Successfully!${NC}\n"
-
-    show_interactive_confirmation "deployment"
-    
-    log_info "Kubespray environment setup completed successfully!"
-}
-
-#######################################
 # Parse and display Vagrant configuration
 #######################################
 parse_vagrant_config() {
@@ -1861,144 +1809,145 @@ parse_vagrant_config() {
 #######################################
 # Generic interactive confirmation function
 #######################################
-show_interactive_confirmation() {
-    local mode="$1"  # "setup" or "deployment"
+#######################################
+# Show setup confirmation and proceed with installation
+#######################################
+show_setup_confirmation() {
+    # Installation Preview Mode
+    echo -e "\n${GREEN}🚀 Kubespray Libvirt Environment Setup${NC}\n"
     
-    if [[ "$mode" == "setup" ]]; then
-        # Installation Preview Mode
-        echo -e "\n${GREEN}🚀 Kubespray Libvirt Environment Setup${NC}\n"
-        
-        # Key Components
-        echo -e "${WHITE}📦 Will Install:${NC}"
-        echo -e "   ${GREEN}•${NC} Virtualization: ${CYAN}libvirt + QEMU/KVM${NC}"
-        echo -e "   ${GREEN}•${NC} Container: ${CYAN}Vagrant 2.4.7 + libvirt plugin${NC}"
-        echo -e "   ${GREEN}•${NC} Python: ${CYAN}pyenv + Python $PYTHON_VERSION${NC}\n"
-        
-        # Network Configuration
-        echo -e "${WHITE}🌐 Network Setup:${NC}"
-        if [[ -n "${BRIDGE_INTERFACE:-}" ]]; then
-            echo -e "   ${GREEN}•${NC} Bridge: ${CYAN}br0${NC} (using interface: ${YELLOW}$BRIDGE_INTERFACE${NC})"
-        else
-            echo -e "   ${YELLOW}•${NC} Bridge: ${YELLOW}Not configured${NC}"
+    # Key Components
+    echo -e "${WHITE}📦 Will Install:${NC}"
+    echo -e "   ${GREEN}•${NC} Virtualization: ${CYAN}libvirt + QEMU/KVM${NC}"
+    echo -e "   ${GREEN}•${NC} Container: ${CYAN}Vagrant 2.4.7 + libvirt plugin${NC}"
+    echo -e "   ${GREEN}•${NC} Python: ${CYAN}pyenv + Python $PYTHON_VERSION${NC}\n"
+    
+    # Network Configuration
+    echo -e "${WHITE}🌐 Network Setup:${NC}"
+    if [[ -n "${BRIDGE_INTERFACE:-}" ]]; then
+        echo -e "   ${GREEN}•${NC} Bridge: ${CYAN}br0${NC} (using interface: ${YELLOW}$BRIDGE_INTERFACE${NC})"
+    else
+        echo -e "   ${YELLOW}•${NC} Bridge: ${YELLOW}Not configured${NC}"
+    fi
+    echo -e "   ${GREEN}•${NC} NAT: ${CYAN}192.168.121.0/24${NC} (DHCP: Enabled)"
+    echo -e "   ${GREEN}•${NC} Host-only: ${CYAN}192.168.200.0/24${NC} (DHCP: Disabled)"
+    
+    # Proxy Configuration
+    if [[ -n "${HTTP_PROXY:-}" ]]; then
+        echo -e "   ${GREEN}•${NC} Proxy: ${CYAN}${HTTP_PROXY}${NC}"
+        if [[ -n "${HTTPS_PROXY:-}" && "${HTTPS_PROXY}" != "${HTTP_PROXY}" ]]; then
+            echo -e "   ${GREEN}•${NC} HTTPS Proxy: ${CYAN}${HTTPS_PROXY}${NC}"
         fi
-        echo -e "   ${GREEN}•${NC} NAT: ${CYAN}192.168.121.0/24${NC} (DHCP: Enabled)"
-        echo -e "   ${GREEN}•${NC} Host-only: ${CYAN}192.168.200.0/24${NC} (DHCP: Disabled)"
-        
-        # Proxy Configuration
-        if [[ -n "${HTTP_PROXY:-}" ]]; then
-            echo -e "   ${GREEN}•${NC} Proxy: ${CYAN}${HTTP_PROXY}${NC}"
-            if [[ -n "${HTTPS_PROXY:-}" && "${HTTPS_PROXY}" != "${HTTP_PROXY}" ]]; then
-                echo -e "   ${GREEN}•${NC} HTTPS Proxy: ${CYAN}${HTTPS_PROXY}${NC}"
-            fi
-            if [[ -n "${NO_PROXY:-}" ]]; then
-                echo -e "   ${GREEN}•${NC} No Proxy: ${CYAN}${NO_PROXY}${NC}"
-            fi
-        else
-            echo -e "   ${YELLOW}•${NC} Proxy: ${YELLOW}Not configured${NC}"
-        fi
-        echo
-        
-        # Critical Changes
-        echo -e "${YELLOW}⚠️  System Changes:${NC}"
-        echo -e "   ${RED}•${NC} Security: ${RED}Firewall & SELinux disabled${NC}"
-        echo -e "   ${GREEN}•${NC} Services: ${GREEN}libvirtd enabled${NC}"
-        echo -e "   ${GREEN}•${NC} User: ${GREEN}Added to libvirt group${NC}\n"
-        
-        # Time & Resources
-        echo -e "${CYAN}⏱️  Estimates: ${YELLOW}15-25 min, ~1GB download, ~5GB disk${NC}"
-        # Important Notes
-        echo -e "${RED}⚠️  Requirements: sudo access, stable internet${NC}\n"
-        
-        # Confirmation prompt for setup
-        if prompt_yes_no "Do you want to proceed with the installation?"; then
-            echo -e "\n${GREEN}✅ Installation confirmed. Proceeding...${NC}\n"
-            log_info "User confirmed installation. Starting setup process..."
-            return 0
-        else
-            echo -e "\n${RED}❌ Installation cancelled by user.${NC}\n"
-            log_info "Installation cancelled by user"
-            exit 0
-        fi
-        
-    elif [[ "$mode" == "deployment" ]]; then
-        # Deployment Confirmation Mode
-        local config_file="$KUBESPRAY_DIR/vagrant/config.rb"
-        
-        # Parse and display configuration
-        if ! parse_vagrant_config "$config_file"; then
-            log_error "Failed to parse Vagrant configuration"
-            return 1
-        fi
-        
-        echo -e "\n${GREEN}🚀 Ready to Deploy Kubernetes Cluster${NC}\n"
-        
-        # Deployment Commands
-        echo -e "${WHITE}📋 Commands to Execute:${NC}"
-        echo -e "   ${GREEN}1.${NC} ${CYAN}cd $KUBESPRAY_DIR${NC}"
-        echo -e "   ${GREEN}2.${NC} ${CYAN}source venv/bin/activate${NC}"
-        echo -e "   ${GREEN}3.${NC} ${CYAN}vagrant up --provider=libvirt --no-parallel${NC}\n"
-        
-        # Time Estimate
-        echo -e "${YELLOW}⏱️  Estimated time: 20-30 minutes${NC}\n"
-        
-        # Confirmation prompt for deployment
-        if prompt_yes_no "Continue with deployment?"; then
-            echo
-            echo -e "${GREEN}🚀 Starting Kubernetes cluster deployment...${NC}"
-            echo
-            
-            # Change to kubespray directory
-            echo -e "${YELLOW}📁 Changing to kubespray directory...${NC}"
-            cd "$KUBESPRAY_DIR" || {
-                error_exit "Failed to change to kubespray directory: $KUBESPRAY_DIR"
-            }
-            
-            # Activate virtual environment
-            echo -e "${YELLOW}🐍 Activating Python virtual environment...${NC}"
-            # shellcheck disable=SC1091
-            source venv/bin/activate || {
-                error_exit "Failed to activate virtual environment"
-            }
-            
-            # Start vagrant deployment
-            echo -e "${YELLOW}⚙️  Starting Vagrant deployment (this may take 15-30 minutes)...${NC}\n"
-            if vagrant up --provider=libvirt --no-parallel; then
-                echo -e "\n${GREEN}🎉 Deployment Completed Successfully!${NC}\n"
-
-                # Configure kubectl for local access
-                echo -e "${YELLOW}🔧 Configuring kubectl for local access...${NC}"
-                if configure_kubectl_access; then
-                    echo -e "${GREEN}✅ kubectl configured successfully${NC}\n"
-                    
-                    display_cluster_info
-                else
-                    echo -e "${YELLOW}⚠️  kubectl configuration failed or artifacts not found${NC}\n"
-                fi
-                
-                echo -e "${WHITE}🎯 Cluster Access Options:${NC}"
-                echo -e "   ${GREEN}Local:${NC}"
-                echo -e "     ${GREEN}•${NC} ${CYAN}kubectl get nodes${NC} (if configured above)"
-                echo -e "     ${GREEN}•${NC} ${CYAN}kubectl get pods --all-namespaces${NC}\n"
-                
-                echo -e "${WHITE}⚙️  Management:${NC}"
-                echo -e "   ${RED}•${NC} Stop: ${CYAN}vagrant halt${NC}"
-                echo -e "   ${GREEN}•${NC} Start: ${CYAN}vagrant up${NC}"
-                echo -e "   ${YELLOW}•${NC} Destroy: ${CYAN}vagrant destroy -f${NC}\n"
-            else
-                echo -e "\n${RED}❌ Deployment failed! Check logs above.${NC}\n"
-                echo -e "${YELLOW}🔄 Retry: ${CYAN}cd $KUBESPRAY_DIR && source venv/bin/activate && vagrant up --provider=libvirt --no-parallel${NC}\n"
-                return 1
-            fi
-            return 0
-        else
-            echo -e "\n${YELLOW}⏸️  Deployment cancelled.${NC}\n"
-            echo -e "${WHITE}📝 Config: ${CYAN}$config_file${NC}\n"
-            echo -e "${WHITE}🚀 Manual deploy: ${CYAN}cd $KUBESPRAY_DIR && source venv/bin/activate && vagrant up --provider=libvirt --no-parallel${NC}\n"
-            return 0
+        if [[ -n "${NO_PROXY:-}" ]]; then
+            echo -e "   ${GREEN}•${NC} No Proxy: ${CYAN}${NO_PROXY}${NC}"
         fi
     else
-        log_error "Invalid mode: $mode. Use 'setup' or 'deployment'."
+        echo -e "   ${YELLOW}•${NC} Proxy: ${YELLOW}Not configured${NC}"
+    fi
+    echo
+    
+    # Critical Changes
+    echo -e "${YELLOW}⚠️  System Changes:${NC}"
+    echo -e "   ${RED}•${NC} Security: ${RED}Firewall & SELinux disabled${NC}"
+    echo -e "   ${GREEN}•${NC} Services: ${GREEN}libvirtd enabled${NC}"
+    echo -e "   ${GREEN}•${NC} User: ${GREEN}Added to libvirt group${NC}\n"
+    
+    # Time & Resources
+    echo -e "${CYAN}⏱️  Estimates: ${YELLOW}15-25 min, ~1GB download, ~5GB disk${NC}"
+    # Important Notes
+    echo -e "${RED}⚠️  Requirements: sudo access, stable internet${NC}\n"
+    
+    # Confirmation prompt for setup
+    if prompt_yes_no "Do you want to proceed with the installation?"; then
+        echo -e "\n${GREEN}✅ Installation confirmed. Proceeding...${NC}\n"
+        log_info "User confirmed installation. Starting setup process..."
+        return 0
+    else
+        echo -e "\n${RED}❌ Installation cancelled by user.${NC}\n"
+        log_info "Installation cancelled by user"
+        exit 0
+    fi
+}
+
+#######################################
+# Show deployment confirmation and execute deployment
+#######################################
+show_deployment_confirmation() {
+    # Deployment Confirmation Mode
+    local config_file="$KUBESPRAY_DIR/vagrant/config.rb"
+    
+    # Parse and display configuration
+    if ! parse_vagrant_config "$config_file"; then
+        log_error "Failed to parse Vagrant configuration"
         return 1
+    fi
+    
+    echo -e "\n${GREEN}🚀 Ready to Deploy Kubernetes Cluster${NC}\n"
+    
+    # Deployment Commands
+    echo -e "${WHITE}📋 Commands to Execute:${NC}"
+    echo -e "   ${GREEN}1.${NC} ${CYAN}cd $KUBESPRAY_DIR${NC}"
+    echo -e "   ${GREEN}2.${NC} ${CYAN}source venv/bin/activate${NC}"
+    echo -e "   ${GREEN}3.${NC} ${CYAN}vagrant up --provider=libvirt --no-parallel${NC}\n"
+    
+    # Time Estimate
+    echo -e "${YELLOW}⏱️  Estimated time: 20-30 minutes${NC}\n"
+    
+    # Confirmation prompt for deployment
+    if prompt_yes_no "Continue with deployment?"; then
+        echo
+        echo -e "${GREEN}🚀 Starting Kubernetes cluster deployment...${NC}"
+        echo
+        
+        # Change to kubespray directory
+        echo -e "${YELLOW}📁 Changing to kubespray directory...${NC}"
+        cd "$KUBESPRAY_DIR" || {
+            error_exit "Failed to change to kubespray directory: $KUBESPRAY_DIR"
+        }
+        
+        # Activate virtual environment
+        echo -e "${YELLOW}🐍 Activating Python virtual environment...${NC}"
+        # shellcheck disable=SC1091
+        source venv/bin/activate || {
+            error_exit "Failed to activate virtual environment"
+        }
+        
+        # Start vagrant deployment
+        echo -e "${YELLOW}⚙️  Starting Vagrant deployment (this may take 15-30 minutes)...${NC}\n"
+        if vagrant up --provider=libvirt --no-parallel; then
+            echo -e "\n${GREEN}🎉 Deployment Completed Successfully!${NC}\n"
+
+            # Configure kubectl for local access
+            echo -e "${YELLOW}🔧 Configuring kubectl for local access...${NC}"
+            if configure_kubectl_access; then
+                echo -e "${GREEN}✅ kubectl configured successfully${NC}\n"
+                
+                display_cluster_info
+            else
+                echo -e "${YELLOW}⚠️  kubectl configuration failed or artifacts not found${NC}\n"
+                error_exit "kubectl configuration failed or artifacts not found"
+            fi
+            
+            echo -e "${WHITE}🎯 Cluster Access Options:${NC}"
+            echo -e "   ${GREEN}Local:${NC}"
+            echo -e "     ${GREEN}•${NC} ${CYAN}kubectl get nodes${NC} (if configured above)"
+            echo -e "     ${GREEN}•${NC} ${CYAN}kubectl get pods --all-namespaces${NC}\n"
+            
+            echo -e "${WHITE}⚙️  Management:${NC}"
+            echo -e "   ${RED}•${NC} Stop: ${CYAN}vagrant halt${NC}"
+            echo -e "   ${GREEN}•${NC} Start: ${CYAN}vagrant up${NC}"
+            echo -e "   ${YELLOW}•${NC} Destroy: ${CYAN}vagrant destroy -f${NC}\n"
+        else
+            echo -e "\n${RED}❌ Deployment failed! Check logs above.${NC}\n"
+            echo -e "${YELLOW}🔄 Retry: ${CYAN}cd $KUBESPRAY_DIR && source venv/bin/activate && vagrant up --provider=libvirt --no-parallel${NC}\n"
+            return 1
+        fi
+        return 0
+    else
+        echo -e "\n${YELLOW}⏸️  Deployment cancelled.${NC}\n"
+        echo -e "${WHITE}📝 Config: ${CYAN}$config_file${NC}\n"
+        echo -e "${WHITE}🚀 Manual deploy: ${CYAN}cd $KUBESPRAY_DIR && source venv/bin/activate && vagrant up --provider=libvirt --no-parallel${NC}\n"
+        return 0
     fi
 }
 
@@ -2020,76 +1969,54 @@ configure_kubectl_access() {
     # Check if artifacts directory exists
     if [[ ! -d "$artifacts_dir" ]]; then
         log_warn "Artifacts directory not found: $artifacts_dir"
-        log_warn "kubectl configuration skipped. You may need to configure it manually."
-        log_warn "Try running: vagrant ssh -c 'sudo cp /usr/local/bin/kubectl /vagrant/kubectl && sudo cp /etc/kubernetes/admin.conf /vagrant/admin.conf'"
         return 1
     fi
     
-    # Create directories with error handling
-    for dir in "$local_bin_dir" "$kube_dir"; do
-        if [[ ! -d "$dir" ]]; then
-            log_info "Creating directory: $dir"
-            if ! mkdir -p "$dir"; then
-                log_error "Failed to create directory: $dir"
-                return 1
-            fi
-        fi
-    done
+    # Create directories
+    mkdir -p "$local_bin_dir" "$kube_dir" || {
+        log_error "Failed to create directories"
+        return 1
+    }
     
-    # Handle kubectl binary
+    # Copy kubectl binary
     if [[ -f "$kubectl_binary" ]]; then
-        log_info "Copying kubectl binary to $local_bin_dir/kubectl"
-        if cp "$kubectl_binary" "$local_bin_dir/kubectl" && chmod +x "$local_bin_dir/kubectl"; then
-            success_count=$((success_count + 1))
+        cp "$kubectl_binary" "$local_bin_dir/kubectl" && chmod +x "$local_bin_dir/kubectl" && {
+            ((success_count++))
             log_info "kubectl binary configured successfully"
-        else
-            log_error "Failed to copy or set permissions for kubectl binary"
-        fi
+        } || log_error "Failed to configure kubectl binary"
     else
         log_warn "kubectl binary not found: $kubectl_binary"
-        log_warn "You may need to install kubectl manually or copy it from the cluster"
     fi
     
-    # Handle kubeconfig file
+    # Copy kubeconfig file
     if [[ -f "$kubeconfig_file" ]]; then
-        log_info "Copying kubeconfig to $kube_dir/config"
-        if cp "$kubeconfig_file" "$kube_dir/config" && chmod 600 "$kube_dir/config"; then
-            success_count=$((success_count + 1))
+        cp "$kubeconfig_file" "$kube_dir/config" && chmod 600 "$kube_dir/config" && {
+            ((success_count++))
             log_info "kubeconfig configured successfully"
-        else
-            log_error "Failed to copy or set permissions for kubeconfig"
-        fi
+        } || log_error "Failed to configure kubeconfig"
     else
         log_warn "kubeconfig file not found: $kubeconfig_file"
-        log_warn "You may need to copy it manually from the cluster"
+        return 1
     fi
     
-    # Verify configuration
+    # Verify and test configuration
     if [[ $success_count -eq $total_steps ]]; then
         log_info "kubectl configuration completed successfully ($success_count/$total_steps steps)"
-        log_info "Please run 'source ~/.bashrc' or restart your terminal to apply changes"
         
-        # Test kubectl with retry mechanism
+        # Test kubectl connection
         if [[ -x "$local_bin_dir/kubectl" && -f "$kube_dir/config" ]]; then
-            log_info "Testing kubectl connection with retry..."
-            local max_attempts=4
-            local wait_seconds=30
-            local attempt=1
-            
-            while [[ $attempt -le $max_attempts ]]; do
-                log_info "Attempt $attempt/$max_attempts: Testing kubectl connection..."
+            log_info "Testing kubectl connection..."
+            for attempt in {1..4}; do
+                log_info "Attempt $attempt/4: Testing kubectl connection..."
                 if timeout 10 "$local_bin_dir/kubectl" --kubeconfig="$kube_dir/config" cluster-info &>/dev/null; then
                     log_info "kubectl connection test successful"
                     break
+                elif [[ $attempt -eq 4 ]]; then
+                    log_warn "kubectl connection test failed after 4 attempts - cluster may still be starting"
                 else
-                    if [[ $attempt -eq $max_attempts ]]; then
-                        log_warn "kubectl connection test failed after $max_attempts attempts - cluster may still be starting"
-                    else
-                        log_info "Connection failed, waiting ${wait_seconds}s before retry..."
-                        sleep $wait_seconds
-                    fi
+                    log_info "Connection failed, waiting 30s before retry..."
+                    sleep 30
                 fi
-                ((attempt++))
             done
         fi
         return 0
@@ -2125,7 +2052,6 @@ display_cluster_info() {
         echo
     else
         echo -e "   ${RED}•${NC} ${RED}Unable to connect to cluster${NC}"
-        echo -e "   ${YELLOW}•${NC} ${YELLOW}The cluster may still be initializing${NC}\n"
         return 1
     fi
     
@@ -2160,10 +2086,60 @@ display_cluster_info() {
     echo -e "   ${GREEN}•${NC} Get nodes: ${CYAN}kubectl get nodes${NC}"
     echo -e "   ${GREEN}•${NC} Get pods: ${CYAN}kubectl get pods --all-namespaces${NC}"
     echo -e "   ${GREEN}•${NC} Get services: ${CYAN}kubectl get services --all-namespaces${NC}\n"
-    
-    echo -e "${YELLOW}💡 Note: You may need to source ~/.bashrc or restart your terminal for PATH changes to take effect${NC}\n"
-    
+ 
     return 0
+}
+
+#######################################
+# Main Function
+#######################################
+main() {
+    # Initialize log file with proper permissions
+    touch "$LOG_FILE" 2>/dev/null || {
+        echo "Warning: Cannot create log file $LOG_FILE, logging to stdout only"
+        LOG_FILE="/dev/stdout"
+    }
+    chmod 666 "$LOG_FILE" 2>/dev/null || true
+    
+    log_info "Starting Kubespray Libvirt Environment Setup v$SCRIPT_VERSION"
+    log_info "Log file: $LOG_FILE"
+    
+    # Validate optional environment variables
+    if [[ -n "${BRIDGE_INTERFACE:-}" ]]; then
+        log_info "Using bridge interface: $BRIDGE_INTERFACE"
+        
+        # Verify the specified interface exists
+        if ! ip link show "$BRIDGE_INTERFACE" &>/dev/null; then
+            error_exit "Network interface '$BRIDGE_INTERFACE' does not exist. Available interfaces: $(ip link show | grep -E '^[0-9]+:' | grep -v 'lo:' | cut -d: -f2 | tr -d ' ' | tr '\n' ' ')"
+        fi
+    else
+        log_info "BRIDGE_INTERFACE not set - bridge network will be skipped"
+    fi
+    
+    # Variable validation
+    validate_required_variables
+    # System validation
+    check_sudo_privileges
+    check_system_requirements
+    check_ntp_synchronization
+    validate_configuration
+    test_network_connectivity
+    # Pre-installation confirmation
+    show_setup_confirmation
+    # Installation steps
+    install_system_dependencies
+    configure_system_security
+    setup_libvirt
+    install_vagrant
+    install_vagrant_libvirt_plugin
+    setup_python_environment
+    setup_kubespray_project
+    
+    echo -e "\n${GREEN}🎉 Environment Setup Completed Successfully!${NC}\n"
+
+    show_deployment_confirmation
+    
+    log_info "Kubespray environment setup completed successfully!"
 }
 
 #######################################
