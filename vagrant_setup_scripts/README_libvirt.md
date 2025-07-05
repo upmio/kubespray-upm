@@ -178,7 +178,7 @@
 
 ```bash
 # 下载脚本
-curl -sSL https://raw.githubusercontent.com/upmio/kubespray/refs/heads/master/vagrant_setup_scripts/libvirt_kubespray_setup.sh -o "libvirt_kubespray_setup.sh"
+curl -sSL https://raw.githubusercontent.com/upmio/kubespray-upm/refs/heads/master/vagrant_setup_scripts/libvirt_kubespray_setup.sh -o "libvirt_kubespray_setup.sh"
 chmod +x ./libvirt_kubespray_setup.sh
 bash ./libvirt_kubespray_setup.sh
 ```
