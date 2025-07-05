@@ -1985,24 +1985,13 @@ install_openebs_lvm_localpv() {
     echo -e "   ${YELLOW}•${NC} Add node labels to control plane and worker nodes"
     echo -e "   ${YELLOW}•${NC} Install Helm if not already present\n"
     
-    while true; do
-        echo -ne "${WHITE}Do you want to proceed with OpenEBS LVM LocalPV installation? [y/N]: ${NC}"
-        read -r response
-        case "$response" in
-            [Yy]|[Yy][Ee][Ss])
-                echo -e "${GREEN}✅ Proceeding with OpenEBS LVM LocalPV installation...${NC}\n"
-                break
-                ;;
-            [Nn]|[Nn][Oo]|"")
-                echo -e "${YELLOW}⏸️  OpenEBS LVM LocalPV installation skipped.${NC}\n"
-                log_info "OpenEBS LVM LocalPV installation skipped by user"
-                return 0
-                ;;
-            *)
-                echo -e "${RED}❌ Please answer 'y' for yes or 'n' for no.${NC}"
-                ;;
-        esac
-    done
+    if ! prompt_yes_no "Do you want to proceed with OpenEBS LVM LocalPV installation?" "N"; then
+        echo -e "${YELLOW}⏸️  OpenEBS LVM LocalPV installation skipped.${NC}\n"
+        log_info "OpenEBS LVM LocalPV installation skipped by user"
+        return 0
+    fi
+    
+    echo -e "${GREEN}✅ Proceeding with OpenEBS LVM LocalPV installation...${NC}\n"
 
 
 
