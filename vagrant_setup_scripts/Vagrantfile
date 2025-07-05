@@ -409,7 +409,6 @@ def configure_vm_network(node, ip, instance_num)
       network_options[:libvirt__network] = "nat-200-network"
       node.vm.network :private_network, **network_options
     elsif $provider == "parallels"
-      network_options = {
       node.vm.network :private_network, **network_options
     end
     

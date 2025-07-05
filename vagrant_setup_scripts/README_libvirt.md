@@ -218,7 +218,7 @@ export BRIDGE_INTERFACE="ens33"  # 替换为实际接口名
 - **网关 IP 地址**: 例如 `192.168.1.1`
 - **DNS 服务器 IP**: 例如 `8.8.8.8` 或使用网关IP
 
-#### 2. NAT 网络模式
+#### 2. NAT网络模式
 
 如果选择 NAT 网络模式，不需要配置 `BRIDGE_INTERFACE`。
 
