@@ -53,7 +53,8 @@ set -eE
 
 # Script metadata
 readonly SCRIPT_VERSION="3.0"
-readonly KUBESPRAY_DIR="$(pwd)/kubespray-upm"
+KUBESPRAY_DIR="$(pwd)/kubespray-upm"
+readonly KUBESPRAY_DIR
 
 # Default values
 readonly DEFAULT_PYTHON_VERSION="3.12.11"
@@ -1909,7 +1910,6 @@ configure_kubectl_access() {
     local kubeconfig_file="$artifacts_dir/admin.conf"
     local local_bin_dir="$HOME/.local/bin"
     local kube_dir="$HOME/.kube"
-    local shell_config="$HOME/.bashrc"
     local success_count=0
     local total_steps=2
     
@@ -1927,20 +1927,24 @@ configure_kubectl_access() {
     
     # Copy kubectl binary
     if [[ -f "$kubectl_binary" ]]; then
-        cp "$kubectl_binary" "$local_bin_dir/kubectl" && chmod +x "$local_bin_dir/kubectl" && {
+        if cp "$kubectl_binary" "$local_bin_dir/kubectl" && chmod +x "$local_bin_dir/kubectl"; then
             ((success_count++))
             log_info "kubectl binary configured successfully"
-        } || log_error "Failed to configure kubectl binary"
+        else
+            log_error "Failed to configure kubectl binary"
+        fi
     else
         log_warn "kubectl binary not found: $kubectl_binary"
     fi
     
     # Copy kubeconfig file
     if [[ -f "$kubeconfig_file" ]]; then
-        cp "$kubeconfig_file" "$kube_dir/config" && chmod 600 "$kube_dir/config" && {
+        if cp "$kubeconfig_file" "$kube_dir/config" && chmod 600 "$kube_dir/config"; then
             ((success_count++))
             log_info "kubeconfig configured successfully"
-        } || log_error "Failed to configure kubeconfig"
+        else
+            log_error "Failed to configure kubeconfig"
+        fi
     else
         log_warn "kubeconfig file not found: $kubeconfig_file"
         return 1
