@@ -55,6 +55,10 @@ set -eE
 readonly SCRIPT_VERSION="3.0"
 KUBESPRAY_DIR="$(pwd)/kubespray-upm"
 readonly KUBESPRAY_DIR
+readonly VAGRANT_CONF_DIR="${KUBESPRAY_DIR}/vagrant"
+readonly VAGRANT_CONF_FILE="${VAGRANT_CONF_DIR}/config.rb"
+readonly KUBCTL="${HOME}/.local/bin/kubectl"
+export KUBECONFIG="${HOME}/.kube/config"
 
 # Default values
 readonly DEFAULT_PYTHON_VERSION="3.12.11"
@@ -1372,7 +1376,6 @@ setup_virtual_environment() {
 # Function to configure public network settings interactively
 configure_public_network_settings() {
     # Declare local variables
-    local config_file
     local temp_file
     local subnet
     local subnet_split4
@@ -1380,8 +1383,7 @@ configure_public_network_settings() {
     local gateway
     local dns_server
 
-    config_file="$1"
-    temp_file="${config_file}.tmp"
+    temp_file="${VAGRANT_CONF_FILE}.tmp"
 
     log_info "Configuring public network settings..."
     echo
@@ -1434,25 +1436,21 @@ configure_public_network_settings() {
         } else {
             print $0
         }
-    }' "$config_file" >"$temp_file"
+    }' "$VAGRANT_CONF_FILE" >"$temp_file"
 
     # Replace the original file
-    mv "$temp_file" "$config_file"
+    mv "$temp_file" "$VAGRANT_CONF_FILE"
 
-    log_info "Public network configuration applied to $config_file"
+    log_info "Public network configuration applied to $VAGRANT_CONF_FILE"
 }
 
 configure_vagrant_config() {
     # Declare local variables
-    local vagrant_dir
-    local config_file
     local script_dir
     local network_type
     local template_file
     local temp_file
 
-    vagrant_dir="$KUBESPRAY_DIR/vagrant"
-    config_file="$vagrant_dir/config.rb"
     network_type="$PRIVATE_NETWORK_TYPE"
 
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
@@ -1469,9 +1467,9 @@ configure_vagrant_config() {
     log_info "Configuring Vagrant config.rb with $network_type network..."
 
     # Create vagrant directory if it doesn't exist
-    if [ ! -d "$vagrant_dir" ]; then
-        log_info "Creating vagrant directory: $vagrant_dir"
-        mkdir -p "$vagrant_dir"
+    if [ ! -d "$VAGRANT_CONF_DIR" ]; then
+        log_info "Creating vagrant directory: $VAGRANT_CONF_DIR"
+        mkdir -p "$VAGRANT_CONF_DIR"
     fi
 
     # Check if template file exists
@@ -1482,12 +1480,12 @@ configure_vagrant_config() {
     fi
 
     # Copy template to config.rb
-    log_info "Copying template to $config_file"
-    cp "$template_file" "$config_file"
+    log_info "Copying template to $VAGRANT_CONF_FILE"
+    cp "$template_file" "$VAGRANT_CONF_FILE"
 
     # Configure public network settings if using public network
     if [[ "$network_type" == "$PUBLIC_NETWORK_TYPE" ]]; then
-        configure_public_network_settings "$config_file"
+        configure_public_network_settings
     fi
 
     # Configure proxy settings if HTTP_PROXY is set
@@ -1495,7 +1493,7 @@ configure_vagrant_config() {
         log_info "Configuring proxy settings in config.rb"
 
         # Create a temporary file for safe editing
-        temp_file="${config_file}.tmp"
+        temp_file="${VAGRANT_CONF_FILE}.tmp"
 
         # Set $https_proxy (use HTTP_PROXY if HTTPS_PROXY is not set)
         local https_proxy_value="${HTTPS_PROXY:-$HTTP_PROXY}"
@@ -1520,10 +1518,10 @@ configure_vagrant_config() {
             } else {
                 print $0
             }
-        }' "$config_file" >"$temp_file"
+        }' "$VAGRANT_CONF_FILE" >"$temp_file"
 
         # Replace the original file
-        mv "$temp_file" "$config_file"
+        mv "$temp_file" "$VAGRANT_CONF_FILE"
 
         log_info "Proxy configuration completed:"
         log_info "  HTTP_PROXY: $HTTP_PROXY"
@@ -1536,7 +1534,7 @@ configure_vagrant_config() {
         log_info "No HTTP_PROXY set, keeping proxy settings commented out"
     fi
 
-    log_info "Vagrant config.rb configuration completed: $config_file"
+    log_info "Vagrant config.rb configuration completed: $VAGRANT_CONF_FILE"
 }
 
 setup_kubespray_project() {
@@ -1596,7 +1594,6 @@ setup_kubespray_project() {
 #######################################
 parse_vagrant_config() {
     # Declare local variables
-    local config_file
     local num_instances
     local kube_master_instances
     local upm_ctl_instances
@@ -1617,31 +1614,29 @@ parse_vagrant_config() {
     local vm_network
     local subnet_split4
 
-    config_file="$1"
-
-    if [[ ! -f "$config_file" ]]; then
-        log_warn "Config file not found: $config_file"
+    if [[ ! -f "$VAGRANT_CONF_FILE" ]]; then
+        log_warn "Config file not found: $VAGRANT_CONF_FILE"
         return 1
     fi
 
     # Extract configuration values from config.rb
-    num_instances=$(grep "^\$num_instances\s*=" "$config_file" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "$DEFAULT_VM_INSTANCES")
-    kube_master_instances=$(grep "^\$kube_master_instances\s*=" "$config_file" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "1")
-    upm_ctl_instances=$(grep "^\$upm_ctl_instances\s*=" "$config_file" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "1")
-    vm_cpus=$(grep "^\$vm_cpus\s*=" "$config_file" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "8")
-    vm_memory=$(grep "^\$vm_memory\s*=" "$config_file" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "16384")
-    kube_master_vm_cpus=$(grep "^\$kube_master_vm_cpus\s*=" "$config_file" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "4")
-    kube_master_vm_memory=$(grep "^\$kube_master_vm_memory\s*=" "$config_file" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "4096")
-    upm_control_plane_vm_cpus=$(grep "^\$upm_control_plane_vm_cpus\s*=" "$config_file" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "12")
-    upm_control_plane_vm_memory=$(grep "^\$upm_control_plane_vm_memory\s*=" "$config_file" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "24576")
-    kube_version=$(grep "^\$kube_version\s*=" "$config_file" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "1.33.2")
-    os=$(grep "^\$os\s*=" "$config_file" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "rockylinux9")
-    network_plugin=$(grep "^\$network_plugin\s*=" "$config_file" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "calico")
-    instance_name_prefix=$(grep "^\$instance_name_prefix\s*=" "$config_file" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "$DEFAULT_INSTANCE_PREFIX")
-    subnet_split4=$(grep "^\$subnet_split4\s*=" "$config_file" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "100")
+    num_instances=$(grep "^\$num_instances\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "$DEFAULT_VM_INSTANCES")
+    kube_master_instances=$(grep "^\$kube_master_instances\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "1")
+    upm_ctl_instances=$(grep "^\$upm_ctl_instances\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "1")
+    vm_cpus=$(grep "^\$vm_cpus\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "8")
+    vm_memory=$(grep "^\$vm_memory\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "16384")
+    kube_master_vm_cpus=$(grep "^\$kube_master_vm_cpus\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "4")
+    kube_master_vm_memory=$(grep "^\$kube_master_vm_memory\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "4096")
+    upm_control_plane_vm_cpus=$(grep "^\$upm_control_plane_vm_cpus\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "12")
+    upm_control_plane_vm_memory=$(grep "^\$upm_control_plane_vm_memory\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "24576")
+    kube_version=$(grep "^\$kube_version\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "1.33.2")
+    os=$(grep "^\$os\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "rockylinux9")
+    network_plugin=$(grep "^\$network_plugin\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "calico")
+    instance_name_prefix=$(grep "^\$instance_name_prefix\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "$DEFAULT_INSTANCE_PREFIX")
+    subnet_split4=$(grep "^\$subnet_split4\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "100")
 
     # Extract network configuration
-    vm_network=$(grep "^\$vm_network\s*=" "$config_file" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "private_network")
+    vm_network=$(grep "^\$vm_network\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "private_network")
     # Only public network is supported
     if [[ "$vm_network" == "public_network" ]]; then
         local subnet
@@ -1649,11 +1644,11 @@ parse_vagrant_config() {
         local gateway
         local dns_server
         local bridge_nic
-        subnet=$(grep "^\$subnet\s*=" "$config_file" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
-        netmask=$(grep "^\$netmask\s*=" "$config_file" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
-        gateway=$(grep "^\$gateway\s*=" "$config_file" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
-        dns_server=$(grep "^\$dns_server\s*=" "$config_file" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
-        bridge_nic=$(grep "^\$bridge_nic\s*=" "$config_file" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
+        subnet=$(grep "^\$subnet\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
+        netmask=$(grep "^\$netmask\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
+        gateway=$(grep "^\$gateway\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
+        dns_server=$(grep "^\$dns_server\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
+        bridge_nic=$(grep "^\$bridge_nic\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
     else
         subnet="192.168.200"
         netmask="255.255.255.0"
@@ -1733,7 +1728,7 @@ parse_vagrant_config() {
     echo -e "   ${GREEN}•${NC} CPUs: ${RED}$total_cpus${NC} cores"
     echo -e "   ${GREEN}•${NC} Memory: ${RED}${total_memory_gb}GB${NC}\n"
 
-    echo -e "${WHITE}⚙️  Config: ${CYAN}$config_file${NC}"
+    echo -e "${WHITE}⚙️  Config: ${CYAN}$VAGRANT_CONF_FILE${NC}"
 
     return 0
 }
@@ -1806,11 +1801,8 @@ show_setup_confirmation() {
 show_deployment_confirmation() {
     echo -e "\n${GREEN}🎉 Environment Setup Completed Successfully!${NC}"
 
-    # Deployment Confirmation Mode
-    local config_file="$KUBESPRAY_DIR/vagrant/config.rb"
-
     # Parse and display configuration
-    if ! parse_vagrant_config "$config_file"; then
+    if ! parse_vagrant_config; then
         log_error "Failed to parse Vagrant configuration"
         return 1
     fi
@@ -1821,16 +1813,15 @@ show_deployment_confirmation() {
     echo -e "\n${WHITE}📋 Commands to Execute:${NC}"
     echo -e "   ${GREEN}1.${NC} ${CYAN}cd $KUBESPRAY_DIR${NC}"
     echo -e "   ${GREEN}2.${NC} ${CYAN}source venv/bin/activate${NC}"
-    echo -e "   ${GREEN}3.${NC} ${CYAN}vagrant up --provider=libvirt --no-parallel${NC}\n"
+    echo -e "   ${GREEN}3.${NC} ${CYAN}vagrant up --provider=libvirt --no-parallel${NC}"
 
     # Time Estimate
-    echo -e "${YELLOW}⏱️  Estimated time: 20-30 minutes${NC}\n"
+    echo -e "\n${YELLOW}⏱️  Estimated time: 20-30 minutes${NC}"
 
     # Confirmation prompt for deployment
     if prompt_yes_no "Continue with deployment?"; then
-        echo
-        echo -e "${GREEN}🚀 Starting Kubernetes cluster deployment...${NC}"
-        echo
+        echo -e "\n${GREEN}🚀 Starting Kubernetes cluster deployment...${NC}"
+        echo -e "\n${YELLOW}⚙️  Starting Vagrant deployment (this may take 15-30 minutes)...${NC}\n"
 
         # Change to kubespray directory
         echo -e "${YELLOW}📁 Changing to kubespray directory...${NC}"
@@ -1845,11 +1836,8 @@ show_deployment_confirmation() {
             error_exit "Failed to activate virtual environment"
         }
 
-        # Start vagrant deployment
-        echo -e "${YELLOW}⚙️  Starting Vagrant deployment (this may take 15-30 minutes)...${NC}\n"
         if vagrant up --provider=libvirt --no-parallel; then
             echo -e "\n${GREEN}🎉 Deployment Completed Successfully!${NC}\n"
-
             # Configure kubectl for local access
             echo -e "${YELLOW}🔧 Configuring kubectl for local access...${NC}"
             if configure_kubectl_access; then
@@ -1875,10 +1863,19 @@ show_deployment_confirmation() {
             echo -e "${YELLOW}🔄 Retry: ${CYAN}cd $KUBESPRAY_DIR && source venv/bin/activate && vagrant up --provider=libvirt --no-parallel${NC}\n"
             return 1
         fi
+
+        # Install OpenEBS LVM LocalPV
+        echo -e "${YELLOW}🔧 Installing OpenEBS LVM LocalPV...${NC}"
+        if install_openebs_lvm_localpv; then
+            echo -e "${GREEN}✅ OpenEBS LVM LocalPV installed successfully${NC}\n"
+        else
+            echo -e "${YELLOW}⚠️  OpenEBS LVM LocalPV installation failed${NC}\n"
+            log_warn "OpenEBS LVM LocalPV installation failed, but continuing..."
+        fi
         return 0
     else
         echo -e "\n${YELLOW}⏸️  Deployment cancelled.${NC}\n"
-        echo -e "${WHITE}📝 Config: ${CYAN}$config_file${NC}\n"
+        echo -e "${WHITE}📝 Config: ${CYAN}$VAGRANT_CONF_FILE${NC}\n"
         echo -e "${WHITE}🚀 Manual deploy: ${CYAN}cd $KUBESPRAY_DIR && source venv/bin/activate && vagrant up --provider=libvirt --no-parallel${NC}\n"
         return 0
     fi
@@ -1924,7 +1921,7 @@ configure_kubectl_access() {
 
     # Copy kubeconfig file
     if [[ -f "$kubeconfig_file" ]]; then
-        if cp "$kubeconfig_file" "$kube_dir/config" && chmod 600 "$kube_dir/config"; then
+        if cp "$kubeconfig_file" "$KUBECONFIG" && chmod 600 "$KUBECONFIG"; then
             ((success_count++))
             log_info "kubeconfig configured successfully"
         else
@@ -1940,11 +1937,11 @@ configure_kubectl_access() {
         log_info "kubectl configuration completed successfully ($success_count/$total_steps steps)"
 
         # Test kubectl connection
-        if [[ -x "$local_bin_dir/kubectl" && -f "$kube_dir/config" ]]; then
+        if [[ -x "$KUBCTL" && -f "$KUBECONFIG" ]]; then
             log_info "Testing kubectl connection..."
             for attempt in {1..4}; do
                 log_info "Attempt $attempt/4: Testing kubectl connection..."
-                if timeout 10 "$local_bin_dir/kubectl" --kubeconfig="$kube_dir/config" cluster-info &>/dev/null; then
+                if timeout 10 "$KUBCTL" --kubeconfig="$KUBECONFIG" cluster-info &>/dev/null; then
                     log_info "kubectl connection test successful"
                     break
                 elif [[ $attempt -eq 4 ]]; then
@@ -1963,28 +1960,199 @@ configure_kubectl_access() {
 }
 
 #######################################
+# Install and configure OpenEBS LVM LocalPV
+#######################################
+install_openebs_lvm_localpv() {
+    log_info "Installing OpenEBS LVM LocalPV..."
+
+    local openebs_namespace="openebs"
+    local openebs_storagclass_name="openebs-lvm-localpv"
+
+    # Interactive confirmation for OpenEBS installation
+    echo -e "\n${YELLOW}📦 OpenEBS LVM LocalPV Installation${NC}\n"
+    echo -e "${WHITE}This will install OpenEBS LVM LocalPV with the following components:${NC}"
+    echo -e "   ${GREEN}•${NC} OpenEBS LVM LocalPV Helm chart"
+    echo -e "   ${GREEN}•${NC} LVM LocalPV StorageClass"
+    echo -e "   ${GREEN}•${NC} Node labels for OpenEBS scheduling"
+    echo -e "   ${GREEN}•${NC} Helm repository configuration\n"
+    
+    echo -e "${WHITE}Installation details:${NC}"
+    echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$openebs_namespace${NC}"
+    echo -e "   ${GREEN}•${NC} StorageClass: ${CYAN}$openebs_storagclass_name${NC}"
+    echo -e "   ${GREEN}•${NC} Installation timeout: ${CYAN}20 minutes${NC}\n"
+    
+    echo -e "${YELLOW}⚠️  Note: This installation will:${NC}"
+    echo -e "   ${YELLOW}•${NC} Add node labels to control plane and worker nodes"
+    echo -e "   ${YELLOW}•${NC} Install Helm if not already present\n"
+    
+    while true; do
+        echo -ne "${WHITE}Do you want to proceed with OpenEBS LVM LocalPV installation? [y/N]: ${NC}"
+        read -r response
+        case "$response" in
+            [Yy]|[Yy][Ee][Ss])
+                echo -e "${GREEN}✅ Proceeding with OpenEBS LVM LocalPV installation...${NC}\n"
+                break
+                ;;
+            [Nn]|[Nn][Oo]|"")
+                echo -e "${YELLOW}⏸️  OpenEBS LVM LocalPV installation skipped.${NC}\n"
+                log_info "OpenEBS LVM LocalPV installation skipped by user"
+                return 0
+                ;;
+            *)
+                echo -e "${RED}❌ Please answer 'y' for yes or 'n' for no.${NC}"
+                ;;
+        esac
+    done
+
+
+
+    # Check if helm is installed
+    if ! command -v helm >/dev/null 2>&1; then
+        log_info "Installing Helm..."
+        curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+        chmod 700 get_helm.sh
+        ./get_helm.sh
+        rm -f get_helm.sh
+    else
+        log_info "Helm is already installed"
+    fi
+
+    # Label nodes for OpenEBS
+    # Label UPM control plane nodes (openebs.io/control-plane=enable)
+    log_info "Labeling UPM control plane nodes..."
+    local instance_name_prefix
+    local kube_master_instances
+    local upm_ctl_instances
+    local num_instances
+    instance_name_prefix=$(grep "^\$instance_name_prefix\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "$DEFAULT_INSTANCE_PREFIX")
+    kube_master_instances=$(grep "^\$kube_master_instances\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "1")
+    upm_ctl_instances=$(grep "^\$upm_ctl_instances\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "1")
+    num_instances=$(grep "^\$num_instances\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "$DEFAULT_VM_INSTANCES")
+
+    local upm_start_index=$((kube_master_instances + 1))
+    local upm_end_index=$((kube_master_instances + upm_ctl_instances))
+
+    local nodes
+    nodes=$("$KUBCTL" get nodes --no-headers -o custom-columns=":metadata.name")
+
+    while IFS= read -r node; do
+        # Extract node number from node name (assuming format: prefix-number)
+        if [[ "$node" =~ ^${instance_name_prefix}-([0-9]+)$ ]]; then
+            local node_num="${BASH_REMATCH[1]}"
+            if [[ "$node_num" -ge "$upm_start_index" ]] && [[ "$node_num" -le "$upm_end_index" ]]; then
+                log_info "Labeling UPM control plane node: $node (node number: $node_num)"
+                "$KUBCTL" label node "$node" "openebs.io/control-plane=enable" --overwrite
+            fi
+        fi
+    done <<< "$nodes"
+
+    # Label worker nodes (openebs.io/node=enable)
+    log_info "Labeling worker nodes..."
+    local worker_start_index=$((upm_end_index + 1))
+    local worker_end_index=$((num_instances))
+
+    while IFS= read -r node; do
+        # Extract node number from node name (assuming format: prefix-number)
+        if [[ "$node" =~ ^${instance_name_prefix}-([0-9]+)$ ]]; then
+            local node_num="${BASH_REMATCH[1]}"
+            if [[ "$node_num" -ge "$worker_start_index" ]] && [[ "$node_num" -le "$worker_end_index" ]]; then
+                log_info "Labeling worker node: $node (node number: $node_num)"
+                "$KUBCTL" label node "$node" "openebs.io/node=enable" --overwrite
+            fi
+        fi
+    done <<< "$nodes"
+
+    # Add OpenEBS Helm repository
+    log_info "Adding OpenEBS Helm repository..."
+    helm repo add openebs-lvmlocalpv https://openebs.github.io/lvm-localpv || log_error "Failed to add OpenEBS Helm repository"
+    helm repo update
+
+    # Install OpenEBS LVM LocalPV
+    log_info "Installing OpenEBS LVM LocalPV with Helm..."
+    helm upgrade --install "$openebs_storagclass_name" openebs-lvmlocalpv/lvm-localpv \
+        --namespace "$openebs_namespace" \
+        --create-namespace \
+        --set lvmPlugin.allowedTopologies="kubernetes.io/hostname,openebs.io/node" \
+        --set lvmController.nodeSelector."openebs\.io/control-plane"="enable" \
+        --set lvmNode.nodeSelector."openebs\.io/node"="enable" \
+        --set analytics.enabled=false \
+        --wait --timeout=20m || log_error "Failed to install OpenEBS LVM LocalPV"
+    
+    log_info "OpenEBS LVM LocalPV installed successfully"
+
+    # Get volume group name from Vagrant configuration
+    local vg_name="local_vg_dev"  # default fallback
+    if [[ -f "$VAGRANT_CONF_FILE" ]]; then
+        local extracted_vg
+        extracted_vg=$(grep '\$kube_node_instances_volume_group' "$VAGRANT_CONF_FILE" 2>/dev/null | \
+                      sed 's/.*= *"\([^"]*\)".*/\1/' | \
+                      head -n1)
+        if [[ -n "$extracted_vg" ]]; then
+            vg_name="$extracted_vg"
+            log_info "Found volume group name '$vg_name' in $VAGRANT_CONF_FILE"
+        else
+            log_info "Could not find volume group name in $VAGRANT_CONF_FILE, using default: $vg_name"
+        fi
+    fi
+
+    # Wait for pods to be ready
+    log_info "Waiting for OpenEBS pods to be ready..."
+    "$KUBCTL" wait --for=condition=ready pod -l app.kubernetes.io/name=lvm-localpv -n "$OPENEBS_NAMESPACE" --timeout=300s
+
+    # Create StorageClass
+    log_info "Creating OpenEBS LVM LocalPV StorageClass..."
+    cat <<EOF | "$KUBCTL" apply -f -
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: $openebs_storagclass_name
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+parameters:
+  shared: "yes"
+  storage: "lvm"
+  volgroup: "$vg_name"
+  fsType: ext4
+provisioner: local.csi.openebs.io
+allowedTopologies:
+  - matchLabelExpressions:
+      - key: openebs.io/node
+        values: ["enable"]
+EOF
+
+    if [[ $? -eq 0 ]]; then
+        log_info "OpenEBS LVM LocalPV StorageClass created successfully"
+    else
+        log_error "Failed to create OpenEBS LVM LocalPV StorageClass"
+        return 1
+    fi
+
+    # Display installation status
+    echo -e "\n${GREEN}🎉 OpenEBS LVM LocalPV Installation Completed!${NC}\n"
+    echo -e "${WHITE}📦 Components:${NC}"
+    echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$openebs_namespace${NC}"
+    echo -e "   ${GREEN}•${NC} StorageClass: ${CYAN}$openebs_storagclass_name${NC}"
+    echo -e "   ${GREEN}•${NC} Volume Group: ${CYAN}$vg_name${NC}\n"
+
+    echo -e "${WHITE}🔍 Verification Commands:${NC}"
+    echo -e "   ${GREEN}•${NC} Check pods: ${CYAN}kubectl get pods -n $openebs_namespace${NC}"
+    echo -e "   ${GREEN}•${NC} Check StorageClass: ${CYAN}kubectl get storageclass $openebs_storagclass_name${NC}"
+    echo -e "   ${GREEN}•${NC} Check node labels: ${CYAN}kubectl get nodes --show-labels${NC}\n"
+
+    return 0
+}
+
+#######################################
 # Display cluster information
 #######################################
 display_cluster_info() {
     log_info "Displaying Kubernetes cluster information..."
 
-    local kubectl_cmd="$HOME/.local/bin/kubectl"
-    local kubeconfig="$HOME/.kube/config"
-
-    # Check if kubectl and kubeconfig are available
-    if [[ ! -f "$kubectl_cmd" ]] || [[ ! -f "$kubeconfig" ]]; then
-        log_warn "kubectl or kubeconfig not found. Skipping cluster info display."
-        return 1
-    fi
-
-    # Set KUBECONFIG for this session
-    export KUBECONFIG="$kubeconfig"
-
     echo -e "\n${GREEN}🎯 Kubernetes Cluster Information${NC}\n"
 
     # Display cluster info
     echo -e "${WHITE}📊 Cluster Status:${NC}"
-    if timeout 30 "$kubectl_cmd" cluster-info 2>/dev/null; then
+    if timeout 30 "$KUBCTL" cluster-info 2>/dev/null; then
         echo
     else
         echo -e "   ${RED}•${NC} ${RED}Unable to connect to cluster${NC}"
@@ -1993,7 +2161,7 @@ display_cluster_info() {
 
     # Display nodes
     echo -e "${WHITE}🖥️  Nodes:${NC}"
-    if timeout 30 "$kubectl_cmd" get nodes -o wide 2>/dev/null; then
+    if timeout 30 "$KUBCTL" get nodes -o wide 2>/dev/null; then
         echo
     else
         echo -e "   ${RED}•${NC} ${RED}Unable to retrieve node information${NC}\n"
@@ -2001,7 +2169,7 @@ display_cluster_info() {
 
     # Display namespaces
     echo -e "${WHITE}📦 Namespaces:${NC}"
-    if timeout 30 "$kubectl_cmd" get namespaces 2>/dev/null; then
+    if timeout 30 "$KUBCTL" get namespaces 2>/dev/null; then
         echo
     else
         echo -e "   ${RED}•${NC} ${RED}Unable to retrieve namespace information${NC}\n"
@@ -2009,7 +2177,7 @@ display_cluster_info() {
 
     # Display pods in kube-system
     echo -e "${WHITE}🔧 System Pods (kube-system):${NC}"
-    if timeout 30 "$kubectl_cmd" get pods -n kube-system 2>/dev/null; then
+    if timeout 30 "$KUBCTL" get pods -n kube-system 2>/dev/null; then
         echo
     else
         echo -e "   ${RED}•${NC} ${RED}Unable to retrieve pod information${NC}\n"
@@ -2017,8 +2185,8 @@ display_cluster_info() {
 
     # Display kubectl usage instructions
     echo -e "${WHITE}💡 kubectl Usage:${NC}"
-    echo -e "   ${GREEN}•${NC} Config: ${CYAN}$kubeconfig${NC}"
-    echo -e "   ${GREEN}•${NC} Binary: ${CYAN}$kubectl_cmd${NC}"
+    echo -e "   ${GREEN}•${NC} Config: ${CYAN}$KUBECONFIG${NC}"
+    echo -e "   ${GREEN}•${NC} Binary: ${CYAN}$KUBCTL${NC}"
     echo -e "   ${GREEN}•${NC} Get nodes: ${CYAN}kubectl get nodes${NC}"
     echo -e "   ${GREEN}•${NC} Get pods: ${CYAN}kubectl get pods --all-namespaces${NC}"
     echo -e "   ${GREEN}•${NC} Get services: ${CYAN}kubectl get services --all-namespaces${NC}\n"
