@@ -10,7 +10,7 @@
 # Key Features:
 #   System validation (OS, resources, NTP sync)
 #   Libvirt/KVM setup with security configuration
-#   Multi-network support (Bridge, NAT, Host-only)
+#   Multi-network support (Bridge, NAT)
 #   Python environment (pyenv 3.11.10 + venv)
 #   Vagrant + libvirt plugin installation
 #   Kubespray project setup with proxy support
@@ -28,8 +28,7 @@
 #
 # Network Setup:
 #   Bridge:    br0 (uses BRIDGE_INTERFACE if set)
-#   NAT:       192.168.121.0/24 (DHCP: Enabled)
-#   Host-only: 192.168.200.0/24 (DHCP: Disabled)
+#   NAT:       192.168.200.0/24 (DHCP: Enabled)
 #
 # Requirements:
 #   - RHEL-based Linux (x86_64)
@@ -1012,72 +1011,6 @@ EOF
     fi
 }
 
-# Configure Host-only network with DHCP disabled
-configure_hostonly_network() {
-    # Declare local variables
-    local network_name
-    local xml_file
-    
-    log_info "Configuring Host-only network without DHCP..."
-    
-    network_name="hostonly-network"
-    xml_file="/tmp/$network_name.xml"
-    
-    # Check if Host-only network already exists
-    if safe_sudo virsh net-list --all | grep -q "$network_name"; then
-        log_info "Host-only network '$network_name' already exists"
-        # Ensure it's active and set to autostart
-        safe_sudo virsh net-list | grep -q "$network_name.*active" || \
-            safe_sudo virsh net-start "$network_name" 2>/dev/null
-        safe_sudo virsh net-list --autostart | grep -q "$network_name" || \
-            safe_sudo virsh net-autostart "$network_name" 2>/dev/null
-        return 0
-    fi
-    
-    # Create Host-only network XML configuration
-    log_info "Creating Host-only network '$network_name'..."
-    cat > "$xml_file" << EOF
-<network>
-  <name>$network_name</name>
-  <uuid>$(uuidgen)</uuid>
-  <bridge name='virbr2' stp='on' delay='0'/>
-  <mac address='52:54:00:12:34:57'/>
-  <ip address='192.168.200.1' netmask='255.255.255.0'/>
-</network>
-EOF
-    
-    # Define, autostart and start the network
-    if safe_sudo virsh net-define "$xml_file" && \
-       safe_sudo virsh net-autostart "$network_name" && \
-       safe_sudo virsh net-start "$network_name"; then
-        log_info "Host-only network '$network_name' created successfully"
-        log_info "  - Network: 192.168.200.0/24"
-        log_info "  - Gateway: 192.168.200.1"
-        log_info "  - DHCP: Disabled (static IP configuration required)"
-    else
-        error_exit "Failed to create Host-only network '$network_name'"
-    fi
-    
-    # Clean up temporary file
-    rm -f "$xml_file"
-}
-
-# Disable default libvirt network
-disable_default_network() {
-    # Declare local variables
-    local libvirt_config_dir
-
-    libvirt_config_dir="/etc/libvirt/qemu/networks"
-    
-    # Disable default network
-    if safe_sudo virsh net-list --all | grep -q "default"; then
-        safe_sudo virsh net-destroy default 2>/dev/null || true
-        safe_sudo virsh net-autostart default --disable 2>/dev/null || true
-    fi
-
-    log_info "Default network disabled"
-}
-
 # Setup libvirt with bridge networking
 setup_libvirt() {
     # Declare local variables
@@ -1166,12 +1099,6 @@ setup_libvirt() {
     else
         log_info "Skipping bridge network configuration (BRIDGE_INTERFACE not set)"
     fi
-    
-    # Configure additional networks
-    configure_hostonly_network
-
-    # disable default network
-    disable_default_network
 
     log_info "Libvirt setup completed"
 }
@@ -1499,15 +1426,6 @@ configure_public_network_settings() {
     prompt_ip_input "Enter DNS server IP (e.g., 8.8.8.8 or $gateway)"
     dns_server="$PROMPT_RESULT"
     
-    echo
-    echo -e "${GREEN}✅ Network configuration summary:${NC}"
-    echo -e "${GREEN}   ├─ Starting IP:${NC} ${WHITE}$starting_ip${NC}"
-    echo -e "${GREEN}   ├─ Netmask:${NC} ${WHITE}$netmask${NC}"
-    echo -e "${GREEN}   ├─ Gateway:${NC} ${WHITE}$gateway${NC}"
-    echo -e "${GREEN}   ├─ DNS Server:${NC} ${WHITE}$dns_server${NC}"
-    echo -e "${GREEN}   └─ Bridge NIC:${NC} ${WHITE}br0${NC}"
-    echo
-    
     # Apply the configuration to the config file
     awk -v subnet="$subnet" \
         -v netmask="$netmask" \
@@ -1535,31 +1453,7 @@ configure_public_network_settings() {
     
     # Replace the original file
     mv "$temp_file" "$config_file"
-    
-    # Show VM IP address preview
-    echo -e "\n${YELLOW}🖥️  Virtual Machine IP Address Preview${NC}"
-    echo -e "${WHITE}The following VMs will be created with these IP addresses:${NC}\n"
-    
-    # Get number of instances and instance name prefix from config file
-    local num_instances
-    num_instances=$(grep "^\$num_instances\s*=" "$config_file" | sed 's/.*=\s*\([0-9]*\).*/\1/' || echo "$DEFAULT_VM_INSTANCES")
-    local instance_name_prefix
-    instance_name_prefix=$(grep "^\$instance_name_prefix\s*=" "$config_file" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "$DEFAULT_INSTANCE_PREFIX")
-    
-    # Display VM preview
-    for ((i=1; i<=num_instances; i++)); do
-        local vm_ip
-        vm_ip="$subnet.$((subnet_split4 + i))"
-        local vm_name="${instance_name_prefix}-${i}"
-        if [[ $i -eq 1 ]]; then
-            echo -e "${GREEN}   ├─ VM $i:${NC} ${WHITE}$vm_name${NC} → ${CYAN}$vm_ip${NC} ${YELLOW}(Master Node)${NC}"
-        else
-            echo -e "${GREEN}   ├─ VM $i:${NC} ${WHITE}$vm_name${NC} → ${CYAN}$vm_ip${NC} (Worker Node)"
-        fi
-    done
-    echo -e "${GREEN}   └─ Total:${NC} ${WHITE}$num_instances VMs${NC} from ${CYAN}$subnet.$((subnet_split4 + 1))${NC} to ${CYAN}$subnet.$((subnet_split4 + num_instances))${NC}"
-    echo
-    
+        
     log_info "Public network configuration applied to $config_file"
 }
 
@@ -1735,6 +1629,8 @@ parse_vagrant_config() {
     local vm_memory_gb
     local kube_master_vm_memory_gb
     local upm_control_plane_vm_memory_gb
+    local vm_network
+    local subnet_split4
     
     config_file="$1"
     
@@ -1744,7 +1640,6 @@ parse_vagrant_config() {
     fi
     
     # Extract configuration values from config.rb
-    
     num_instances=$(grep "^\$num_instances\s*=" "$config_file" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "$DEFAULT_VM_INSTANCES")
     kube_master_instances=$(grep "^\$kube_master_instances\s*=" "$config_file" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "1")
     upm_ctl_instances=$(grep "^\$upm_ctl_instances\s*=" "$config_file" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "1")
@@ -1758,6 +1653,27 @@ parse_vagrant_config() {
     os=$(grep "^\$os\s*=" "$config_file" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "rockylinux9")
     network_plugin=$(grep "^\$network_plugin\s*=" "$config_file" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "calico")
     instance_name_prefix=$(grep "^\$instance_name_prefix\s*=" "$config_file" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "$DEFAULT_INSTANCE_PREFIX")
+    subnet_split4=$(grep "^\$subnet_split4\s*=" "$config_file" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "100")
+
+    # Extract network configuration
+    vm_network=$(grep "^\$vm_network\s*=" "$config_file" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "private_network")
+    # Only public network is supported
+    if [[ "$vm_network" == "public_network" ]]; then
+        local subnet
+        local netmask
+        local gateway
+        local dns_server
+        local bridge_nic
+        subnet=$(grep "^\$subnet\s*=" "$config_file" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
+        netmask=$(grep "^\$netmask\s*=" "$config_file" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
+        gateway=$(grep "^\$gateway\s*=" "$config_file" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
+        dns_server=$(grep "^\$dns_server\s*=" "$config_file" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
+        bridge_nic=$(grep "^\$bridge_nic\s*=" "$config_file" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
+    else
+        subnet="192.168.200"
+        netmask="255.255.255.0"
+    fi
+
 
     # Calculate worker nodes
     worker_nodes=$((num_instances - kube_master_instances - upm_ctl_instances))
@@ -1791,17 +1707,49 @@ parse_vagrant_config() {
     echo -e "   ${GREEN}•${NC} Workers: ${WHITE}$worker_nodes${NC} × ${CYAN}${vm_cpus}C/${vm_memory_gb}GB${NC}"
     echo -e "   ${GREEN}•${NC} UPM Control: ${WHITE}$upm_ctl_instances${NC} × ${CYAN}${upm_control_plane_vm_cpus}C/${upm_control_plane_vm_memory_gb}GB${NC}\n"
     
-    echo -e "${WHITE}📊 Total Resources:${NC}"
+    # Display network configuration
+    echo -e "${WHITE}🌐 Network Configuration:${NC}"
+    echo -e "   ${GREEN}•${NC} Type: ${CYAN}$vm_network${NC}"
+    
+    if [[ "$vm_network" == "public_network" ]]; then
+        # PUBLIC_NETWORK_TYPE: Display configured bridge network information
+        echo -e "   ${GREEN}•${NC} Mode: ${CYAN}Bridge Network${NC}"
+        echo -e "${GREEN}✅ Network configuration summary:${NC}"
+        echo -e "${GREEN}   ├─ Starting IP:${NC} ${CYAN}$subnet.${subnet_split4}+${NC}"
+        echo -e "${GREEN}   ├─ Netmask:${NC} ${WHITE}$netmask${NC}"
+        echo -e "${GREEN}   ├─ Gateway:${NC} ${WHITE}$gateway${NC}"
+        echo -e "${GREEN}   ├─ DNS Server:${NC} ${WHITE}$dns_server${NC}"
+        echo -e "${GREEN}   └─ Bridge Interface:${NC} ${WHITE}$bridge_nic${NC}"
+    else
+        # PRIVATE_NETWORK_TYPE: Display NAT network information
+        echo -e "   ${GREEN}•${NC} Mode: ${CYAN}NAT Network${NC}"
+        echo -e "   ${GREEN}•${NC} Subnet: ${CYAN}192.168.200.0${NC}"
+        echo -e "   ${GREEN}•${NC} Netmask: ${CYAN}255.255.255.0${NC}"
+    fi
+
+    # Show VM IP address preview
+    echo -e "\n${YELLOW}🖥️  Virtual Machine IP Address Preview${NC}"
+    echo -e "${WHITE}The following VMs will be created with these IP addresses:${NC}\n"
+    
+    # Display VM preview
+    for ((i=1; i<=num_instances; i++)); do
+        local vm_ip
+        vm_ip="$subnet.$((subnet_split4 + i))"
+        local vm_name="${instance_name_prefix}-${i}"
+        if [[ $i -eq 1 ]]; then
+            echo -e "${GREEN}   ├─ VM $i:${NC} ${WHITE}$vm_name${NC} → ${CYAN}$vm_ip${NC} ${YELLOW}(Master Node)${NC}"
+        else
+            echo -e "${GREEN}   ├─ VM $i:${NC} ${WHITE}$vm_name${NC} → ${CYAN}$vm_ip${NC} (Worker Node)"
+        fi
+    done
+    echo -e "${GREEN}   └─ Total:${NC} ${WHITE}$num_instances VMs${NC} from ${CYAN}$subnet.$((subnet_split4 + 1))${NC} to ${CYAN}$subnet.$((subnet_split4 + num_instances))${NC}"
+    
+    echo -e "\n${WHITE}📊 Total Resources:${NC}"
     echo -e "   ${GREEN}•${NC} Nodes: ${WHITE}$num_instances${NC}"
     echo -e "   ${GREEN}•${NC} CPUs: ${RED}$total_cpus${NC} cores"
     echo -e "   ${GREEN}•${NC} Memory: ${RED}${total_memory_gb}GB${NC}\n"
     
     echo -e "${WHITE}⚙️  Config: ${CYAN}$config_file${NC}"
-    
-    # Resource Warning if needed
-    if [[ $total_cpus -gt 32 ]] || [[ $total_memory_gb -gt 128 ]]; then
-        echo -e "${RED}⚠️  Warning: High resource requirements (${total_cpus}C/${total_memory_gb}GB)${NC}"
-    fi
     
     return 0
 }
@@ -1829,8 +1777,7 @@ show_setup_confirmation() {
     else
         echo -e "   ${YELLOW}•${NC} Bridge: ${YELLOW}Not configured${NC}"
     fi
-    echo -e "   ${GREEN}•${NC} NAT: ${CYAN}192.168.121.0/24${NC} (DHCP: Enabled)"
-    echo -e "   ${GREEN}•${NC} Host-only: ${CYAN}192.168.200.0/24${NC} (DHCP: Disabled)"
+    echo -e "   ${GREEN}•${NC} NAT: ${CYAN}192.168.200.0/24${NC} (DHCP: Enabled)"
     
     # Proxy Configuration
     if [[ -n "${HTTP_PROXY:-}" ]]; then

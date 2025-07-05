@@ -123,21 +123,14 @@
 - **网络配置一致性**: 验证网关、DNS 与子网的一致性
 - **重试机制**: 输入错误时提供重新输入的机会
 
-### 2. NAT 网络模式 + Host-only 网络模式
+### 2. NAT 网络模式
 
 **NAT 网络模式特点**:
 
 - VM 通过 NAT 访问外部网络
-- 网络范围: `192.168.121.0/24`
-- DHCP 范围: `192.168.121.10-192.168.121.254`
-- 网关: `192.168.121.1`
-
-**Host-only 网络模式特点**:
-
-- 仅主机与 VM 之间通信
 - 网络范围: `192.168.200.0/24`
+- DHCP 范围: `192.168.200.10-192.168.200.254`
 - 网关: `192.168.200.1`
-- DHCP: 禁用（需要静态 IP 配置）
 
 **适用场景**:
 
@@ -272,7 +265,7 @@ export BRIDGE_INTERFACE="ens33"  # 替换为实际接口名
 脚本会根据网络模式自动配置 `vagrant/config.rb`：
 
 - **桥接模式**: 使用 `public_network-config.rb` 模板
-- **NAT + Host-only 模式**: 使用 `private_network-config.rb` 模板
+- **NAT 模式**: 使用 `private_network-config.rb` 模板
 
 ## 安全配置
 
@@ -305,8 +298,7 @@ export BRIDGE_INTERFACE="ens33"  # 替换为实际接口名
 
 🌐 Network Setup:
    • Bridge: br0 (using interface: ens33)
-   • NAT: 192.168.121.0/24 (DHCP: Enabled)
-   • Host-only: 192.168.200.0/24 (DHCP: Disabled)
+   • NAT: 192.168.200.0/24 (DHCP: Enabled)
 
 ⚠️  System Changes:
    • Security: Firewall & SELinux disabled
