@@ -169,11 +169,8 @@ $subnet_split4 = 100
 # Options: "calico", "flannel", "weave", "cilium", "kube-ovn", etc.
 $network_plugin = "calico"
 
-# Enable multi-networking support
-$multi_networking = "False"
-
 # Cert-Manager Configuration
-$cert_manager_enabled = "False"             # Enable cert-manager
+$cert_manager_enabled = "True"             # Enable cert-manager
 
 # Local Path Provisioner Configuration
 $local_path_provisioner_enabled = "False"    # Enable local path provisioner
