@@ -970,133 +970,99 @@ create_bridge_connections() {
     fi
 }
 
-# Configure libvirt bridge network
-configure_bridge_network() {
-    local network_name="$1"
-    local bridge_name="$2"
-    local interface="$3"
-    local xml_file="/tmp/$network_name.xml"
-    
-    # First create the bridge connections if interface is provided
-    if [[ -n "$interface" ]]; then
-        log_info "Setting up bridge connections for network '$network_name'..."
-        create_bridge_connections "$bridge_name" "$interface"
-    fi
-    
-    if safe_sudo virsh net-list --all | grep -q "$network_name"; then
-        # Ensure existing network is active and set to autostart
-        safe_sudo virsh net-list | grep -q "$network_name.*active" || \
-            safe_sudo virsh net-start "$network_name" 2>/dev/null
-        safe_sudo virsh net-list --autostart | grep -q "$network_name" || \
-            safe_sudo virsh net-autostart "$network_name" 2>/dev/null
-        log_info "Bridge network '$network_name' is already configured and active"
-    else
-        # Create new bridge network
-        log_info "Creating libvirt bridge network '$network_name'..."
-        cat > "$xml_file" << EOF
-<network>
-  <name>$network_name</name>
-  <forward mode='bridge'/>
-  <bridge name='$bridge_name'/>
-</network>
-EOF
-        
-        if ! safe_sudo virsh net-define "$xml_file" || \
-           ! safe_sudo virsh net-autostart "$network_name" || \
-           ! safe_sudo virsh net-start "$network_name"; then
-            error_exit "Failed to create bridge network '$network_name'"
-        fi
-        
-        rm -f "$xml_file"
-        log_info "Bridge network '$network_name' created and configured"
-    fi
-}
-
 # Setup libvirt with bridge networking
 setup_libvirt() {
-    # Declare local variables
-    local current_ip
-    
-    if [[ -n "${BRIDGE_INTERFACE:-}" ]]; then
-        log_info "Setting up Libvirt with bridge networking..."
-        
-        # Verify bridge interface exists
-        ip link show "$BRIDGE_INTERFACE" &>/dev/null || \
-            error_exit "Network interface '$BRIDGE_INTERFACE' does not exist. Available: $(ip link show | grep -E '^[0-9]+:' | grep -v 'lo:' | cut -d: -f2 | tr -d ' ' | tr '\n' ' ')"
-    else
-        log_info "Setting up Libvirt without bridge networking..."
-    fi
-    
     # Enable and start libvirtd service
     manage_service "libvirtd" "enable"
     manage_service "libvirtd" "start"
     
     # Add current user to libvirt group
     add_user_to_group "$USER" "libvirt"
+
+    # Declare local variables
     
-    # Configure libvirt networks
-    log_info "Configuring libvirt networks..."
-    
-    # Configure bridge network only if BRIDGE_INTERFACE is set
     if [[ -n "${BRIDGE_INTERFACE:-}" ]]; then
+        log_info "Setting up Libvirt with bridge networking..."
+        
+        # Verify bridge interface exists
+        ip link show "$BRIDGE_INTERFACE" &>/dev/null || {
+            error_exit "Network interface '$BRIDGE_INTERFACE' does not exist. Available: $(ip link show | grep -E '^[0-9]+:' | grep -v 'lo:' | cut -d: -f2 | tr -d ' ' | tr '\n' ' ')"
+        }
+
         # Get current IP address of the interface for warning
+        local current_ip
         current_ip=$(ip addr show "$BRIDGE_INTERFACE" 2>/dev/null | grep -oP 'inet \K[^/]+' | head -1)
         
         # Interactive confirmation for bridge setup
         if [[ -n "$current_ip" ]]; then
-            echo
-            echo -e "${RED}⚠️  Bridge Configuration Warning${NC}"
-        echo -e "${YELLOW}🔧 Interface:${NC} ${WHITE}$BRIDGE_INTERFACE${NC}"
-        echo -e "${YELLOW}🌐 Current IP:${NC} ${WHITE}$current_ip${NC}"
-        echo -e "${RED}⚠️  WARNING:${NC} Configuring bridge will remove this IP address and may disconnect existing connections!"
-            echo
+            echo -e "\n${RED}⚠️  Bridge Configuration Warning${NC}"
+            echo -e "${YELLOW}🔧 Interface:${NC} ${WHITE}$BRIDGE_INTERFACE${NC}"
+            echo -e "${YELLOW}🌐 Current IP:${NC} ${WHITE}$current_ip${NC}"
+            echo -e "${RED}⚠️  WARNING:${NC} Configuring bridge will remove this IP address and may disconnect existing connections!\n"
             
             if ! prompt_yes_no "Continue with bridge configuration?"; then
-                echo
-                echo -e "${YELLOW}⏸️  Bridge configuration cancelled by user.${NC}"
-                echo
+                echo -e "\n${YELLOW}⏸️  Bridge configuration cancelled by user.${NC}\n"
                 exit 0
             fi
             
             # Second confirmation: require user to input the current IP address
-            echo
-            echo -e "${RED}🔐 Second Confirmation Required${NC}"
+            echo -e "\n${RED}🔐 Second Confirmation Required${NC}"
             echo -e "${YELLOW}🔒 Security Check:${NC} To proceed with bridge configuration"
             echo -e "${WHITE}   Please enter the current IP address of '$BRIDGE_INTERFACE'${NC}"
-            echo -e "${RED}⚠️  This confirms you understand that IP '$current_ip' will be permanently removed${NC}"
-            echo
+            echo -e "${RED}⚠️  This confirms you understand that IP '$current_ip' will be permanently removed${NC}\n"
             
             if ! prompt_confirmation_with_retry "Enter current IP address to confirm deletion" "$current_ip" 3; then
-                echo
-                echo -e "${RED}🚫 Bridge configuration cancelled for safety.${NC}"
-                echo
+                echo -e "\n${RED}🚫 Bridge configuration cancelled for safety.${NC}\n"
                 exit 0
             fi
-            echo
-            echo -e "${GREEN}✅ IP address confirmed. Proceeding with bridge configuration...${NC}"
-            echo
+            echo -e "\n${GREEN}✅ IP address confirmed. Proceeding with bridge configuration...${NC}\n"
         else
-            echo
-            echo -e "${RED}⚠️  Bridge Configuration Warning${NC}"
-        echo -e "${YELLOW}🔧 Interface:${NC} ${WHITE}$BRIDGE_INTERFACE${NC}"
-        echo -e "${RED}⚠️  WARNING:${NC} Configuring bridge will modify interface configuration and may affect network connectivity!"
-            echo
+            echo -e "\n${RED}⚠️  Bridge Configuration Warning${NC}"
+            echo -e "${YELLOW}🔧 Interface:${NC} ${WHITE}$BRIDGE_INTERFACE${NC}"
+            echo -e "${RED}⚠️  WARNING:${NC} Configuring bridge will modify interface configuration and may affect network connectivity!\n"
             
             if ! prompt_yes_no "Continue with bridge configuration?"; then
-                echo
-                echo -e "${YELLOW}⏸️  Bridge configuration cancelled by user.${NC}"
-                echo
+                echo -e "\n${YELLOW}⏸️  Bridge configuration cancelled by user.${NC}\n"
                 exit 0
             fi
         fi
         
         echo -e "${GREEN}🚀 Starting bridge configuration...${NC}"
-    echo -e "${YELLOW}🌉 Configuring bridge network...${NC}"
         local bridge_name="br0"
         local network_name="bridge-network"
-        configure_bridge_network "$network_name" "$bridge_name" "$BRIDGE_INTERFACE"
-
-        log_info "Bridge network configured as default"
+        local xml_file="/tmp/$network_name.xml"
+        
+        # First create the bridge connections if interface is provided
+        log_info "Setting up bridge connections for network '$network_name'..."
+        create_bridge_connections "$bridge_name" "$BRIDGE_INTERFACE"
+        
+        if safe_sudo virsh net-list --all | grep -q "$network_name"; then
+            # Ensure existing network is active and set to autostart
+            safe_sudo virsh net-list | grep -q "$network_name.*active" || \
+                safe_sudo virsh net-start "$network_name" 2>/dev/null
+            safe_sudo virsh net-list --autostart | grep -q "$network_name" || \
+                safe_sudo virsh net-autostart "$network_name" 2>/dev/null
+            log_info "Bridge network '$network_name' is already configured and active"
+        else
+            # Create new bridge network
+            log_info "Creating libvirt bridge network '$network_name'..."
+            cat > "$xml_file" << EOF
+<network>
+  <name>$network_name</name>
+  <forward mode='bridge'/>
+  <bridge name='$bridge_name'/>
+</network>
+EOF
+            
+            if ! safe_sudo virsh net-define "$xml_file" || \
+               ! safe_sudo virsh net-autostart "$network_name" || \
+               ! safe_sudo virsh net-start "$network_name"; then
+                error_exit "Failed to create bridge network '$network_name'"
+            fi
+            
+            rm -f "$xml_file"
+            log_info "Bridge network '$network_name' created and configured"
+        fi
     else
         log_info "Skipping bridge network configuration (BRIDGE_INTERFACE not set)"
     fi
