@@ -2061,11 +2061,14 @@ install_openebs_lvm_localpv() {
     helm upgrade --install "$openebs_storagclass_name" openebs-lvmlocalpv/lvm-localpv \
         --namespace "$openebs_namespace" \
         --create-namespace \
-        --set lvmPlugin.allowedTopologies="kubernetes.io/hostname,openebs.io/node" \
+        --set lvmPlugin.allowedTopologies='kubernetes\.io/hostname\,openebs\.io/node' \
         --set lvmController.nodeSelector."openebs\.io/control-plane"="enable" \
         --set lvmNode.nodeSelector."openebs\.io/node"="enable" \
         --set analytics.enabled=false \
-        --wait --timeout=20m || log_error "Failed to install OpenEBS LVM LocalPV"
+        --wait --timeout=20m || {
+            log_error "Failed to install OpenEBS LVM LocalPV"
+            return 1
+        }
     
     log_info "OpenEBS LVM LocalPV installed successfully"
 
