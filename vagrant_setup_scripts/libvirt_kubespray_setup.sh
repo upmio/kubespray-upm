@@ -1965,6 +1965,21 @@ install_openebs_lvm_localpv() {
     local openebs_namespace="openebs"
     local openebs_storagclass_name="openebs-lvm-localpv"
 
+    # Get volume group name from Vagrant configuration
+    local vg_name="local_vg_dev" # default fallback
+    if [[ -f "$VAGRANT_CONF_FILE" ]]; then
+        local extracted_vg
+        extracted_vg=$(grep '\$kube_node_instances_volume_group' "$VAGRANT_CONF_FILE" 2>/dev/null |
+            sed 's/.*= *"\([^"]*\)".*/\1/' |
+            head -n1)
+        if [[ -n "$extracted_vg" ]]; then
+            vg_name="$extracted_vg"
+            log_info "Found volume group name '$vg_name' in $VAGRANT_CONF_FILE"
+        else
+            log_info "Could not find volume group name in $VAGRANT_CONF_FILE, using default: $vg_name"
+        fi
+    fi
+
     # Interactive confirmation for OpenEBS installation
     echo -e "\n${YELLOW}📦 OpenEBS LVM LocalPV Installation${NC}\n"
     echo -e "${WHITE}This will install OpenEBS LVM LocalPV with the following components:${NC}"
@@ -1976,13 +1991,14 @@ install_openebs_lvm_localpv() {
     echo -e "${WHITE}Installation details:${NC}"
     echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$openebs_namespace${NC}"
     echo -e "   ${GREEN}•${NC} StorageClass: ${CYAN}$openebs_storagclass_name${NC}"
+    echo -e "   ${GREEN}•${NC} VolumeGroup: ${CYAN}$vg_name${NC}"
     echo -e "   ${GREEN}•${NC} Installation timeout: ${CYAN}20 minutes${NC}\n"
 
     echo -e "${YELLOW}⚠️  Note: This installation will:${NC}"
     echo -e "   ${YELLOW}•${NC} Add node labels to control plane and worker nodes"
     echo -e "   ${YELLOW}•${NC} Install Helm if not already present\n"
 
-    if ! prompt_yes_no "Do you want to proceed with OpenEBS LVM LocalPV installation?" "N"; then
+    if ! prompt_yes_no "Do you want to proceed with OpenEBS LVM LocalPV installation?"; then
         echo -e "${YELLOW}⏸️  OpenEBS LVM LocalPV installation skipped.${NC}\n"
         log_info "OpenEBS LVM LocalPV installation skipped by user"
         return 0
@@ -2064,26 +2080,10 @@ install_openebs_lvm_localpv() {
         return 1
     }
 
-    log_info "OpenEBS LVM LocalPV installed successfully"
-
-    # Get volume group name from Vagrant configuration
-    local vg_name="local_vg_dev" # default fallback
-    if [[ -f "$VAGRANT_CONF_FILE" ]]; then
-        local extracted_vg
-        extracted_vg=$(grep '\$kube_node_instances_volume_group' "$VAGRANT_CONF_FILE" 2>/dev/null |
-            sed 's/.*= *"\([^"]*\)".*/\1/' |
-            head -n1)
-        if [[ -n "$extracted_vg" ]]; then
-            vg_name="$extracted_vg"
-            log_info "Found volume group name '$vg_name' in $VAGRANT_CONF_FILE"
-        else
-            log_info "Could not find volume group name in $VAGRANT_CONF_FILE, using default: $vg_name"
-        fi
-    fi
-
     # Wait for pods to be ready
     log_info "Waiting for OpenEBS pods to be ready..."
-    "$KUBCTL" wait --for=condition=ready pod -l app.kubernetes.io/name=lvm-localpv -n "$OPENEBS_NAMESPACE" --timeout=300s
+    "$KUBCTL" wait --for=condition=ready pod -l release="$openebs_storagclass_name" -n "$openebs_namespace" --timeout=300s
+    log_info "OpenEBS LVM LocalPV installed successfully"
 
     # Create StorageClass
     log_info "Creating OpenEBS LVM LocalPV StorageClass..."
@@ -2181,9 +2181,68 @@ display_cluster_info() {
 }
 
 #######################################
+# Help Function
+#######################################
+show_help() {
+    cat << EOF
+Usage: $0 [OPTIONS]
+
+OPTIONS:
+  -h, --help              Show this help message
+  --install-openebs       Install OpenEBS LVM LocalPV only
+
+EXAMPLES:
+  $0                      Run full Kubespray setup
+  $0 --install-openebs    Install OpenEBS LVM LocalPV only
+
+DESCRIPTION:
+  This script sets up a complete Kubespray environment with libvirt virtualization
+  for RHEL-based distributions. It can also be used to install OpenEBS LVM LocalPV
+  independently on an existing Kubernetes cluster.
+
+REQUIREMENTS for OpenEBS installation:
+  - Existing Kubernetes cluster with kubectl access
+  - Helm 3.x (will be installed if not present)
+  - Proper node labeling for OpenEBS scheduling
+  - LVM volume group available on worker nodes
+
+EOF
+}
+
+#######################################
+# Parse Command Line Arguments
+#######################################
+parse_arguments() {
+    # Check for help first
+    for arg in "$@"; do
+        if [[ "$arg" == "-h" || "$arg" == "--help" ]]; then
+            show_help
+            exit 0
+        fi
+    done
+        
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --install-openebs)
+                install_openebs_lvm_localpv
+                exit 0
+                ;;
+            *)
+                log_error "Unknown option: $1"
+                show_help
+                exit 1
+                ;;
+        esac
+    done
+}
+
+#######################################
 # Main Function
 #######################################
 main() {
+    # Parse command line arguments first
+    parse_arguments "$@"
+    
     # Variable validation
     validate_required_variables
     # System validation
@@ -2212,7 +2271,6 @@ main() {
 #######################################
 # Script Execution Entry Point
 #######################################
-# Support both direct execution and curl | bash execution
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]] || [[ "${BASH_SOURCE[0]}" == "bash" ]] || [[ -z "${BASH_SOURCE[0]}" ]] || [[ "${0}" == "bash" ]]; then
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     main "$@"
 fi
