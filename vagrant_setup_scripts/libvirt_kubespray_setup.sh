@@ -65,7 +65,7 @@ readonly DEFAULT_PYTHON_VERSION="3.12.11"
 readonly KUBESPRAY_REPO_URL="https://github.com/upmio/kubespray-upm.git"
 
 # Network configuration constants
-readonly DEFAULT_BRIDGE_NAME="br0"
+readonly BRIDGE_NAME="br0"
 readonly PRIVATE_NETWORK_TYPE="private"
 readonly PUBLIC_NETWORK_TYPE="public"
 readonly DEFAULT_VM_INSTANCES="5"
@@ -961,39 +961,37 @@ configure_system_security() {
 
 # Create and configure bridge network connections
 create_bridge_connections() {
-    local bridge_name="$1"
-    local interface="$2"
-    local slave_name="bridge-slave-$interface"
+    local slave_name="bridge-slave-$BRIDGE_INTERFACE"
 
     # Create bridge connection if it doesn't exist
-    if ! safe_sudo nmcli con show "$bridge_name" &>/dev/null; then
-        log_info "Creating transparent bridge $bridge_name..."
-        safe_sudo nmcli con add type bridge con-name "$bridge_name" ifname "$bridge_name" ||
-            error_exit "Failed to create bridge connection $bridge_name"
+    if ! safe_sudo nmcli con show "$BRIDGE_NAME" &>/dev/null; then
+        log_info "Creating transparent bridge $BRIDGE_NAME..."
+        safe_sudo nmcli con add type bridge con-name "$BRIDGE_NAME" ifname "$BRIDGE_NAME" ||
+            error_exit "Failed to create bridge connection $BRIDGE_NAME"
 
         # Configure bridge (disable IP, disable STP)
-        safe_sudo nmcli con mod "$bridge_name" ipv4.method disabled ipv6.method disabled ||
-            error_exit "Failed to disable IP on bridge $bridge_name"
-        safe_sudo nmcli con mod "$bridge_name" bridge.stp no ||
-            log_warn "Failed to disable STP on bridge $bridge_name"
+        safe_sudo nmcli con mod "$BRIDGE_NAME" ipv4.method disabled ipv6.method disabled ||
+            error_exit "Failed to disable IP on bridge $BRIDGE_NAME"
+        safe_sudo nmcli con mod "$BRIDGE_NAME" bridge.stp no ||
+            log_warn "Failed to disable STP on bridge $BRIDGE_NAME"
     fi
 
     # Create bridge slave connection if it doesn't exist
     if ! safe_sudo nmcli con show "$slave_name" &>/dev/null; then
-        log_info "Adding $interface to bridge $bridge_name..."
-        safe_sudo nmcli con add type bridge-slave ifname "$interface" master "$bridge_name" con-name "$slave_name" ||
-            error_exit "Failed to add $interface to bridge $bridge_name"
+        log_info "Adding $BRIDGE_INTERFACE to bridge $BRIDGE_NAME..."
+        safe_sudo nmcli con add type bridge-slave ifname "$BRIDGE_INTERFACE" master "$BRIDGE_NAME" con-name "$slave_name" ||
+            error_exit "Failed to add $BRIDGE_INTERFACE to bridge $BRIDGE_NAME"
     fi
 
     # Activate connections
-    if ! safe_sudo nmcli con up "$bridge_name" || ! safe_sudo nmcli con up "$slave_name"; then
+    if ! safe_sudo nmcli con up "$BRIDGE_NAME" || ! safe_sudo nmcli con up "$slave_name"; then
         error_exit "Failed to activate bridge connections"
     fi
 
     # Wait and verify bridge is ready
     sleep 2
-    if ! ip link show "$bridge_name" | grep -q "state UP"; then
-        error_exit "Bridge $bridge_name is not in UP state"
+    if ! ip link show "$BRIDGE_NAME" | grep -q "state UP"; then
+        error_exit "Bridge $BRIDGE_NAME is not in UP state"
     fi
 }
 
@@ -1050,13 +1048,12 @@ setup_libvirt() {
         fi
 
         echo -e "${GREEN}🚀 Starting bridge configuration...${NC}"
-        local bridge_name="br0"
         local network_name="bridge-network"
         local xml_file="/tmp/$network_name.xml"
 
         # First create the bridge connections if interface is provided
         log_info "Setting up bridge connections for network '$network_name'..."
-        create_bridge_connections "$bridge_name" "$BRIDGE_INTERFACE"
+        create_bridge_connections
 
         if safe_sudo virsh net-list --all | grep -q "$network_name"; then
             # Ensure existing network is active and set to autostart
@@ -1419,7 +1416,7 @@ configure_public_network_settings() {
         -v gateway="$gateway" \
         -v dns_server="$dns_server" \
         -v subnet_split4="$subnet_split4" \
-        -v bridge_name="$DEFAULT_BRIDGE_NAME" '
+        -v bridge_name="$BRIDGE_NAME" '
     {
         if ($0 ~ /^\$subnet = /) {
             print "$subnet = \"" subnet "\""
@@ -1752,7 +1749,7 @@ show_setup_confirmation() {
     # Network Configuration
     echo -e "${WHITE}🌐 Network Setup:${NC}"
     if [[ -n "${BRIDGE_INTERFACE:-}" ]]; then
-        echo -e "   ${GREEN}•${NC} Bridge: ${CYAN}br0${NC} (using interface: ${YELLOW}$BRIDGE_INTERFACE${NC})"
+        echo -e "   ${GREEN}•${NC} Bridge: ${CYAN}$BRIDGE_NAME (using interface: ${YELLOW}$BRIDGE_INTERFACE${NC})"
     else
         echo -e "   ${YELLOW}•${NC} Bridge: ${YELLOW}Not configured${NC}"
     fi
@@ -1975,25 +1972,23 @@ install_openebs_lvm_localpv() {
     echo -e "   ${GREEN}•${NC} LVM LocalPV StorageClass"
     echo -e "   ${GREEN}•${NC} Node labels for OpenEBS scheduling"
     echo -e "   ${GREEN}•${NC} Helm repository configuration\n"
-    
+
     echo -e "${WHITE}Installation details:${NC}"
     echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$openebs_namespace${NC}"
     echo -e "   ${GREEN}•${NC} StorageClass: ${CYAN}$openebs_storagclass_name${NC}"
     echo -e "   ${GREEN}•${NC} Installation timeout: ${CYAN}20 minutes${NC}\n"
-    
+
     echo -e "${YELLOW}⚠️  Note: This installation will:${NC}"
     echo -e "   ${YELLOW}•${NC} Add node labels to control plane and worker nodes"
     echo -e "   ${YELLOW}•${NC} Install Helm if not already present\n"
-    
+
     if ! prompt_yes_no "Do you want to proceed with OpenEBS LVM LocalPV installation?" "N"; then
         echo -e "${YELLOW}⏸️  OpenEBS LVM LocalPV installation skipped.${NC}\n"
         log_info "OpenEBS LVM LocalPV installation skipped by user"
         return 0
     fi
-    
+
     echo -e "${GREEN}✅ Proceeding with OpenEBS LVM LocalPV installation...${NC}\n"
-
-
 
     # Check if helm is installed
     if ! command -v helm >/dev/null 2>&1; then
@@ -2006,7 +2001,6 @@ install_openebs_lvm_localpv() {
         log_info "Helm is already installed"
     fi
 
-    # Label nodes for OpenEBS
     # Label UPM control plane nodes (openebs.io/control-plane=enable)
     log_info "Labeling UPM control plane nodes..."
     local instance_name_prefix
@@ -2033,7 +2027,7 @@ install_openebs_lvm_localpv() {
                 "$KUBCTL" label node "$node" "openebs.io/control-plane=enable" --overwrite
             fi
         fi
-    done <<< "$nodes"
+    done <<<"$nodes"
 
     # Label worker nodes (openebs.io/node=enable)
     log_info "Labeling worker nodes..."
@@ -2049,7 +2043,7 @@ install_openebs_lvm_localpv() {
                 "$KUBCTL" label node "$node" "openebs.io/node=enable" --overwrite
             fi
         fi
-    done <<< "$nodes"
+    done <<<"$nodes"
 
     # Add OpenEBS Helm repository
     log_info "Adding OpenEBS Helm repository..."
@@ -2066,19 +2060,19 @@ install_openebs_lvm_localpv() {
         --set lvmNode.nodeSelector."openebs\.io/node"="enable" \
         --set analytics.enabled=false \
         --wait --timeout=20m || {
-            log_error "Failed to install OpenEBS LVM LocalPV"
-            return 1
-        }
-    
+        log_error "Failed to install OpenEBS LVM LocalPV"
+        return 1
+    }
+
     log_info "OpenEBS LVM LocalPV installed successfully"
 
     # Get volume group name from Vagrant configuration
-    local vg_name="local_vg_dev"  # default fallback
+    local vg_name="local_vg_dev" # default fallback
     if [[ -f "$VAGRANT_CONF_FILE" ]]; then
         local extracted_vg
-        extracted_vg=$(grep '\$kube_node_instances_volume_group' "$VAGRANT_CONF_FILE" 2>/dev/null | \
-                      sed 's/.*= *"\([^"]*\)".*/\1/' | \
-                      head -n1)
+        extracted_vg=$(grep '\$kube_node_instances_volume_group' "$VAGRANT_CONF_FILE" 2>/dev/null |
+            sed 's/.*= *"\([^"]*\)".*/\1/' |
+            head -n1)
         if [[ -n "$extracted_vg" ]]; then
             vg_name="$extracted_vg"
             log_info "Found volume group name '$vg_name' in $VAGRANT_CONF_FILE"
