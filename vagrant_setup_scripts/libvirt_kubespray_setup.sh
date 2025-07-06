@@ -2047,7 +2047,7 @@ install_openebs_lvm_localpv() {
 
     # Label worker nodes (openebs.io/node=enable)
     log_info "Labeling worker nodes..."
-    local worker_start_index=$((upm_end_index + 1))
+    local worker_start_index=$upm_start_index
     local worker_end_index=$((num_instances))
 
     while IFS= read -r node; do
