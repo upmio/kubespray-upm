@@ -1978,7 +1978,7 @@ vagrant_and_run_kubespray() {
             while [[ $attempt -le $max_retries ]]; do
                 echo -e "${YELLOW}📦 Attempt $attempt/$max_retries: Adding Vagrant box '$box_name'...${NC}"
 
-                if vagrant box add --name "$box_name" "$box_name"; then
+                if vagrant box add --name "$box_name" "$box_name" --provider libvirt; then
                     echo -e "${GREEN}✅ Successfully added Vagrant box '$box_name'${NC}"
                     success=true
                     break
