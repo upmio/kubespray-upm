@@ -117,15 +117,15 @@ log_with_level() {
     timestamp=$(date '+%Y-%m-%d %H:%M:%S')
 
     case "$level" in
-        "INFO")
-            echo "[$timestamp] [INFO] $message" | tee -a "$LOG_FILE"
-            ;;
-        "WARN")
-            echo "[$timestamp] [WARN] $message" | tee -a "$LOG_FILE" >&2
-            ;;
-        "ERROR")
-            echo "[$timestamp] [ERROR] $message" | tee -a "$LOG_FILE" >&2
-            ;;
+    "INFO")
+        echo "[$timestamp] [INFO] $message" | tee -a "$LOG_FILE"
+        ;;
+    "WARN")
+        echo "[$timestamp] [WARN] $message" | tee -a "$LOG_FILE" >&2
+        ;;
+    "ERROR")
+        echo "[$timestamp] [ERROR] $message" | tee -a "$LOG_FILE" >&2
+        ;;
     esac
 }
 
@@ -202,15 +202,15 @@ prompt_yes_no() {
         fi
 
         case "$response" in
-            [Yy][Ee][Ss] | [Yy])
-                return 0
-                ;;
-            [Nn][Oo] | [Nn])
-                return 1
-                ;;
-            *)
-                echo -e "${RED}❌ Please enter 'yes' or 'no'${NC}"
-                ;;
+        [Yy][Ee][Ss] | [Yy])
+            return 0
+            ;;
+        [Nn][Oo] | [Nn])
+            return 1
+            ;;
+        *)
+            echo -e "${RED}❌ Please enter 'yes' or 'no'${NC}"
+            ;;
         esac
     done
 }
@@ -465,86 +465,86 @@ manage_service() {
     fi
 
     case "$action" in
-        "enable")
-            if ! systemctl is-enabled "$service_name" &>/dev/null; then
-                log_info "Enabling $service_name service..."
-                if safe_sudo systemctl enable "$service_name"; then
-                    log_info "Service $service_name enabled successfully"
-                else
-                    log_error "Failed to enable service $service_name"
-                    return 1
-                fi
+    "enable")
+        if ! systemctl is-enabled "$service_name" &>/dev/null; then
+            log_info "Enabling $service_name service..."
+            if safe_sudo systemctl enable "$service_name"; then
+                log_info "Service $service_name enabled successfully"
             else
-                log_info "Service $service_name is already enabled"
+                log_error "Failed to enable service $service_name"
+                return 1
             fi
-            ;;
-        "start")
-            if ! systemctl is-active "$service_name" &>/dev/null; then
-                log_info "Starting $service_name service..."
-                if safe_sudo systemctl start "$service_name"; then
-                    # Wait for service to start with timeout
-                    local wait_time=0
-                    while [[ $wait_time -lt $timeout ]]; do
-                        if systemctl is-active "$service_name" &>/dev/null; then
-                            log_info "Service $service_name started successfully"
-                            return 0
-                        fi
-                        sleep 2
-                        wait_time=$((wait_time + 2))
-                    done
-                    log_error "Service $service_name failed to start within ${timeout}s timeout"
-                    # Show service status for debugging
-                    log_error "Service status: $(systemctl status "$service_name" --no-pager -l)"
-                    return 1
-                else
-                    log_error "Failed to start service $service_name"
-                    return 1
-                fi
+        else
+            log_info "Service $service_name is already enabled"
+        fi
+        ;;
+    "start")
+        if ! systemctl is-active "$service_name" &>/dev/null; then
+            log_info "Starting $service_name service..."
+            if safe_sudo systemctl start "$service_name"; then
+                # Wait for service to start with timeout
+                local wait_time=0
+                while [[ $wait_time -lt $timeout ]]; do
+                    if systemctl is-active "$service_name" &>/dev/null; then
+                        log_info "Service $service_name started successfully"
+                        return 0
+                    fi
+                    sleep 2
+                    wait_time=$((wait_time + 2))
+                done
+                log_error "Service $service_name failed to start within ${timeout}s timeout"
+                # Show service status for debugging
+                log_error "Service status: $(systemctl status "$service_name" --no-pager -l)"
+                return 1
             else
-                log_info "Service $service_name is already running"
+                log_error "Failed to start service $service_name"
+                return 1
             fi
-            ;;
-        "stop")
-            if systemctl is-active "$service_name" &>/dev/null; then
-                log_info "Stopping $service_name service..."
-                if safe_sudo systemctl stop "$service_name"; then
-                    # Wait for service to stop with timeout
-                    local wait_time=0
-                    while [[ $wait_time -lt $timeout ]]; do
-                        if ! systemctl is-active "$service_name" &>/dev/null; then
-                            log_info "Service $service_name stopped successfully"
-                            return 0
-                        fi
-                        sleep 2
-                        wait_time=$((wait_time + 2))
-                    done
-                    log_warn "Service $service_name did not stop within ${timeout}s, forcing stop..."
-                    safe_sudo systemctl kill "$service_name" || true
-                else
-                    log_error "Failed to stop service $service_name"
-                    return 1
-                fi
+        else
+            log_info "Service $service_name is already running"
+        fi
+        ;;
+    "stop")
+        if systemctl is-active "$service_name" &>/dev/null; then
+            log_info "Stopping $service_name service..."
+            if safe_sudo systemctl stop "$service_name"; then
+                # Wait for service to stop with timeout
+                local wait_time=0
+                while [[ $wait_time -lt $timeout ]]; do
+                    if ! systemctl is-active "$service_name" &>/dev/null; then
+                        log_info "Service $service_name stopped successfully"
+                        return 0
+                    fi
+                    sleep 2
+                    wait_time=$((wait_time + 2))
+                done
+                log_warn "Service $service_name did not stop within ${timeout}s, forcing stop..."
+                safe_sudo systemctl kill "$service_name" || true
             else
-                log_info "Service $service_name is already stopped"
+                log_error "Failed to stop service $service_name"
+                return 1
             fi
-            ;;
-        "disable")
-            if systemctl is-enabled "$service_name" &>/dev/null; then
-                log_info "Disabling $service_name service..."
-                if safe_sudo systemctl disable "$service_name"; then
-                    log_info "Service $service_name disabled successfully"
-                else
-                    log_error "Failed to disable service $service_name"
-                    return 1
-                fi
+        else
+            log_info "Service $service_name is already stopped"
+        fi
+        ;;
+    "disable")
+        if systemctl is-enabled "$service_name" &>/dev/null; then
+            log_info "Disabling $service_name service..."
+            if safe_sudo systemctl disable "$service_name"; then
+                log_info "Service $service_name disabled successfully"
             else
-                log_info "Service $service_name is already disabled or not found"
+                log_error "Failed to disable service $service_name"
+                return 1
             fi
-            ;;
-        *)
-            log_error "Invalid action: $action. Valid actions: enable, start, stop, disable, restart"
-            return 1
-            ;;
+        else
+            log_info "Service $service_name is already disabled or not found"
+        fi
+        ;;
+    *)
+        log_error "Invalid action: $action. Valid actions: enable, start, stop, disable, restart"
+        return 1
+        ;;
     esac
 
     return 0
@@ -763,12 +763,12 @@ check_system_requirements() {
     local vt_support=false
     local cpu_flags=""
     local os_type="$(uname -s)"
-    
+
     # Only perform this check on Linux systems
     if [ "$os_type" = "Linux" ]; then
         if [ -r "/proc/cpuinfo" ]; then
             cpu_flags=$(grep -m1 "^flags" /proc/cpuinfo | cut -d: -f2 2>/dev/null || echo "")
-            
+
             # Check for Intel VT-x (vmx flag)
             if echo "$cpu_flags" | grep -q "vmx"; then
                 log_info "Intel VT-x (vmx) support detected"
@@ -779,7 +779,7 @@ check_system_requirements() {
                 vt_support=true
             fi
         fi
-        
+
         if [ "$vt_support" = false ]; then
             log_error "CPU hardware virtualization extensions not found or not enabled"
             log_error "Libvirt requires Intel VT-x or AMD-V support for hardware virtualization"
@@ -791,7 +791,7 @@ check_system_requirements() {
         else
             log_info "CPU hardware virtualization support check passed"
         fi
-        
+
         # Additional check for KVM module availability (Linux only)
         if [ -e "/dev/kvm" ]; then
             log_info "KVM device (/dev/kvm) is available"
@@ -1343,15 +1343,15 @@ setup_pyenv_environment() {
 
     # Determine shell configuration file
     case "$SHELL" in
-        "/bin/bash")
-            shell_rc="$HOME/.bashrc"
-            ;;
-        "/bin/zsh" | */usr/bin/zsh)
-            shell_rc="$HOME/.zshrc"
-            ;;
-        *)
-            shell_rc="$HOME/.profile"
-            ;;
+    "/bin/bash")
+        shell_rc="$HOME/.bashrc"
+        ;;
+    "/bin/zsh" | */usr/bin/zsh)
+        shell_rc="$HOME/.zshrc"
+        ;;
+    *)
+        shell_rc="$HOME/.profile"
+        ;;
     esac
 
     # Create shell config file if it doesn't exist
@@ -1532,7 +1532,7 @@ configure_vagrant_config() {
 
     # Configure VM resources based on system capacity
     log_info "Configuring VM resources based on system capacity..."
-    
+
     # Detect system CPU count (cross-platform)
     local system_cpus
     if command -v lscpu >/dev/null 2>&1; then
@@ -1546,7 +1546,7 @@ configure_vagrant_config() {
         system_cpus=$(nproc 2>/dev/null || echo "8")
     fi
     log_info "Detected system CPUs: $system_cpus"
-    
+
     # Set vm_cpus based on system CPU count
     local vm_cpus
     if [[ $system_cpus -le 12 ]]; then
@@ -1558,9 +1558,9 @@ configure_vagrant_config() {
     elif [[ $system_cpus -le 32 ]]; then
         vm_cpus=16
     else
-        vm_cpus=24  # Default for systems with more than 32 CPUs
+        vm_cpus=24 # Default for systems with more than 32 CPUs
     fi
-    
+
     # Detect system memory in GB (cross-platform)
     local system_memory_gb
     if command -v free >/dev/null 2>&1; then
@@ -1576,21 +1576,21 @@ configure_vagrant_config() {
         system_memory_gb=32
     fi
     log_info "Detected system memory: ${system_memory_gb}GB"
-    
+
     # Set vm_memory based on system memory
     local vm_memory
     if [[ $system_memory_gb -le 32 ]]; then
-        vm_memory=8192  # 8GB
+        vm_memory=8192 # 8GB
     elif [[ $system_memory_gb -le 64 ]]; then
-        vm_memory=16384  # 16GB
+        vm_memory=16384 # 16GB
     elif [[ $system_memory_gb -le 128 ]]; then
-        vm_memory=32768  # 32GB
+        vm_memory=32768 # 32GB
     else
-        vm_memory=49152  # 48GB
+        vm_memory=49152 # 48GB
     fi
-    
+
     log_info "Setting VM resources: CPUs=$vm_cpus, Memory=${vm_memory}MB"
-    
+
     # Update vm_cpus and vm_memory in config.rb
     temp_file="${VAGRANT_CONF_FILE}.tmp"
     awk -v vm_cpus="$vm_cpus" -v vm_memory="$vm_memory" '
@@ -1713,7 +1713,7 @@ setup_kubespray_project() {
         log_error "Source Vagrantfile not found: $source_vagrantfile"
         error_exit "Source Vagrantfile not found"
     fi
-  
+
     log_info "Kubespray project setup completed"
 }
 
@@ -1968,18 +1968,6 @@ show_deployment_confirmation() {
         }
 
         if vagrant up --provider=libvirt --no-parallel; then
-            # Record installation end time
-            INSTALLATION_END_TIME=$(date +%s)
-            INSTALLATION_DURATION=$((INSTALLATION_END_TIME - INSTALLATION_START_TIME))
-
-            # Display installation timing information
-            if [[ -n "$INSTALLATION_START_TIME" && -n "$INSTALLATION_END_TIME" ]]; then
-                echo -e "\n${WHITE}⏱️  Installation Steps Timing:${NC}"
-                echo -e "   ${GREEN}•${NC} Start Time: ${CYAN}$(date -d @$INSTALLATION_START_TIME '+%Y-%m-%d %H:%M:%S')${NC}"
-                echo -e "   ${GREEN}•${NC} End Time: ${CYAN}$(date -d @$INSTALLATION_END_TIME '+%Y-%m-%d %H:%M:%S')${NC}"
-                echo -e "   ${GREEN}•${NC} Duration: ${YELLOW}$(printf '%02d:%02d:%02d' $((INSTALLATION_DURATION/3600)) $((INSTALLATION_DURATION%3600/60)) $((INSTALLATION_DURATION%60)))${NC}"
-            fi
-
             echo -e "\n${GREEN}🎉 Deployment Completed Successfully!${NC}\n"
             # Configure kubectl for local access
             echo -e "${YELLOW}🔧 Configuring kubectl for local access...${NC}"
@@ -2007,15 +1995,16 @@ show_deployment_confirmation() {
             return 1
         fi
 
-        # Install OpenEBS LVM LocalPV
-        echo -e "${YELLOW}🔧 Installing OpenEBS LVM LocalPV...${NC}"
-        if install_openebs_lvm_localpv; then
-            echo -e "${GREEN}✅ OpenEBS LVM LocalPV installed successfully${NC}\n"
-        else
-            echo -e "${YELLOW}⚠️  OpenEBS LVM LocalPV installation failed${NC}\n"
-            log_warn "OpenEBS LVM LocalPV installation failed, but continuing..."
+        # Record installation end time
+        INSTALLATION_END_TIME=$(date +%s)
+        INSTALLATION_DURATION=$((INSTALLATION_END_TIME - INSTALLATION_START_TIME))
+        # Display installation timing information
+        if [[ -n "$INSTALLATION_START_TIME" && -n "$INSTALLATION_END_TIME" ]]; then
+            echo -e "\n${WHITE}⏱️  Installation Steps Timing:${NC}"
+            echo -e "   ${GREEN}•${NC} Start Time: ${CYAN}$(date -d @$INSTALLATION_START_TIME '+%Y-%m-%d %H:%M:%S')${NC}"
+            echo -e "   ${GREEN}•${NC} End Time: ${CYAN}$(date -d @$INSTALLATION_END_TIME '+%Y-%m-%d %H:%M:%S')${NC}"
+            echo -e "   ${GREEN}•${NC} Duration: ${YELLOW}$(printf '%02d:%02d:%02d' $((INSTALLATION_DURATION / 3600)) $((INSTALLATION_DURATION % 3600 / 60)) $((INSTALLATION_DURATION % 60)))${NC}"
         fi
-        return 0
     else
         echo -e "\n${YELLOW}⏸️  Deployment cancelled.${NC}\n"
         echo -e "${WHITE}📝 Config: ${CYAN}$VAGRANT_CONF_FILE${NC}\n"
@@ -2108,6 +2097,7 @@ configure_kubectl_access() {
 install_openebs_lvm_localpv() {
     log_info "Installing OpenEBS LVM LocalPV..."
 
+    echo -e "${YELLOW}🔧 Installing OpenEBS LVM LocalPV...${NC}"
     local openebs_namespace="openebs"
     local openebs_storagclass_name="openebs-lvm-localpv"
 
@@ -2186,7 +2176,9 @@ install_openebs_lvm_localpv() {
             local node_num="${BASH_REMATCH[1]}"
             if [[ "$node_num" -ge "$upm_start_index" ]] && [[ "$node_num" -le "$upm_end_index" ]]; then
                 log_info "Labeling UPM control plane node: $node (node number: $node_num)"
-                "$KUBCTL" label node "$node" "openebs.io/control-plane=enable" --overwrite
+                "$KUBCTL" label node "$node" "openebs.io/control-plane=enable" --overwrite || {
+                    error_exit "Failed to label UPM control plane node: $node"
+                }
             fi
         fi
     done <<<"$nodes"
@@ -2202,14 +2194,18 @@ install_openebs_lvm_localpv() {
             local node_num="${BASH_REMATCH[1]}"
             if [[ "$node_num" -ge "$worker_start_index" ]] && [[ "$node_num" -le "$worker_end_index" ]]; then
                 log_info "Labeling worker node: $node (node number: $node_num)"
-                "$KUBCTL" label node "$node" "openebs.io/node=enable" --overwrite
+                "$KUBCTL" label node "$node" "openebs.io/node=enable" --overwrite || {
+                    error_exit "Failed to label worker node: $node"
+                }
             fi
         fi
     done <<<"$nodes"
 
     # Add OpenEBS Helm repository
     log_info "Adding OpenEBS Helm repository..."
-    helm repo add openebs-lvmlocalpv https://openebs.github.io/lvm-localpv || log_error "Failed to add OpenEBS Helm repository"
+    helm repo add openebs-lvmlocalpv https://openebs.github.io/lvm-localpv || {
+        error_exit "Failed to add OpenEBS Helm repository"
+    }
     helm repo update
 
     # Install OpenEBS LVM LocalPV
@@ -2222,8 +2218,7 @@ install_openebs_lvm_localpv() {
         --set lvmNode.nodeSelector."openebs\.io/node"="enable" \
         --set analytics.enabled=false \
         --wait --timeout=20m || {
-        log_error "Failed to install OpenEBS LVM LocalPV"
-        return 1
+        error_exit "Failed to install OpenEBS LVM LocalPV"
     }
 
     # Wait for pods to be ready
@@ -2255,8 +2250,7 @@ EOF
     if [[ $? -eq 0 ]]; then
         log_info "OpenEBS LVM LocalPV StorageClass created successfully"
     else
-        log_error "Failed to create OpenEBS LVM LocalPV StorageClass"
-        return 1
+        error_exit "Failed to create OpenEBS LVM LocalPV StorageClass"
     fi
 
     # Display installation status
@@ -2269,7 +2263,8 @@ EOF
     echo -e "${WHITE}🔍 Verification Commands:${NC}"
     echo -e "   ${GREEN}•${NC} Check pods: ${CYAN}kubectl get pods -n $openebs_namespace${NC}"
     echo -e "   ${GREEN}•${NC} Check StorageClass: ${CYAN}kubectl get storageclass $openebs_storagclass_name${NC}"
-    echo -e "   ${GREEN}•${NC} Check node labels: ${CYAN}kubectl get nodes --show-labels${NC}\n"
+    echo -e "   ${GREEN}•${NC} Check node labels: ${CYAN}kubectl get nodes --show-labels${NC}"
+    echo -e "${GREEN}✅ OpenEBS LVM LocalPV installed successfully${NC}\n"
 
     return 0
 }
@@ -2330,7 +2325,7 @@ display_cluster_info() {
 # Help Function
 #######################################
 show_help() {
-    cat << EOF
+    cat <<EOF
 Usage: $0 [OPTIONS]
 
 OPTIONS:
@@ -2366,18 +2361,18 @@ parse_arguments() {
             exit 0
         fi
     done
-        
+
     while [[ $# -gt 0 ]]; do
         case $1 in
-            --install-openebs)
-                install_openebs_lvm_localpv
-                exit 0
-                ;;
-            *)
-                log_error "Unknown option: $1"
-                show_help
-                exit 1
-                ;;
+        --install-openebs)
+            install_openebs_lvm_localpv
+            exit 0
+            ;;
+        *)
+            log_error "Unknown option: $1"
+            show_help
+            exit 1
+            ;;
         esac
     done
 }
@@ -2388,7 +2383,6 @@ parse_arguments() {
 main() {
     # Parse command line arguments first
     parse_arguments "$@"
-    
     # Variable validation
     validate_required_variables
     # System validation
@@ -2407,9 +2401,10 @@ main() {
     install_vagrant_libvirt_plugin
     setup_python_environment
     setup_kubespray_project
-
     # Post-installation confirmation
     show_deployment_confirmation
+    # install openebs
+    install_openebs_lvm_localpv
 
     log_info "Kubespray environment setup completed successfully!"
 }
