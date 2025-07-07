@@ -7,16 +7,6 @@
 #   distributions. Configures complete Kubernetes development environment with
 #   networking, virtualization, and interactive deployment capabilities.
 #
-# Key Features:
-#   System validation (OS, resources, NTP sync)
-#   Libvirt/KVM setup with security configuration
-#   Multi-network support (Bridge, NAT)
-#   Python environment (pyenv 3.11.10 + venv)
-#   Vagrant + libvirt plugin installation
-#   Kubespray project setup with proxy support
-#   VM IP preview and interactive deployment
-#   Comprehensive logging and error handling
-#
 # Environment Variables:
 #   BRIDGE_INTERFACE   - Network interface for bridge (optional)
 #   HTTP_PROXY         - HTTP proxy URL
@@ -2136,12 +2126,16 @@ configure_kubectl_access() {
 #######################################
 # Install and configure OpenEBS LVM LocalPV
 #######################################
-install_openebs_lvm_localpv() {
+install_lvm_localpv() {
     log_info "Installing OpenEBS LVM LocalPV..."
 
     echo -e "${YELLOW}🔧 Installing OpenEBS LVM LocalPV...${NC}"
     local openebs_namespace="openebs"
-    local openebs_storagclass_name="openebs-lvm-localpv"
+    local openebs_storagclass_name="lvm-localpv"
+    local openebs_chart_repo="https://openebs.github.io/lvm-localpv"
+    local openebs_release_name="openebs-lvmlocalpv"
+    local openebs_chart_name="$openebs_release_name/lvm-localpv"
+    local openebs_chart_version="1.6.2"
 
     # Get volume group name from Vagrant configuration
     local vg_name="local_vg_dev" # default fallback
@@ -2168,9 +2162,11 @@ install_openebs_lvm_localpv() {
 
     echo -e "${WHITE}Installation details:${NC}"
     echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$openebs_namespace${NC}"
+    echo -e "   ${GREEN}•${NC} Helm chart: ${CYAN}$openebs_chart_name${NC}"
+    echo -e "   ${GREEN}•${NC} Helm chart version: ${CYAN}$openebs_chart_version${NC}"
     echo -e "   ${GREEN}•${NC} StorageClass: ${CYAN}$openebs_storagclass_name${NC}"
     echo -e "   ${GREEN}•${NC} VolumeGroup: ${CYAN}$vg_name${NC}"
-    echo -e "   ${GREEN}•${NC} Installation timeout: ${CYAN}20 minutes${NC}\n"
+    echo -e "   ${GREEN}•${NC} Installation timeout: ${CYAN}10 minutes${NC}\n"
 
     echo -e "${YELLOW}⚠️  Note: This installation will:${NC}"
     echo -e "   ${YELLOW}•${NC} Add node labels to control plane and worker nodes"
@@ -2198,8 +2194,8 @@ install_openebs_lvm_localpv() {
         log_info "Helm is already installed"
     fi
 
-    # Label UPM control plane nodes (openebs.io/control-plane=enable)
-    log_info "Labeling UPM control plane nodes..."
+    # Label openebs control plane nodes (openebs.io/control-plane=enable)
+    log_info "Labeling openebs control plane nodes..."
     # Use global variables extracted from config
     extract_vagrant_config_variables
 
@@ -2222,8 +2218,8 @@ install_openebs_lvm_localpv() {
         fi
     done <<<"$nodes"
 
-    # Label worker nodes (openebs.io/node=enable)
-    log_info "Labeling worker nodes..."
+    # Label data nodes (openebs.io/node=enable)
+    log_info "Labeling data nodes..."
     local worker_start_index=$upm_start_index
     local worker_end_index=$((G_NUM_INSTANCES))
 
@@ -2232,7 +2228,7 @@ install_openebs_lvm_localpv() {
         if [[ "$node" =~ ^${G_INSTANCE_NAME_PREFIX}-([0-9]+)$ ]]; then
             local node_num="${BASH_REMATCH[1]}"
             if [[ "$node_num" -ge "$worker_start_index" ]] && [[ "$node_num" -le "$worker_end_index" ]]; then
-                log_info "Labeling worker node: $node (node number: $node_num)"
+                log_info "Labeling worker node: $node"
                 "$KUBCTL" label node "$node" "openebs.io/node=enable" --overwrite || {
                     error_exit "Failed to label worker node: $node"
                 }
@@ -2242,27 +2238,30 @@ install_openebs_lvm_localpv() {
 
     # Add OpenEBS Helm repository
     log_info "Adding OpenEBS Helm repository..."
-    helm repo add openebs-lvmlocalpv https://openebs.github.io/lvm-localpv || {
-        error_exit "Failed to add OpenEBS Helm repository"
+    helm repo add "$openebs_release_name" "$openebs_chart_repo" || {
+        error_exit "Failed to add OpenEBS Helm repository: $openebs_release_name, $openebs_chart_repo"
     }
     helm repo update
 
     # Install OpenEBS LVM LocalPV
     log_info "Installing OpenEBS LVM LocalPV with Helm..."
-    helm upgrade --install "$openebs_storagclass_name" openebs-lvmlocalpv/lvm-localpv \
+    helm upgrade --install "$openebs_release_name" "$openebs_chart_name" \
+        --version "$openebs_chart_version" \
         --namespace "$openebs_namespace" \
         --create-namespace \
         --set lvmPlugin.allowedTopologies='kubernetes\.io/hostname\,openebs\.io/node' \
         --set lvmController.nodeSelector."openebs\.io/control-plane"="enable" \
         --set lvmNode.nodeSelector."openebs\.io/node"="enable" \
         --set analytics.enabled=false \
-        --wait --timeout=20m || {
+        --wait --timeout=5m || {
         error_exit "Failed to install OpenEBS LVM LocalPV"
     }
 
     # Wait for pods to be ready
     log_info "Waiting for OpenEBS pods to be ready..."
-    "$KUBCTL" wait --for=condition=ready pod -l release="$openebs_storagclass_name" -n "$openebs_namespace" --timeout=300s
+    "$KUBCTL" wait --for=condition=ready pod -l release="$openebs_release_name" -n "$openebs_namespace" --timeout=300s || {
+        error_exit "OpenEBS pods failed to become ready"
+    }
     log_info "OpenEBS LVM LocalPV installed successfully"
 
     # Create StorageClass
@@ -2308,6 +2307,158 @@ EOF
     # Record installation end time
     INSTALLATION_END_TIME=$(date +%s)
     INSTALLATION_DURATION=$((INSTALLATION_END_TIME - INSTALLATION_START_TIME))
+    # Display installation timing information
+    if [[ -n "$INSTALLATION_START_TIME" && -n "$INSTALLATION_END_TIME" ]]; then
+        echo -e "\n${WHITE}⏱️  Installation Steps Timing:${NC}"
+        echo -e "   ${GREEN}•${NC} Start Time: ${CYAN}$(date -d @$INSTALLATION_START_TIME '+%Y-%m-%d %H:%M:%S')${NC}"
+        echo -e "   ${GREEN}•${NC} End Time: ${CYAN}$(date -d @$INSTALLATION_END_TIME '+%Y-%m-%d %H:%M:%S')${NC}"
+        echo -e "   ${GREEN}•${NC} Duration: ${YELLOW}$(printf '%02d:%02d:%02d' $((INSTALLATION_DURATION / 3600)) $((INSTALLATION_DURATION % 3600 / 60)) $((INSTALLATION_DURATION % 60)))${NC}"
+    fi
+
+    return 0
+}
+
+#######################################
+# Install CloudNative-PG
+#######################################
+install_cnpg() {
+    log_info "Starting CloudNative-PG installation..."
+
+    # Configuration variables
+    local cnpg_namespace="cnpg-system"
+    local cnpg_chart_repo="https://cloudnative-pg.github.io/charts"
+    local cnpg_release_name="cnpg"
+    local cnpg_chart_name="$cnpg_release_name/cloudnative-pg"
+    local cnpg_chart_version="0.24.0"
+
+    # Interactive confirmation for CloudNative-PG installation
+    echo -e "\n${YELLOW}📦 CloudNative-PG Installation${NC}\n"
+    echo -e "${WHITE}This will install CloudNative-PG with the following components:${NC}"
+    echo -e "   ${GREEN}•${NC} CloudNative-PG Helm chart"
+    echo -e "   ${GREEN}•${NC} Node labels for CloudNative-PG scheduling"
+    echo -e "   ${GREEN}•${NC} Helm repository configuration\n"
+
+    echo -e "${WHITE}Installation details:${NC}"
+    echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$cnpg_namespace${NC}"
+    echo -e "   ${GREEN}•${NC} Helm chart: ${CYAN}$ccnpg_chart_name${NC}"
+    echo -e "   ${GREEN}•${NC} Helm chart version: ${CYAN}$cnpg_chart_version${NC}"
+    echo -e "   ${GREEN}•${NC} Installation timeout: ${CYAN}5 minutes${NC}\n"
+
+    echo -e "${YELLOW}⚠️  Note: This installation will:${NC}"
+    echo -e "   ${YELLOW}•${NC} Add node labels to control plane"
+    echo -e "   ${YELLOW}•${NC} Install Helm if not already present\n"
+
+    if ! prompt_yes_no "Do you want to proceed with CloudNative-PG installation?"; then
+        echo -e "${YELLOW}⏸️  CloudNative-PG installation skipped.${NC}\n"
+        log_info "CloudNative-PG installation skipped by user"
+        return 0
+    fi
+
+    echo -e "${GREEN}✅ Proceeding with CloudNative-PG installation...${NC}\n"
+    # Record installation start time
+    local INSTALLATION_START_TIME=$(date +%s)
+    log_info "Installation start time: $INSTALLATION_START_TIME"
+
+    # Check if helm is installed
+    if ! command -v helm >/dev/null 2>&1; then
+        log_info "Installing Helm..."
+        curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+        chmod 700 get_helm.sh
+        ./get_helm.sh
+        rm -f get_helm.sh
+    else
+        log_info "Helm is already installed"
+    fi
+
+
+
+    # Add CloudNative-PG Helm repository
+    log_info "Adding CloudNative-PG Helm repository..."
+    helm repo add "$cnpg_release_name" "$cnpg_chart_repo" || {
+        error_exit "Failed to add CloudNative-PG Helm repository"
+    }
+    helm repo update
+
+    log_info "Labeling CloudNative-PG control plane nodes..."
+    # Use global variables extracted from config
+    extract_vagrant_config_variables
+
+    local cnpg_start_index=$((G_KUBE_MASTER_INSTANCES + 1))
+    local cnpg_end_index=$((G_KUBE_MASTER_INSTANCES + G_UPM_CTL_INSTANCES))
+
+    local nodes
+    nodes=$("$KUBCTL" get nodes --no-headers -o custom-columns=":metadata.name")
+
+    while IFS= read -r node; do
+        # Extract node number from node name (assuming format: prefix-number)
+        if [[ "$node" =~ ^${G_INSTANCE_NAME_PREFIX}-([0-9]+)$ ]]; then
+            local node_num="${BASH_REMATCH[1]}"
+            if [[ "$node_num" -ge "$cnpg_start_index" ]] && [[ "$node_num" -le "$cnpg_end_index" ]]; then
+                log_info "Labeling CloudNative-PG control plane node: $node"
+                "$KUBCTL" label node "$node" "cnpg.io/control-plane=enable" --overwrite || {
+                    error_exit "Failed to label CloudNative-PG control plane node: $node"
+                }
+            fi
+        fi
+    done <<<"$nodes"
+
+    # Create values file
+    local values_file="/tmp/cnpg_values.yaml"
+    cat >"$values_file" <<EOF
+# Operator configuration.
+config:
+  data:
+    ENABLE_INSTANCE_MANAGER_INPLACE_UPDATES: "true"
+    INHERITED_ANNOTATIONS: "categories"
+    INHERITED_LABELS: "upm.api/service-group.name, upm.api/service-group.type, upm.api/service.type, upm.io/owner, upm.api/pod.main-container"
+# -- Affinity for the operator to be installed.
+affinity: 
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: cnpg.io/control-plane
+          operator: In
+          values:
+          - enable
+EOF
+
+    log_info "Installing CloudNative-PG operator via Helm..."
+    helm upgrade --install "$cnpg_release_name" "$cnpg_chart_name" \
+        --namespace "$cnpg_namespace" \
+        --create-namespace \
+        --version "$cnpg_chart_version" \
+        --values "$values_file" \
+        --wait --timeout=5m || {
+        error_exit "Failed to upgrade CloudNative-PG"
+    }
+
+    # Clean up values file
+    rm -f "$values_file"
+
+    # Wait for operator to be ready
+    log_info "Waiting for CloudNative-PG operator to be ready..."
+    "$KUBCTL" wait --for=condition=ready pod -l app.kubernetes.io/instance="$cnpg_release_name" -n "$cnpg_namespace" --timeout=300s || {
+        error_exit "CloudNative-PG operator failed to become ready"
+    }
+
+    # Display installation status
+    echo -e "\n${GREEN}🎉 CloudNative-PG Installation Completed!${NC}\n"
+    echo -e "${WHITE}📦 Components:${NC}"
+    echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$cnpg_namespace${NC}"
+    echo -e "   ${GREEN}•${NC} Chart Version: ${CYAN}$cnpg_chart_version${NC}\n"
+
+    echo -e "${WHITE}🔍 Verification Commands:${NC}"
+    echo -e "   ${GREEN}•${NC} Check pods: ${CYAN}kubectl get pods -n $cnpg_namespace${NC}"
+    echo -e "   ${GREEN}•${NC} Check operator logs: ${CYAN}kubectl logs -n $cnpg_namespace deployment/cnpg-controller-manager${NC}"
+    echo -e "   ${GREEN}•${NC} Check CRDs: ${CYAN}kubectl get crd | grep cnpg${NC}"
+    echo -e "   ${GREEN}•${NC} Check Helm release: ${CYAN}helm list -n $cnpg_namespace${NC}"
+    echo -e "   ${GREEN}•${NC} Check deployment config: ${CYAN}kubectl get deployment cnpg-controller-manager -n $cnpg_namespace -o yaml${NC}"
+    echo -e "${GREEN}✅ CloudNative-PG installed successfully${NC}\n"
+
+    # Record installation end time
+    local INSTALLATION_END_TIME=$(date +%s)
+    local INSTALLATION_DURATION=$((INSTALLATION_END_TIME - INSTALLATION_START_TIME))
     # Display installation timing information
     if [[ -n "$INSTALLATION_START_TIME" && -n "$INSTALLATION_END_TIME" ]]; then
         echo -e "\n${WHITE}⏱️  Installation Steps Timing:${NC}"
@@ -2380,22 +2531,30 @@ Usage: $0 [OPTIONS]
 
 OPTIONS:
   -h, --help              Show this help message
-  --install-openebs       Install OpenEBS LVM LocalPV only
+  --install-lvmlocalpv   Install OpenEBS LVM LocalPV only
+  --install-cnpg          Install CloudNative-PG only
 
 EXAMPLES:
   $0                      Run full Kubespray setup
-  $0 --install-openebs    Install OpenEBS LVM LocalPV only
+  $0 --install-lvmlocalpv    Install OpenEBS LVM LocalPV only
+  $0 --install-cnpg       Install CloudNative-PG only
 
 DESCRIPTION:
   This script sets up a complete Kubespray environment with libvirt virtualization
   for RHEL-based distributions. It can also be used to install OpenEBS LVM LocalPV
-  independently on an existing Kubernetes cluster.
+  or CloudNative-PG independently on an existing Kubernetes cluster.
 
 REQUIREMENTS for OpenEBS installation:
   - Existing Kubernetes cluster with kubectl access
   - Helm 3.x (will be installed if not present)
   - Proper node labeling for OpenEBS scheduling
   - LVM volume group available on worker nodes
+
+REQUIREMENTS for CloudNative-PG installation:
+  - Existing Kubernetes cluster with kubectl access
+  - Helm 3.x (will be installed if not present)
+  - Cluster admin privileges for CRD installation
+  - Internet access to download Helm charts
 
 EOF
 }
@@ -2414,8 +2573,12 @@ parse_arguments() {
 
     while [[ $# -gt 0 ]]; do
         case $1 in
-        --install-openebs)
-            install_openebs_lvm_localpv
+        --install-lvmlocalpv)
+            install_lvm_localpv
+            exit 0
+            ;;
+        --install-cnpg)
+            install_cnpg
             exit 0
             ;;
         *)
@@ -2454,8 +2617,10 @@ main() {
     echo -e "\n${GREEN}🎉 Environment Setup Completed Successfully!${NC}"
     # Post-installation confirmation
     vagrant_and_run_kubespray
-    # install openebs
-    install_openebs_lvm_localpv
+    # install lvm localpv
+    install_lvm_localpv
+    # install cnpg
+    install_cnpg
 
     log_info "Kubespray environment setup completed successfully!"
 }
