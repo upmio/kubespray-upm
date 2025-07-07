@@ -36,7 +36,7 @@
 #   - Internet connectivity
 #   - 200GB+ disk space
 #   - 32GB+ memory
-#   - 16+ CPU cores
+#   - 12+ CPU cores
 #
 # Software Installed:
 #   - Python: 3.11.10 (pyenv)
@@ -751,11 +751,56 @@ check_system_requirements() {
     # Check CPU cores (at least 16 cores recommended)
     local cpu_cores
     cpu_cores=$(nproc)
-    local required_cores=16
+    local required_cores=12
     if [ "$cpu_cores" -lt "$required_cores" ]; then
-        error_exit "Insufficient CPU cores. At least 16 cores required, but only $cpu_cores available."
+        error_exit "Insufficient CPU cores. At least 12 cores required, but only $cpu_cores available."
     else
         log_info "CPU cores check passed: $cpu_cores cores available"
+    fi
+
+    # Check CPU hardware virtualization extensions (Intel VT-x or AMD-V)
+    log_info "Checking CPU hardware virtualization support..."
+    local vt_support=false
+    local cpu_flags=""
+    local os_type="$(uname -s)"
+    
+    # Only perform this check on Linux systems
+    if [ "$os_type" = "Linux" ]; then
+        if [ -r "/proc/cpuinfo" ]; then
+            cpu_flags=$(grep -m1 "^flags" /proc/cpuinfo | cut -d: -f2 2>/dev/null || echo "")
+            
+            # Check for Intel VT-x (vmx flag)
+            if echo "$cpu_flags" | grep -q "vmx"; then
+                log_info "Intel VT-x (vmx) support detected"
+                vt_support=true
+            # Check for AMD-V (svm flag)
+            elif echo "$cpu_flags" | grep -q "svm"; then
+                log_info "AMD-V (svm) support detected"
+                vt_support=true
+            fi
+        fi
+        
+        if [ "$vt_support" = false ]; then
+            log_error "CPU hardware virtualization extensions not found or not enabled"
+            log_error "Libvirt requires Intel VT-x or AMD-V support for hardware virtualization"
+            log_error "Please check:"
+            log_error "  1. CPU supports hardware virtualization (Intel VT-x or AMD-V)"
+            log_error "  2. Virtualization is enabled in BIOS/UEFI settings"
+            log_error "  3. Nested virtualization is enabled if running in a VM"
+            error_exit "Hardware virtualization support check failed"
+        else
+            log_info "CPU hardware virtualization support check passed"
+        fi
+        
+        # Additional check for KVM module availability (Linux only)
+        if [ -e "/dev/kvm" ]; then
+            log_info "KVM device (/dev/kvm) is available"
+        else
+            log_warn "KVM device (/dev/kvm) not found - KVM modules may not be loaded"
+            log_warn "This will be addressed during libvirt installation"
+        fi
+    else
+        error_exit "Only supported on Linux systems"
     fi
 
     log_info "System requirements check passed"
@@ -1485,6 +1530,81 @@ configure_vagrant_config() {
     log_info "Copying template to $VAGRANT_CONF_FILE"
     cp "$template_file" "$VAGRANT_CONF_FILE"
 
+    # Configure VM resources based on system capacity
+    log_info "Configuring VM resources based on system capacity..."
+    
+    # Detect system CPU count (cross-platform)
+    local system_cpus
+    if command -v lscpu >/dev/null 2>&1; then
+        # Linux
+        system_cpus=$(lscpu | grep "^CPU(s):" | awk '{print $2}')
+    elif command -v sysctl >/dev/null 2>&1; then
+        # macOS
+        system_cpus=$(sysctl -n hw.ncpu)
+    else
+        # Fallback
+        system_cpus=$(nproc 2>/dev/null || echo "8")
+    fi
+    log_info "Detected system CPUs: $system_cpus"
+    
+    # Set vm_cpus based on system CPU count
+    local vm_cpus
+    if [[ $system_cpus -le 12 ]]; then
+        vm_cpus=6
+    elif [[ $system_cpus -le 16 ]]; then
+        vm_cpus=8
+    elif [[ $system_cpus -le 24 ]]; then
+        vm_cpus=12
+    elif [[ $system_cpus -le 32 ]]; then
+        vm_cpus=16
+    else
+        vm_cpus=24  # Default for systems with more than 32 CPUs
+    fi
+    
+    # Detect system memory in GB (cross-platform)
+    local system_memory_gb
+    if command -v free >/dev/null 2>&1; then
+        # Linux
+        system_memory_gb=$(free -g | grep "^Mem:" | awk '{print $2}')
+    elif command -v sysctl >/dev/null 2>&1; then
+        # macOS
+        local system_memory_bytes
+        system_memory_bytes=$(sysctl -n hw.memsize)
+        system_memory_gb=$((system_memory_bytes / 1024 / 1024 / 1024))
+    else
+        # Fallback to 32GB
+        system_memory_gb=32
+    fi
+    log_info "Detected system memory: ${system_memory_gb}GB"
+    
+    # Set vm_memory based on system memory
+    local vm_memory
+    if [[ $system_memory_gb -le 32 ]]; then
+        vm_memory=8192  # 8GB
+    elif [[ $system_memory_gb -le 64 ]]; then
+        vm_memory=16384  # 16GB
+    elif [[ $system_memory_gb -le 128 ]]; then
+        vm_memory=32768  # 32GB
+    else
+        vm_memory=49152  # 48GB
+    fi
+    
+    log_info "Setting VM resources: CPUs=$vm_cpus, Memory=${vm_memory}MB"
+    
+    # Update vm_cpus and vm_memory in config.rb
+    temp_file="${VAGRANT_CONF_FILE}.tmp"
+    awk -v vm_cpus="$vm_cpus" -v vm_memory="$vm_memory" '
+    {
+        if ($0 ~ /^# \$vm_cpus = [0-9]+/ || $0 ~ /^\$vm_cpus = [0-9]+/) {
+            print "$vm_cpus = " vm_cpus
+        } else if ($0 ~ /^# \$vm_memory = [0-9]+/ || $0 ~ /^\$vm_memory = [0-9]+/) {
+            print "$vm_memory = " vm_memory
+        } else {
+            print $0
+        }
+    }' "$VAGRANT_CONF_FILE" >"$temp_file"
+    mv "$temp_file" "$VAGRANT_CONF_FILE"
+
     # Configure public network settings if using public network
     if [[ "$network_type" == "$PUBLIC_NETWORK_TYPE" ]]; then
         configure_public_network_settings
@@ -1507,7 +1627,9 @@ configure_vagrant_config() {
         awk -v http_proxy="$HTTP_PROXY" \
             -v https_proxy="$https_proxy_value" \
             -v no_proxy="$no_proxy_value" \
-            -v additional_no_proxy="${NO_PROXY:-}" '
+            -v additional_no_proxy="$no_proxy_value" \
+            -v vm_cpus="$vm_cpus" \
+            -v vm_memory="$vm_memory" '
         {
             if ($0 ~ /^# \$http_proxy = ""/) {
                 print "$http_proxy = \"" http_proxy "\""
@@ -1517,6 +1639,10 @@ configure_vagrant_config() {
                 print "$no_proxy = \"" no_proxy "\""
             } else if ($0 ~ /^# \$additional_no_proxy = ""/ && additional_no_proxy != "") {
                 print "$additional_no_proxy = \"" additional_no_proxy "\""
+            } else if ($0 ~ /^# \$vm_cpus = [0-9]+/ || $0 ~ /^\$vm_cpus = [0-9]+/) {
+                print "$vm_cpus = " vm_cpus
+            } else if ($0 ~ /^# \$vm_memory = [0-9]+/ || $0 ~ /^\$vm_memory = [0-9]+/) {
+                print "$vm_memory = " vm_memory
             } else {
                 print $0
             }
@@ -1587,13 +1713,7 @@ setup_kubespray_project() {
         log_error "Source Vagrantfile not found: $source_vagrantfile"
         error_exit "Source Vagrantfile not found"
     fi
-
-    # Record installation end time
-    INSTALLATION_END_TIME=$(date +%s)
-    INSTALLATION_DURATION=$((INSTALLATION_END_TIME - INSTALLATION_START_TIME))
-    log_info "Installation completed at: $(date -d @$INSTALLATION_END_TIME '+%Y-%m-%d %H:%M:%S')"
-    log_info "Total installation duration: $(printf '%02d:%02d:%02d' $((INSTALLATION_DURATION/3600)) $((INSTALLATION_DURATION%3600/60)) $((INSTALLATION_DURATION%60)))"
-    
+  
     log_info "Kubespray project setup completed"
 }
 
@@ -1811,21 +1931,6 @@ show_setup_confirmation() {
 #######################################
 show_deployment_confirmation() {
     echo -e "\n${GREEN}🎉 Environment Setup Completed Successfully!${NC}"
-    
-    # Display installation timing information
-    if [[ -n "$INSTALLATION_START_TIME" && -n "$INSTALLATION_END_TIME" ]]; then
-        local start_time_formatted
-        local end_time_formatted
-        local duration_formatted
-        start_time_formatted=$(date -d @$INSTALLATION_START_TIME '+%Y-%m-%d %H:%M:%S')
-        end_time_formatted=$(date -d @$INSTALLATION_END_TIME '+%Y-%m-%d %H:%M:%S')
-        duration_formatted=$(printf '%02d:%02d:%02d' $((INSTALLATION_DURATION/3600)) $((INSTALLATION_DURATION%3600/60)) $((INSTALLATION_DURATION%60)))
-        
-        echo -e "\n${WHITE}⏱️  Installation Steps Timing:${NC}"
-        echo -e "   ${GREEN}•${NC} Start Time: ${CYAN}$start_time_formatted${NC}"
-        echo -e "   ${GREEN}•${NC} End Time: ${CYAN}$end_time_formatted${NC}"
-        echo -e "   ${GREEN}•${NC} Duration: ${YELLOW}$duration_formatted${NC}"
-    fi
 
     # Parse and display configuration
     if ! parse_vagrant_config; then
@@ -1863,6 +1968,18 @@ show_deployment_confirmation() {
         }
 
         if vagrant up --provider=libvirt --no-parallel; then
+            # Record installation end time
+            INSTALLATION_END_TIME=$(date +%s)
+            INSTALLATION_DURATION=$((INSTALLATION_END_TIME - INSTALLATION_START_TIME))
+
+            # Display installation timing information
+            if [[ -n "$INSTALLATION_START_TIME" && -n "$INSTALLATION_END_TIME" ]]; then
+                echo -e "\n${WHITE}⏱️  Installation Steps Timing:${NC}"
+                echo -e "   ${GREEN}•${NC} Start Time: ${CYAN}$(date -d @$INSTALLATION_START_TIME '+%Y-%m-%d %H:%M:%S')${NC}"
+                echo -e "   ${GREEN}•${NC} End Time: ${CYAN}$(date -d @$INSTALLATION_END_TIME '+%Y-%m-%d %H:%M:%S')${NC}"
+                echo -e "   ${GREEN}•${NC} Duration: ${YELLOW}$(printf '%02d:%02d:%02d' $((INSTALLATION_DURATION/3600)) $((INSTALLATION_DURATION%3600/60)) $((INSTALLATION_DURATION%60)))${NC}"
+            fi
+
             echo -e "\n${GREEN}🎉 Deployment Completed Successfully!${NC}\n"
             # Configure kubectl for local access
             echo -e "${YELLOW}🔧 Configuring kubectl for local access...${NC}"
