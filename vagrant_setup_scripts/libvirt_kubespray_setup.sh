@@ -93,6 +93,35 @@ declare INSTALLATION_START_TIME=""
 declare INSTALLATION_END_TIME=""
 declare INSTALLATION_DURATION=""
 
+# Global variables for Vagrant configuration (extracted from config.rb)
+declare G_NUM_INSTANCES=""
+declare G_KUBE_MASTER_INSTANCES=""
+declare G_UPM_CTL_INSTANCES=""
+declare G_VM_CPUS=""
+declare G_VM_MEMORY=""
+declare G_KUBE_MASTER_VM_CPUS=""
+declare G_KUBE_MASTER_VM_MEMORY=""
+declare G_UPM_CONTROL_PLANE_VM_CPUS=""
+declare G_UPM_CONTROL_PLANE_VM_MEMORY=""
+declare G_KUBE_VERSION=""
+declare G_OS=""
+declare G_NETWORK_PLUGIN=""
+declare G_INSTANCE_NAME_PREFIX=""
+declare G_WORKER_NODES=""
+declare G_VM_MEMORY_GB=""
+declare G_KUBE_MASTER_VM_MEMORY_GB=""
+declare G_UPM_CONTROL_PLANE_VM_MEMORY_GB=""
+declare G_VM_NETWORK=""
+declare G_SUBNET_SPLIT4=""
+declare G_SUBNET=""
+declare G_NETMASK=""
+declare G_GATEWAY=""
+declare G_DNS_SERVER=""
+declare G_BRIDGE_NIC=""
+
+declare SYS_MEMORY_MB=""
+declare SYS_CPU_CORES=""
+
 # Log file configuration
 LOG_FILE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/libvirt_kubespray_setup.log"
 
@@ -739,23 +768,21 @@ check_system_requirements() {
     fi
 
     # Check available memory (at least 32GB recommended)
-    local available_memory
-    available_memory=$(free -m | awk 'NR==2{print $7}')
+    SYS_MEMORY_MB=$(free -m | awk 'NR==2{print $7}')
     local required_memory=32768 # 32GB in MB
-    if [ "$available_memory" -lt "$required_memory" ]; then
-        log_warn "Insufficient memory. At least 32GB recommended, but only ${available_memory}MB available. Performance may be affected."
+    if [ "$SYS_MEMORY_MB" -lt "$required_memory" ]; then
+        log_warn "Insufficient memory. At least 32GB recommended, but only ${SYS_MEMORY_MB}MB available. Performance may be affected."
     else
-        log_info "Memory check passed: ${available_memory}MB available"
+        log_info "Memory check passed: ${SYS_MEMORY_MB}MB available"
     fi
 
     # Check CPU cores (at least 16 cores recommended)
-    local cpu_cores
-    cpu_cores=$(nproc)
+    SYS_CPU_CORES=$(nproc)
     local required_cores=12
-    if [ "$cpu_cores" -lt "$required_cores" ]; then
-        error_exit "Insufficient CPU cores. At least 12 cores required, but only $cpu_cores available."
+    if [ "$SYS_CPU_CORES" -lt "$required_cores" ]; then
+        error_exit "Insufficient CPU cores. At least 12 cores required, but only $SYS_CPU_CORES available."
     else
-        log_info "CPU cores check passed: $cpu_cores cores available"
+        log_info "CPU cores check passed: $SYS_CPU_CORES cores available"
     fi
 
     # Check CPU hardware virtualization extensions (Intel VT-x or AMD-V)
@@ -1492,118 +1519,38 @@ configure_public_network_settings() {
 }
 
 configure_vagrant_config() {
-    # Declare local variables
-    local script_dir
-    local network_type
-    local template_file
-    local temp_file
-
-    network_type="$PRIVATE_NETWORK_TYPE"
-
-    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-    template_file="$script_dir/vagrant_setup_scripts/vagrant-config/private_network-config.rb"
-
-    if [[ -n "${BRIDGE_INTERFACE:-}" ]]; then
-        network_type="$PUBLIC_NETWORK_TYPE"
-        template_file="$script_dir/vagrant_setup_scripts/vagrant-config/public_network-config.rb"
-        log_info "BRIDGE_INTERFACE detected: $BRIDGE_INTERFACE - Using public network configuration"
-    else
-        log_info "BRIDGE_INTERFACE not set - Using private network configuration"
-    fi
-
-    log_info "Configuring Vagrant config.rb with $network_type network..."
-
+    log_info "Configuring Vagrant config.rb ..."
     # Create vagrant directory if it doesn't exist
     if [ ! -d "$VAGRANT_CONF_DIR" ]; then
         log_info "Creating vagrant directory: $VAGRANT_CONF_DIR"
         mkdir -p "$VAGRANT_CONF_DIR"
     fi
 
-    # Check if template file exists
-    if [ ! -f "$template_file" ]; then
-        log_warn "Template file not found: $template_file"
-        log_warn "Skipping Vagrant config.rb configuration"
-        return 0
+    # Declare local variables
+    local network_type
+    local template_file
+    local temp_file
+
+    if [[ -n "${BRIDGE_INTERFACE:-}" ]]; then
+        network_type="$PUBLIC_NETWORK_TYPE"
+        template_file="$KUBESPRAY_DIR/vagrant_setup_scripts/vagrant-config/public_network-config.rb"
+        log_info "BRIDGE_INTERFACE detected: $BRIDGE_INTERFACE - Using public network configuration"
+    else
+        network_type="$PRIVATE_NETWORK_TYPE"
+        template_file="$KUBESPRAY_DIR/vagrant_setup_scripts/vagrant-config/private_network-config.rb"
+        log_info "BRIDGE_INTERFACE not set - Using private network configuration"
     fi
 
     # Copy template to config.rb
     log_info "Copying template to $VAGRANT_CONF_FILE"
-    cp "$template_file" "$VAGRANT_CONF_FILE"
-
-    # Configure VM resources based on system capacity
-    log_info "Configuring VM resources based on system capacity..."
-
-    # Detect system CPU count (cross-platform)
-    local system_cpus
-    if command -v lscpu >/dev/null 2>&1; then
-        # Linux
-        system_cpus=$(lscpu | grep "^CPU(s):" | awk '{print $2}')
-    elif command -v sysctl >/dev/null 2>&1; then
-        # macOS
-        system_cpus=$(sysctl -n hw.ncpu)
-    else
-        # Fallback
-        system_cpus=$(nproc 2>/dev/null || echo "8")
-    fi
-    log_info "Detected system CPUs: $system_cpus"
-
-    # Set vm_cpus based on system CPU count
-    local vm_cpus
-    if [[ $system_cpus -le 12 ]]; then
-        vm_cpus=6
-    elif [[ $system_cpus -le 16 ]]; then
-        vm_cpus=8
-    elif [[ $system_cpus -le 24 ]]; then
-        vm_cpus=12
-    elif [[ $system_cpus -le 32 ]]; then
-        vm_cpus=16
-    else
-        vm_cpus=24 # Default for systems with more than 32 CPUs
-    fi
-
-    # Detect system memory in GB (cross-platform)
-    local system_memory_gb
-    if command -v free >/dev/null 2>&1; then
-        # Linux
-        system_memory_gb=$(free -g | grep "^Mem:" | awk '{print $2}')
-    elif command -v sysctl >/dev/null 2>&1; then
-        # macOS
-        local system_memory_bytes
-        system_memory_bytes=$(sysctl -n hw.memsize)
-        system_memory_gb=$((system_memory_bytes / 1024 / 1024 / 1024))
-    else
-        # Fallback to 32GB
-        system_memory_gb=32
-    fi
-    log_info "Detected system memory: ${system_memory_gb}GB"
-
-    # Set vm_memory based on system memory
-    local vm_memory
-    if [[ $system_memory_gb -le 32 ]]; then
-        vm_memory=8192 # 8GB
-    elif [[ $system_memory_gb -le 64 ]]; then
-        vm_memory=16384 # 16GB
-    elif [[ $system_memory_gb -le 128 ]]; then
-        vm_memory=32768 # 32GB
-    else
-        vm_memory=49152 # 48GB
-    fi
-
-    log_info "Setting VM resources: CPUs=$vm_cpus, Memory=${vm_memory}MB"
-
-    # Update vm_cpus and vm_memory in config.rb
-    temp_file="${VAGRANT_CONF_FILE}.tmp"
-    awk -v vm_cpus="$vm_cpus" -v vm_memory="$vm_memory" '
-    {
-        if ($0 ~ /^# \$vm_cpus = [0-9]+/ || $0 ~ /^\$vm_cpus = [0-9]+/) {
-            print "$vm_cpus = " vm_cpus
-        } else if ($0 ~ /^# \$vm_memory = [0-9]+/ || $0 ~ /^\$vm_memory = [0-9]+/) {
-            print "$vm_memory = " vm_memory
-        } else {
-            print $0
-        }
-    }' "$VAGRANT_CONF_FILE" >"$temp_file"
-    mv "$temp_file" "$VAGRANT_CONF_FILE"
+    [[ -f "$template_file" ]] || {
+        log_error "Template file not found: $template_file"
+        error_exit "Template file not found"
+    }
+    cp "$template_file" "$VAGRANT_CONF_FILE" || {
+        log_error "Failed to copy template file to $VAGRANT_CONF_FILE"
+        error_exit "Template file copy failed"
+    }
 
     # Configure public network settings if using public network
     if [[ "$network_type" == "$PUBLIC_NETWORK_TYPE" ]]; then
@@ -1627,9 +1574,7 @@ configure_vagrant_config() {
         awk -v http_proxy="$HTTP_PROXY" \
             -v https_proxy="$https_proxy_value" \
             -v no_proxy="$no_proxy_value" \
-            -v additional_no_proxy="$no_proxy_value" \
-            -v vm_cpus="$vm_cpus" \
-            -v vm_memory="$vm_memory" '
+            -v additional_no_proxy="$no_proxy_value" '
         {
             if ($0 ~ /^# \$http_proxy = ""/) {
                 print "$http_proxy = \"" http_proxy "\""
@@ -1639,10 +1584,6 @@ configure_vagrant_config() {
                 print "$no_proxy = \"" no_proxy "\""
             } else if ($0 ~ /^# \$additional_no_proxy = ""/ && additional_no_proxy != "") {
                 print "$additional_no_proxy = \"" additional_no_proxy "\""
-            } else if ($0 ~ /^# \$vm_cpus = [0-9]+/ || $0 ~ /^\$vm_cpus = [0-9]+/) {
-                print "$vm_cpus = " vm_cpus
-            } else if ($0 ~ /^# \$vm_memory = [0-9]+/ || $0 ~ /^\$vm_memory = [0-9]+/) {
-                print "$vm_memory = " vm_memory
             } else {
                 print $0
             }
@@ -1661,6 +1602,51 @@ configure_vagrant_config() {
     else
         log_info "No HTTP_PROXY set, keeping proxy settings commented out"
     fi
+
+    # Configure VM resources based on system capacity
+    log_info "Configuring VM resources based on system capacity..."
+    # Set vm_cpus based on system CPU count
+    if [[ $SYS_CPU_CORES -le 12 ]]; then
+        G_VM_CPUS=6
+    elif [[ $SYS_CPU_CORES -le 16 ]]; then
+        G_VM_CPUS=8
+    elif [[ $SYS_CPU_CORES -le 24 ]]; then
+        G_VM_CPUS=12
+    elif [[ $SYS_CPU_CORES -le 32 ]]; then
+        G_VM_CPUS=16
+    else
+        G_VM_CPUS=24 # Default for systems with more than 32 CPUs
+    fi
+
+    # Set vm_memory based on system memory
+    if [[ $SYS_MEMORY_MB -le 32768 ]]; then
+        G_VM_MEMORY=8192 # 8GB
+    elif [[ $SYS_MEMORY_MB -le 65536 ]]; then
+        G_VM_MEMORY=16384 # 16GB
+    elif [[ $SYS_MEMORY_MB -le 131072 ]]; then
+        G_VM_MEMORY=32768 # 32GB
+    else
+        G_VM_MEMORY=49152 # 48GB
+    fi
+
+    temp_file="${VAGRANT_CONF_FILE}.tmp"
+    # Add VM resource configuration to config.rb
+    awk -v vm_cpus="$G_VM_CPUS" \
+        -v vm_memory="$G_VM_MEMORY" '
+    {
+        if ($0 ~ /^# \$vm_cpus = ""/) {
+            print "$vm_cpus = " vm_cpus
+        } else if ($0 ~ /^# \$vm_memory = ""/) {
+            print "$vm_memory = " vm_memory
+        } else {
+            print $0
+        }
+    }' "$VAGRANT_CONF_FILE" >"$temp_file"
+
+    # Replace the original file
+    mv "$temp_file" "$VAGRANT_CONF_FILE"
+
+    log_info "Recommended VM resources added to config.rb: CPUs=$G_VM_CPUS, Memory=${G_VM_MEMORY}MB"
 
     log_info "Vagrant config.rb configuration completed: $VAGRANT_CONF_FILE"
 }
@@ -1718,115 +1704,116 @@ setup_kubespray_project() {
 }
 
 #######################################
-# Parse and display Vagrant configuration
+# Extract Vagrant configuration variables and set as globals
 #######################################
-parse_vagrant_config() {
-    # Declare local variables
-    local num_instances
-    local kube_master_instances
-    local upm_ctl_instances
-    local vm_cpus
-    local vm_memory
-    local kube_master_vm_cpus
-    local kube_master_vm_memory
-    local upm_control_plane_vm_cpus
-    local upm_control_plane_vm_memory
-    local kube_version
-    local os
-    local network_plugin
-    local instance_name_prefix
-    local worker_nodes
-    local vm_memory_gb
-    local kube_master_vm_memory_gb
-    local upm_control_plane_vm_memory_gb
-    local vm_network
-    local subnet_split4
-
+extract_vagrant_config_variables() {
     if [[ ! -f "$VAGRANT_CONF_FILE" ]]; then
-        log_warn "Config file not found: $VAGRANT_CONF_FILE"
-        return 1
+        error_exit "Config file not found: $VAGRANT_CONF_FILE"
     fi
 
-    # Extract configuration values from config.rb
-    num_instances=$(grep "^\$num_instances\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "$DEFAULT_VM_INSTANCES")
-    kube_master_instances=$(grep "^\$kube_master_instances\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "1")
-    upm_ctl_instances=$(grep "^\$upm_ctl_instances\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "1")
-    vm_cpus=$(grep "^\$vm_cpus\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "8")
-    vm_memory=$(grep "^\$vm_memory\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "16384")
-    kube_master_vm_cpus=$(grep "^\$kube_master_vm_cpus\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "4")
-    kube_master_vm_memory=$(grep "^\$kube_master_vm_memory\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "4096")
-    upm_control_plane_vm_cpus=$(grep "^\$upm_control_plane_vm_cpus\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "12")
-    upm_control_plane_vm_memory=$(grep "^\$upm_control_plane_vm_memory\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "24576")
-    kube_version=$(grep "^\$kube_version\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "1.33.2")
-    os=$(grep "^\$os\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "rockylinux9")
-    network_plugin=$(grep "^\$network_plugin\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "calico")
-    instance_name_prefix=$(grep "^\$instance_name_prefix\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "$DEFAULT_INSTANCE_PREFIX")
-    subnet_split4=$(grep "^\$subnet_split4\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "100")
+    log_info "Extracting Vagrant configuration variables from: $VAGRANT_CONF_FILE"
+
+    # Extract configuration values from config.rb and set as global variables
+    G_NUM_INSTANCES=$(grep "^\$num_instances\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "$DEFAULT_VM_INSTANCES")
+    G_KUBE_MASTER_INSTANCES=$(grep "^\$kube_master_instances\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "1")
+    G_UPM_CTL_INSTANCES=$(grep "^\$upm_ctl_instances\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "1")
+    G_VM_CPUS=$(grep "^\$vm_cpus\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "8")
+    G_VM_MEMORY=$(grep "^\$vm_memory\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "16384")
+    G_KUBE_MASTER_VM_CPUS=$(grep "^\$kube_master_vm_cpus\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "4")
+    G_KUBE_MASTER_VM_MEMORY=$(grep "^\$kube_master_vm_memory\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "4096")
+    G_UPM_CONTROL_PLANE_VM_CPUS=$(grep "^\$upm_control_plane_vm_cpus\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "12")
+    G_UPM_CONTROL_PLANE_VM_MEMORY=$(grep "^\$upm_control_plane_vm_memory\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "24576")
+    G_KUBE_VERSION=$(grep "^\$kube_version\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "1.33.2")
+    G_OS=$(grep "^\$os\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "rockylinux9")
+    G_NETWORK_PLUGIN=$(grep "^\$network_plugin\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "calico")
+    G_INSTANCE_NAME_PREFIX=$(grep "^\$instance_name_prefix\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "$DEFAULT_INSTANCE_PREFIX")
+    G_SUBNET_SPLIT4=$(grep "^\$subnet_split4\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "100")
 
     # Extract network configuration
-    vm_network=$(grep "^\$vm_network\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "private_network")
-    # Only public network is supported
-    if [[ "$vm_network" == "public_network" ]]; then
-        local subnet
-        local netmask
-        local gateway
-        local dns_server
-        local bridge_nic
-        subnet=$(grep "^\$subnet\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
-        netmask=$(grep "^\$netmask\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
-        gateway=$(grep "^\$gateway\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
-        dns_server=$(grep "^\$dns_server\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
-        bridge_nic=$(grep "^\$bridge_nic\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
+    G_VM_NETWORK=$(grep "^\$vm_network\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "private_network")
+
+    # Extract network-specific variables based on network type
+    if [[ "$G_VM_NETWORK" == "public_network" ]]; then
+        G_SUBNET=$(grep "^\$subnet\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
+        G_NETMASK=$(grep "^\$netmask\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
+        G_GATEWAY=$(grep "^\$gateway\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
+        G_DNS_SERVER=$(grep "^\$dns_server\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
+        G_BRIDGE_NIC=$(grep "^\$bridge_nic\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
     else
-        subnet="192.168.200"
-        netmask="255.255.255.0"
+        G_SUBNET="192.168.200"
+        G_NETMASK="255.255.255.0"
+        G_GATEWAY=""
+        G_DNS_SERVER=""
+        G_BRIDGE_NIC=""
     fi
 
-    # Calculate worker nodes
-    worker_nodes=$((num_instances - kube_master_instances - upm_ctl_instances))
-    if [[ $worker_nodes -lt 0 ]]; then
-        worker_nodes=0
+    # Ensure all numeric variables have valid default values to prevent arithmetic errors
+    G_NUM_INSTANCES=${G_NUM_INSTANCES:-$DEFAULT_VM_INSTANCES}
+    G_KUBE_MASTER_INSTANCES=${G_KUBE_MASTER_INSTANCES:-1}
+    G_UPM_CTL_INSTANCES=${G_UPM_CTL_INSTANCES:-1}
+    G_VM_CPUS=${G_VM_CPUS:-8}
+    G_VM_MEMORY=${G_VM_MEMORY:-16384}
+    G_KUBE_MASTER_VM_CPUS=${G_KUBE_MASTER_VM_CPUS:-4}
+    G_KUBE_MASTER_VM_MEMORY=${G_KUBE_MASTER_VM_MEMORY:-4096}
+    G_UPM_CONTROL_PLANE_VM_CPUS=${G_UPM_CONTROL_PLANE_VM_CPUS:-12}
+    G_UPM_CONTROL_PLANE_VM_MEMORY=${G_UPM_CONTROL_PLANE_VM_MEMORY:-24576}
+    G_SUBNET_SPLIT4=${G_SUBNET_SPLIT4:-100}
+
+    # Calculate derived values
+    G_WORKER_NODES=$((G_NUM_INSTANCES - G_KUBE_MASTER_INSTANCES - G_UPM_CTL_INSTANCES))
+    if [[ $G_WORKER_NODES -lt 0 ]]; then
+        G_WORKER_NODES=0
     fi
 
     # Convert memory from MB to GB for display
-    vm_memory_gb=$((vm_memory / 1024))
-    kube_master_vm_memory_gb=$((kube_master_vm_memory / 1024))
-    upm_control_plane_vm_memory_gb=$((upm_control_plane_vm_memory / 1024))
+    G_VM_MEMORY_GB=$((G_VM_MEMORY / 1024))
+    G_KUBE_MASTER_VM_MEMORY_GB=$((G_KUBE_MASTER_VM_MEMORY / 1024))
+    G_UPM_CONTROL_PLANE_VM_MEMORY_GB=$((G_UPM_CONTROL_PLANE_VM_MEMORY / 1024))
+
+    log_info "Vagrant configuration variables extracted successfully"
+    return 0
+}
+
+#######################################
+# Parse and display Vagrant configuration
+#######################################
+parse_vagrant_config() {
+    log_info "Parsing Vagrant configuration"
 
     # Calculate total resources
     local total_cpus
-    total_cpus=$((worker_nodes * vm_cpus + kube_master_instances * kube_master_vm_cpus + upm_ctl_instances * upm_control_plane_vm_cpus))
+    total_cpus=$((G_WORKER_NODES * G_VM_CPUS + G_KUBE_MASTER_INSTANCES * G_KUBE_MASTER_VM_CPUS + G_UPM_CTL_INSTANCES * G_UPM_CONTROL_PLANE_VM_CPUS))
     local total_memory_mb
-    total_memory_mb=$((worker_nodes * vm_memory + kube_master_instances * kube_master_vm_memory + upm_ctl_instances * upm_control_plane_vm_memory))
+    total_memory_mb=$((G_WORKER_NODES * G_VM_MEMORY + G_KUBE_MASTER_INSTANCES * G_KUBE_MASTER_VM_MEMORY + G_UPM_CTL_INSTANCES * G_UPM_CONTROL_PLANE_VM_MEMORY))
     local total_memory_gb
     total_memory_gb=$((total_memory_mb / 1024))
 
     echo -e "\n${GREEN}🎯 Kubernetes Cluster Configuration${NC}\n"
 
     echo -e "${WHITE}📋 Cluster:${NC}"
-    echo -e "   ${GREEN}•${NC} Kubernetes: ${CYAN}$kube_version${NC}"
-    echo -e "   ${GREEN}•${NC} OS: ${CYAN}$os${NC}"
-    echo -e "   ${GREEN}•${NC} Network Plugin: ${CYAN}$network_plugin${NC}"
-    echo -e "   ${GREEN}•${NC} Prefix: ${CYAN}$instance_name_prefix${NC}\n"
+    echo -e "   ${GREEN}•${NC} Kubernetes: ${CYAN}$G_KUBE_VERSION${NC}"
+    echo -e "   ${GREEN}•${NC} OS: ${CYAN}$G_OS${NC}"
+    echo -e "   ${GREEN}•${NC} Network Plugin: ${CYAN}$G_NETWORK_PLUGIN${NC}"
+    echo -e "   ${GREEN}•${NC} Prefix: ${CYAN}$G_INSTANCE_NAME_PREFIX${NC}\n"
 
     echo -e "${WHITE}🖥️  Nodes:${NC}"
-    echo -e "   ${GREEN}•${NC} Masters: ${WHITE}$kube_master_instances${NC} × ${CYAN}${kube_master_vm_cpus}C/${kube_master_vm_memory_gb}GB${NC}"
-    echo -e "   ${GREEN}•${NC} Workers: ${WHITE}$worker_nodes${NC} × ${CYAN}${vm_cpus}C/${vm_memory_gb}GB${NC}"
-    echo -e "   ${GREEN}•${NC} UPM Control: ${WHITE}$upm_ctl_instances${NC} × ${CYAN}${upm_control_plane_vm_cpus}C/${upm_control_plane_vm_memory_gb}GB${NC}\n"
+    echo -e "   ${GREEN}•${NC} Masters: ${WHITE}$G_KUBE_MASTER_INSTANCES${NC} × ${CYAN}${G_KUBE_MASTER_VM_CPUS}C/${G_KUBE_MASTER_VM_MEMORY_GB}GB${NC}"
+    echo -e "   ${GREEN}•${NC} Workers: ${WHITE}$G_WORKER_NODES${NC} × ${CYAN}${G_VM_CPUS}C/${G_VM_MEMORY_GB}GB${NC}"
+    echo -e "   ${GREEN}•${NC} UPM Control: ${WHITE}$G_UPM_CTL_INSTANCES${NC} × ${CYAN}${G_UPM_CONTROL_PLANE_VM_CPUS}C/${G_UPM_CONTROL_PLANE_VM_MEMORY_GB}GB${NC}\n"
 
     # Display network configuration
     echo -e "${WHITE}🌐 Network Configuration:${NC}"
-    echo -e "   ${GREEN}•${NC} Type: ${CYAN}$vm_network${NC}"
+    echo -e "   ${GREEN}•${NC} Type: ${CYAN}$G_VM_NETWORK${NC}"
 
-    if [[ "$vm_network" == "public_network" ]]; then
+    if [[ "$G_VM_NETWORK" == "public_network" ]]; then
         # PUBLIC_NETWORK_TYPE: Display configured bridge network information
         echo -e "   ${GREEN}•${NC} Mode: ${CYAN}Bridge Network${NC}"
         echo -e "${GREEN}✅ Network configuration summary:${NC}"
-        echo -e "${GREEN}   ├─ Starting IP:${NC} ${CYAN}$subnet.${subnet_split4}+${NC}"
-        echo -e "${GREEN}   ├─ Netmask:${NC} ${WHITE}$netmask${NC}"
-        echo -e "${GREEN}   ├─ Gateway:${NC} ${WHITE}$gateway${NC}"
-        echo -e "${GREEN}   ├─ DNS Server:${NC} ${WHITE}$dns_server${NC}"
-        echo -e "${GREEN}   └─ Bridge Interface:${NC} ${WHITE}$bridge_nic${NC}"
+        echo -e "${GREEN}   ├─ Starting IP:${NC} ${CYAN}$G_SUBNET.${G_SUBNET_SPLIT4}+${NC}"
+        echo -e "${GREEN}   ├─ Netmask:${NC} ${WHITE}$G_NETMASK${NC}"
+        echo -e "${GREEN}   ├─ Gateway:${NC} ${WHITE}$G_GATEWAY${NC}"
+        echo -e "${GREEN}   ├─ DNS Server:${NC} ${WHITE}$G_DNS_SERVER${NC}"
+        echo -e "${GREEN}   └─ Bridge Interface:${NC} ${WHITE}$G_BRIDGE_NIC${NC}"
     else
         # PRIVATE_NETWORK_TYPE: Display NAT network information
         echo -e "   ${GREEN}•${NC} Mode: ${CYAN}NAT Network${NC}"
@@ -1839,20 +1826,20 @@ parse_vagrant_config() {
     echo -e "${WHITE}The following VMs will be created with these IP addresses:${NC}\n"
 
     # Display VM preview
-    for ((i = 1; i <= num_instances; i++)); do
+    for ((i = 1; i <= G_NUM_INSTANCES; i++)); do
         local vm_ip
-        vm_ip="$subnet.$((subnet_split4 + i))"
-        local vm_name="${instance_name_prefix}-${i}"
+        vm_ip="$G_SUBNET.$((G_SUBNET_SPLIT4 + i))"
+        local vm_name="${G_INSTANCE_NAME_PREFIX}-${i}"
         if [[ $i -eq 1 ]]; then
             echo -e "${GREEN}   ├─ VM $i:${NC} ${WHITE}$vm_name${NC} → ${CYAN}$vm_ip${NC} ${YELLOW}(Master Node)${NC}"
         else
             echo -e "${GREEN}   ├─ VM $i:${NC} ${WHITE}$vm_name${NC} → ${CYAN}$vm_ip${NC} (Worker Node)"
         fi
     done
-    echo -e "${GREEN}   └─ Total:${NC} ${WHITE}$num_instances VMs${NC} from ${CYAN}$subnet.$((subnet_split4 + 1))${NC} to ${CYAN}$subnet.$((subnet_split4 + num_instances))${NC}"
+    echo -e "${GREEN}   └─ Total:${NC} ${WHITE}$G_NUM_INSTANCES VMs${NC} from ${CYAN}$G_SUBNET.$((G_SUBNET_SPLIT4 + 1))${NC} to ${CYAN}$G_SUBNET.$((G_SUBNET_SPLIT4 + G_NUM_INSTANCES))${NC}"
 
     echo -e "\n${WHITE}📊 Total Resources:${NC}"
-    echo -e "   ${GREEN}•${NC} Nodes: ${WHITE}$num_instances${NC}"
+    echo -e "   ${GREEN}•${NC} Nodes: ${WHITE}$G_NUM_INSTANCES${NC}"
     echo -e "   ${GREEN}•${NC} CPUs: ${RED}$total_cpus${NC} cores"
     echo -e "   ${GREEN}•${NC} Memory: ${RED}${total_memory_gb}GB${NC}\n"
 
@@ -1861,9 +1848,6 @@ parse_vagrant_config() {
     return 0
 }
 
-#######################################
-# Generic interactive confirmation function
-#######################################
 #######################################
 # Show setup confirmation and proceed with installation
 #######################################
@@ -1927,10 +1911,12 @@ show_setup_confirmation() {
 }
 
 #######################################
-# Show deployment confirmation and execute deployment
+# Create VM And Deploy Kubernetes Cluster
 #######################################
-show_deployment_confirmation() {
-    echo -e "\n${GREEN}🎉 Environment Setup Completed Successfully!${NC}"
+vagrant_and_run_kubespray() {
+    log_info "Starting VM creation and Kubespray deployment"
+    # Use global variables extracted from config
+    extract_vagrant_config_variables
 
     # Parse and display configuration
     if ! parse_vagrant_config; then
@@ -2158,24 +2144,18 @@ install_openebs_lvm_localpv() {
 
     # Label UPM control plane nodes (openebs.io/control-plane=enable)
     log_info "Labeling UPM control plane nodes..."
-    local instance_name_prefix
-    local kube_master_instances
-    local upm_ctl_instances
-    local num_instances
-    instance_name_prefix=$(grep "^\$instance_name_prefix\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "$DEFAULT_INSTANCE_PREFIX")
-    kube_master_instances=$(grep "^\$kube_master_instances\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "1")
-    upm_ctl_instances=$(grep "^\$upm_ctl_instances\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "1")
-    num_instances=$(grep "^\$num_instances\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "$DEFAULT_VM_INSTANCES")
+    # Use global variables extracted from config
+    extract_vagrant_config_variables
 
-    local upm_start_index=$((kube_master_instances + 1))
-    local upm_end_index=$((kube_master_instances + upm_ctl_instances))
+    local upm_start_index=$((G_KUBE_MASTER_INSTANCES + 1))
+    local upm_end_index=$((G_KUBE_MASTER_INSTANCES + G_UPM_CTL_INSTANCES))
 
     local nodes
     nodes=$("$KUBCTL" get nodes --no-headers -o custom-columns=":metadata.name")
 
     while IFS= read -r node; do
         # Extract node number from node name (assuming format: prefix-number)
-        if [[ "$node" =~ ^${instance_name_prefix}-([0-9]+)$ ]]; then
+        if [[ "$node" =~ ^${G_INSTANCE_NAME_PREFIX}-([0-9]+)$ ]]; then
             local node_num="${BASH_REMATCH[1]}"
             if [[ "$node_num" -ge "$upm_start_index" ]] && [[ "$node_num" -le "$upm_end_index" ]]; then
                 log_info "Labeling UPM control plane node: $node (node number: $node_num)"
@@ -2189,11 +2169,11 @@ install_openebs_lvm_localpv() {
     # Label worker nodes (openebs.io/node=enable)
     log_info "Labeling worker nodes..."
     local worker_start_index=$upm_start_index
-    local worker_end_index=$((num_instances))
+    local worker_end_index=$((G_NUM_INSTANCES))
 
     while IFS= read -r node; do
         # Extract node number from node name (assuming format: prefix-number)
-        if [[ "$node" =~ ^${instance_name_prefix}-([0-9]+)$ ]]; then
+        if [[ "$node" =~ ^${G_INSTANCE_NAME_PREFIX}-([0-9]+)$ ]]; then
             local node_num="${BASH_REMATCH[1]}"
             if [[ "$node_num" -ge "$worker_start_index" ]] && [[ "$node_num" -le "$worker_end_index" ]]; then
                 log_info "Labeling worker node: $node (node number: $node_num)"
@@ -2415,8 +2395,9 @@ main() {
     install_vagrant_libvirt_plugin
     setup_python_environment
     setup_kubespray_project
+    echo -e "\n${GREEN}🎉 Environment Setup Completed Successfully!${NC}"
     # Post-installation confirmation
-    show_deployment_confirmation
+    vagrant_and_run_kubespray
     # install openebs
     install_openebs_lvm_localpv
 
