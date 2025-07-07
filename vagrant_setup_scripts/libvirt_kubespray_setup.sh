@@ -779,7 +779,8 @@ check_system_requirements() {
     log_info "Checking CPU hardware virtualization support..."
     local vt_support=false
     local cpu_flags=""
-    local os_type="$(uname -s)"
+    local os_type
+    os_type="$(uname -s)"
 
     # Only perform this check on Linux systems
     if [ "$os_type" = "Linux" ]; then
@@ -1136,7 +1137,7 @@ setup_libvirt() {
 <network>
   <name>$network_name</name>
   <forward mode='bridge'/>
-  <bridge name='$bridge_name'/>
+  <bridge name='$BRIDGE_NAME'/>
 </network>
 EOF
 
@@ -1891,7 +1892,7 @@ show_setup_confirmation() {
         log_info "User confirmed installation. Starting setup process..."
         # Record installation start time
         INSTALLATION_START_TIME=$(date +%s)
-        log_info "Installation started at: $(date -d @$INSTALLATION_START_TIME '+%Y-%m-%d %H:%M:%S')"
+        log_info "Installation started at: $(date -d @"$INSTALLATION_START_TIME" '+%Y-%m-%d %H:%M:%S')"
         return 0
     else
         echo -e "\n${RED}❌ Installation cancelled by user.${NC}\n"
@@ -2033,8 +2034,8 @@ vagrant_and_run_kubespray() {
         # Display installation timing information
         if [[ -n "$INSTALLATION_START_TIME" && -n "$INSTALLATION_END_TIME" ]]; then
             echo -e "\n${WHITE}⏱️  Installation Steps Timing:${NC}"
-            echo -e "   ${GREEN}•${NC} Start Time: ${CYAN}$(date -d @$INSTALLATION_START_TIME '+%Y-%m-%d %H:%M:%S')${NC}"
-            echo -e "   ${GREEN}•${NC} End Time: ${CYAN}$(date -d @$INSTALLATION_END_TIME '+%Y-%m-%d %H:%M:%S')${NC}"
+            echo -e "   ${GREEN}•${NC} Start Time: ${CYAN}$(date -d @"$INSTALLATION_START_TIME" '+%Y-%m-%d %H:%M:%S')${NC}"
+            echo -e "   ${GREEN}•${NC} End Time: ${CYAN}$(date -d @"$INSTALLATION_END_TIME" '+%Y-%m-%d %H:%M:%S')${NC}"
             echo -e "   ${GREEN}•${NC} Duration: ${YELLOW}$(printf '%02d:%02d:%02d' $((INSTALLATION_DURATION / 3600)) $((INSTALLATION_DURATION % 3600 / 60)) $((INSTALLATION_DURATION % 60)))${NC}"
         fi
     else
@@ -2181,7 +2182,7 @@ install_lvm_localpv() {
     echo -e "${GREEN}✅ Proceeding with OpenEBS LVM LocalPV installation...${NC}\n"
     # Record installation start time
     INSTALLATION_START_TIME=$(date +%s)
-    log_info "Installation started at: $(date -d @$INSTALLATION_START_TIME '+%Y-%m-%d %H:%M:%S')"
+    log_info "Installation started at: $(date -d @"$INSTALLATION_START_TIME" '+%Y-%m-%d %H:%M:%S')"
 
     # Check if helm is installed
     if ! command -v helm >/dev/null 2>&1; then
@@ -2266,7 +2267,7 @@ install_lvm_localpv() {
 
     # Create StorageClass
     log_info "Creating OpenEBS LVM LocalPV StorageClass..."
-    cat <<EOF | "$KUBCTL" apply -f -
+    if "$KUBCTL" apply -f - <<EOF
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
@@ -2284,8 +2285,7 @@ allowedTopologies:
       - key: openebs.io/node
         values: ["enable"]
 EOF
-
-    if [[ $? -eq 0 ]]; then
+    then
         log_info "OpenEBS LVM LocalPV StorageClass created successfully"
     else
         error_exit "Failed to create OpenEBS LVM LocalPV StorageClass"
@@ -2310,8 +2310,8 @@ EOF
     # Display installation timing information
     if [[ -n "$INSTALLATION_START_TIME" && -n "$INSTALLATION_END_TIME" ]]; then
         echo -e "\n${WHITE}⏱️  Installation Steps Timing:${NC}"
-        echo -e "   ${GREEN}•${NC} Start Time: ${CYAN}$(date -d @$INSTALLATION_START_TIME '+%Y-%m-%d %H:%M:%S')${NC}"
-        echo -e "   ${GREEN}•${NC} End Time: ${CYAN}$(date -d @$INSTALLATION_END_TIME '+%Y-%m-%d %H:%M:%S')${NC}"
+        echo -e "   ${GREEN}•${NC} Start Time: ${CYAN}$(date -d @"$INSTALLATION_START_TIME" '+%Y-%m-%d %H:%M:%S')${NC}"
+        echo -e "   ${GREEN}•${NC} End Time: ${CYAN}$(date -d @"$INSTALLATION_END_TIME" '+%Y-%m-%d %H:%M:%S')${NC}"
         echo -e "   ${GREEN}•${NC} Duration: ${YELLOW}$(printf '%02d:%02d:%02d' $((INSTALLATION_DURATION / 3600)) $((INSTALLATION_DURATION % 3600 / 60)) $((INSTALLATION_DURATION % 60)))${NC}"
     fi
 
@@ -2340,7 +2340,7 @@ install_cnpg() {
 
     echo -e "${WHITE}Installation details:${NC}"
     echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$cnpg_namespace${NC}"
-    echo -e "   ${GREEN}•${NC} Helm chart: ${CYAN}$ccnpg_chart_name${NC}"
+    echo -e "   ${GREEN}•${NC} Helm chart: ${CYAN}$cnpg_chart_name${NC}"
     echo -e "   ${GREEN}•${NC} Helm chart version: ${CYAN}$cnpg_chart_version${NC}"
     echo -e "   ${GREEN}•${NC} Installation timeout: ${CYAN}5 minutes${NC}\n"
 
@@ -2356,7 +2356,8 @@ install_cnpg() {
 
     echo -e "${GREEN}✅ Proceeding with CloudNative-PG installation...${NC}\n"
     # Record installation start time
-    local INSTALLATION_START_TIME=$(date +%s)
+    local INSTALLATION_START_TIME
+    INSTALLATION_START_TIME=$(date +%s)
     log_info "Installation start time: $INSTALLATION_START_TIME"
 
     # Check if helm is installed
@@ -2369,8 +2370,6 @@ install_cnpg() {
     else
         log_info "Helm is already installed"
     fi
-
-
 
     # Add CloudNative-PG Helm repository
     log_info "Adding CloudNative-PG Helm repository..."
@@ -2457,13 +2456,14 @@ EOF
     echo -e "${GREEN}✅ CloudNative-PG installed successfully${NC}\n"
 
     # Record installation end time
-    local INSTALLATION_END_TIME=$(date +%s)
+    local INSTALLATION_END_TIME
+    INSTALLATION_END_TIME=$(date +%s)
     local INSTALLATION_DURATION=$((INSTALLATION_END_TIME - INSTALLATION_START_TIME))
     # Display installation timing information
     if [[ -n "$INSTALLATION_START_TIME" && -n "$INSTALLATION_END_TIME" ]]; then
         echo -e "\n${WHITE}⏱️  Installation Steps Timing:${NC}"
-        echo -e "   ${GREEN}•${NC} Start Time: ${CYAN}$(date -d @$INSTALLATION_START_TIME '+%Y-%m-%d %H:%M:%S')${NC}"
-        echo -e "   ${GREEN}•${NC} End Time: ${CYAN}$(date -d @$INSTALLATION_END_TIME '+%Y-%m-%d %H:%M:%S')${NC}"
+        echo -e "   ${GREEN}•${NC} Start Time: ${CYAN}$(date -d @"$INSTALLATION_START_TIME" '+%Y-%m-%d %H:%M:%S')${NC}"
+        echo -e "   ${GREEN}•${NC} End Time: ${CYAN}$(date -d @"$INSTALLATION_END_TIME" '+%Y-%m-%d %H:%M:%S')${NC}"
         echo -e "   ${GREEN}•${NC} Duration: ${YELLOW}$(printf '%02d:%02d:%02d' $((INSTALLATION_DURATION / 3600)) $((INSTALLATION_DURATION % 3600 / 60)) $((INSTALLATION_DURATION % 60)))${NC}"
     fi
 
@@ -2527,6 +2527,7 @@ display_cluster_info() {
 #######################################
 show_help() {
     cat <<EOF
+Kubespray Setup Script v${SCRIPT_VERSION}
 Usage: $0 [OPTIONS]
 
 OPTIONS:
