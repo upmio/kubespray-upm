@@ -2142,9 +2142,7 @@ install_lvm_localpv() {
     local vg_name="local_vg_dev" # default fallback
     if [[ -f "$VAGRANT_CONF_FILE" ]]; then
         local extracted_vg
-        extracted_vg=$(grep '\$kube_node_instances_volume_group' "$VAGRANT_CONF_FILE" 2>/dev/null |
-            sed 's/.*= *"\([^"]*\)".*/\1/' |
-            head -n1)
+        extracted_vg=$(grep "\$kube_node_instances_volume_group" "$VAGRANT_CONF_FILE" 2>/dev/null | sed 's/.*= *"\([^"]*\)".*/\1/' | head -n1)
         if [[ -n "$extracted_vg" ]]; then
             vg_name="$extracted_vg"
             log_info "Found volume group name '$vg_name' in $VAGRANT_CONF_FILE"
