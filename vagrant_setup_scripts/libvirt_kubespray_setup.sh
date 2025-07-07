@@ -2141,6 +2141,9 @@ install_openebs_lvm_localpv() {
     fi
 
     echo -e "${GREEN}✅ Proceeding with OpenEBS LVM LocalPV installation...${NC}\n"
+    # Record installation start time
+    INSTALLATION_START_TIME=$(date +%s)
+    log_info "Installation started at: $(date -d @$INSTALLATION_START_TIME '+%Y-%m-%d %H:%M:%S')"
 
     # Check if helm is installed
     if ! command -v helm >/dev/null 2>&1; then
@@ -2265,6 +2268,17 @@ EOF
     echo -e "   ${GREEN}•${NC} Check StorageClass: ${CYAN}kubectl get storageclass $openebs_storagclass_name${NC}"
     echo -e "   ${GREEN}•${NC} Check node labels: ${CYAN}kubectl get nodes --show-labels${NC}"
     echo -e "${GREEN}✅ OpenEBS LVM LocalPV installed successfully${NC}\n"
+
+    # Record installation end time
+    INSTALLATION_END_TIME=$(date +%s)
+    INSTALLATION_DURATION=$((INSTALLATION_END_TIME - INSTALLATION_START_TIME))
+    # Display installation timing information
+    if [[ -n "$INSTALLATION_START_TIME" && -n "$INSTALLATION_END_TIME" ]]; then
+        echo -e "\n${WHITE}⏱️  Installation Steps Timing:${NC}"
+        echo -e "   ${GREEN}•${NC} Start Time: ${CYAN}$(date -d @$INSTALLATION_START_TIME '+%Y-%m-%d %H:%M:%S')${NC}"
+        echo -e "   ${GREEN}•${NC} End Time: ${CYAN}$(date -d @$INSTALLATION_END_TIME '+%Y-%m-%d %H:%M:%S')${NC}"
+        echo -e "   ${GREEN}•${NC} Duration: ${YELLOW}$(printf '%02d:%02d:%02d' $((INSTALLATION_DURATION / 3600)) $((INSTALLATION_DURATION % 3600 / 60)) $((INSTALLATION_DURATION % 60)))${NC}"
+    fi
 
     return 0
 }
