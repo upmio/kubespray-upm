@@ -1953,6 +1953,62 @@ vagrant_and_run_kubespray() {
             error_exit "Failed to activate virtual environment"
         }
 
+        # Check vagrant box existence
+        # Get Box Name
+        local box_name=""
+        if G_OS="rockylinux9"; then
+            box_name="bento/rockylinux-9"
+        elif G_OS="ubuntu2404"; then
+            box_name="bento/ubuntu-24.04"
+        else
+            error_exit "Unsupported OS: $G_OS"
+        fi
+
+        # Check vagrant box existence with retry mechanism
+        echo -e "${YELLOW}🔍 Checking for Vagrant box...${NC}"
+        if ! vagrant box list | grep -q "$box_name"; then
+            echo -e "${RED}❌ Box not found.${NC}"
+            echo -e "${YELLOW}🔄 Adding box with retry mechanism...${NC}"
+
+            local max_retries=3
+            local retry_delay=30
+            local attempt=1
+            local success=false
+
+            while [[ $attempt -le $max_retries ]]; do
+                echo -e "${YELLOW}📦 Attempt $attempt/$max_retries: Adding Vagrant box '$box_name'...${NC}"
+
+                if vagrant box add --name "$box_name" "$box_name"; then
+                    echo -e "${GREEN}✅ Successfully added Vagrant box '$box_name'${NC}"
+                    success=true
+                    break
+                else
+                    echo -e "${RED}❌ Failed to add Vagrant box (attempt $attempt/$max_retries)${NC}"
+
+                    if [[ $attempt -lt $max_retries ]]; then
+                        echo -e "${YELLOW}⏳ Waiting ${retry_delay}s before retry...${NC}"
+                        sleep $retry_delay
+                        # Increase delay for next attempt (exponential backoff)
+                        retry_delay=$((retry_delay * 2))
+                    fi
+                fi
+
+                ((attempt++))
+            done
+
+            if [[ "$success" != "true" ]]; then
+                echo -e "${RED}💥 Failed to add Vagrant box '$box_name' after $max_retries attempts${NC}"
+                echo -e "${YELLOW}💡 Troubleshooting suggestions:${NC}"
+                echo -e "   ${YELLOW}•${NC} Check internet connection"
+                echo -e "   ${YELLOW}•${NC} Verify box name: $box_name"
+                echo -e "   ${YELLOW}•${NC} Try manual addition: ${CYAN}vagrant box add $box_name${NC}"
+                echo -e "   ${YELLOW}•${NC} Check Vagrant Cloud status: ${CYAN}https://app.vagrantup.com/bento${NC}"
+                error_exit "Failed to add Vagrant box: $box_name"
+            fi
+        else
+            echo -e "${GREEN}✅ Box found.${NC}"
+        fi
+
         if vagrant up --provider=libvirt --no-parallel; then
             echo -e "\n${GREEN}🎉 Deployment Completed Successfully!${NC}\n"
             # Configure kubectl for local access
