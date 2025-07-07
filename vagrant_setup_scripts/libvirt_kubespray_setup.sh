@@ -88,6 +88,11 @@ declare BRIDGE_INTERFACE="${BRIDGE_INTERFACE:-""}"
 # Global variable for prompt function results
 declare PROMPT_RESULT=""
 
+# Global variables for installation timing
+declare INSTALLATION_START_TIME=""
+declare INSTALLATION_END_TIME=""
+declare INSTALLATION_DURATION=""
+
 # Log file configuration
 LOG_FILE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/libvirt_kubespray_setup.log"
 
@@ -1583,6 +1588,12 @@ setup_kubespray_project() {
         error_exit "Source Vagrantfile not found"
     fi
 
+    # Record installation end time
+    INSTALLATION_END_TIME=$(date +%s)
+    INSTALLATION_DURATION=$((INSTALLATION_END_TIME - INSTALLATION_START_TIME))
+    log_info "Installation completed at: $(date -d @$INSTALLATION_END_TIME '+%Y-%m-%d %H:%M:%S')"
+    log_info "Total installation duration: $(printf '%02d:%02d:%02d' $((INSTALLATION_DURATION/3600)) $((INSTALLATION_DURATION%3600/60)) $((INSTALLATION_DURATION%60)))"
+    
     log_info "Kubespray project setup completed"
 }
 
@@ -1784,6 +1795,9 @@ show_setup_confirmation() {
     if prompt_yes_no "Do you want to proceed with the installation?"; then
         echo -e "\n${GREEN}✅ Installation confirmed. Proceeding...${NC}\n"
         log_info "User confirmed installation. Starting setup process..."
+        # Record installation start time
+        INSTALLATION_START_TIME=$(date +%s)
+        log_info "Installation started at: $(date -d @$INSTALLATION_START_TIME '+%Y-%m-%d %H:%M:%S')"
         return 0
     else
         echo -e "\n${RED}❌ Installation cancelled by user.${NC}\n"
@@ -1797,6 +1811,21 @@ show_setup_confirmation() {
 #######################################
 show_deployment_confirmation() {
     echo -e "\n${GREEN}🎉 Environment Setup Completed Successfully!${NC}"
+    
+    # Display installation timing information
+    if [[ -n "$INSTALLATION_START_TIME" && -n "$INSTALLATION_END_TIME" ]]; then
+        local start_time_formatted
+        local end_time_formatted
+        local duration_formatted
+        start_time_formatted=$(date -d @$INSTALLATION_START_TIME '+%Y-%m-%d %H:%M:%S')
+        end_time_formatted=$(date -d @$INSTALLATION_END_TIME '+%Y-%m-%d %H:%M:%S')
+        duration_formatted=$(printf '%02d:%02d:%02d' $((INSTALLATION_DURATION/3600)) $((INSTALLATION_DURATION%3600/60)) $((INSTALLATION_DURATION%60)))
+        
+        echo -e "\n${WHITE}⏱️  Installation Steps Timing:${NC}"
+        echo -e "   ${GREEN}•${NC} Start Time: ${CYAN}$start_time_formatted${NC}"
+        echo -e "   ${GREEN}•${NC} End Time: ${CYAN}$end_time_formatted${NC}"
+        echo -e "   ${GREEN}•${NC} Duration: ${YELLOW}$duration_formatted${NC}"
+    fi
 
     # Parse and display configuration
     if ! parse_vagrant_config; then
