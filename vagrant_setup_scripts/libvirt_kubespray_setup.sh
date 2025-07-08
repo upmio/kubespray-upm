@@ -1519,19 +1519,60 @@ configure_public_network_settings() {
     echo -e "${WHITE}Please provide the network configuration for public network:${NC}"
     echo
 
-    # Get starting IP for VM allocation using unified function
+    # Get starting IP with CIDR notation
+    local starting_ip_cidr
     local starting_ip
-    prompt_ip_input "Enter starting IP for VM allocation (e.g., 192.168.1.10)" "validate_vm_ip_range"
-    starting_ip="$PROMPT_RESULT"
+    local cidr_prefix
+    
+    while true; do
+        read -r -p "$(echo -e "${WHITE}Enter starting IP for VM allocation with CIDR (e.g., 192.168.1.90/24): ${NC}")" starting_ip_cidr
+        
+        # Validate CIDR format
+        if [[ "$starting_ip_cidr" =~ ^([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})/([0-9]{1,2})$ ]]; then
+            starting_ip="${BASH_REMATCH[1]}"
+            cidr_prefix="${BASH_REMATCH[2]}"
+            
+            # Validate IP address
+            if validate_vm_ip_range "$starting_ip"; then
+                # Validate CIDR prefix (8-30 for practical use)
+                if [[ "$cidr_prefix" -ge 8 && "$cidr_prefix" -le 30 ]]; then
+                    break
+                else
+                    echo -e "${RED}Invalid CIDR prefix. Please use a value between 8 and 30.${NC}"
+                fi
+            else
+                echo -e "${RED}Invalid IP address format.${NC}"
+            fi
+        else
+            echo -e "${RED}Invalid CIDR format. Please use format like 192.168.1.90/24${NC}"
+        fi
+    done
 
-    # Extract subnet and fourth octet
+    # Extract subnet and fourth octet from IP
     IFS='.' read -ra octets <<<"$starting_ip"
     subnet="${octets[0]}.${octets[1]}.${octets[2]}"
     subnet_split4="${octets[3]}"
-
-    # Get netmask using unified function
-    prompt_ip_input "Enter netmask (e.g., 255.255.255.0)"
-    netmask="$PROMPT_RESULT"
+# Convert CIDR prefix to netmask using lookup table
+    if [[ "$cidr_prefix" -ge 8 && "$cidr_prefix" -le 30 ]]; then
+        local netmasks=(
+            [8]="255.0.0.0"     [9]="255.128.0.0"   [10]="255.192.0.0"  [11]="255.224.0.0"
+            [12]="255.240.0.0"  [13]="255.248.0.0"  [14]="255.252.0.0"  [15]="255.254.0.0"
+            [16]="255.255.0.0"  [17]="255.255.128.0" [18]="255.255.192.0" [19]="255.255.224.0"
+            [20]="255.255.240.0" [21]="255.255.248.0" [22]="255.255.252.0" [23]="255.255.254.0"
+            [24]="255.255.255.0" [25]="255.255.255.128" [26]="255.255.255.192" [27]="255.255.255.224"
+            [28]="255.255.255.240" [29]="255.255.255.248" [30]="255.255.255.252"
+        )
+        netmask="${netmasks[$cidr_prefix]}"
+    else
+        log_error "Invalid CIDR prefix: $cidr_prefix. Must be between /8 and /30."
+        return 1
+    fi
+    
+    echo -e "${GREEN}✅ Parsed network configuration:${NC}"
+    echo -e "   ${GREEN}•${NC} Starting IP: ${CYAN}$starting_ip${NC}"
+    echo -e "   ${GREEN}•${NC} Subnet: ${CYAN}$subnet.0${NC}"
+    echo -e "   ${GREEN}•${NC} Netmask: ${CYAN}$netmask${NC}"
+    echo -e "   ${GREEN}•${NC} CIDR: ${CYAN}/$cidr_prefix${NC}\n"
 
     # Get gateway using unified function
     prompt_ip_input "Enter gateway IP (e.g., $subnet.1)"
@@ -2135,7 +2176,7 @@ vagrant_and_run_kubespray() {
             
             local choice
             while true; do
-                read -p "$(echo -e "${WHITE}Please choose an option [1/2/3]: ${NC}")" choice
+                read -r -p "$(echo -e "${WHITE}Please choose an option [1/2/3]: ${NC}")" choice
                 case $choice in
                     1)
                         echo -e "${YELLOW}🧹 Cleaning up existing VMs...${NC}"
