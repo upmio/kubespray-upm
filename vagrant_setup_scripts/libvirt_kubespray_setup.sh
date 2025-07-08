@@ -112,7 +112,7 @@ readonly LVM_LOCALPV_VERSION="${LVM_LOCALPV_VERSION:-"1.6.2"}"
 readonly CNPG_VERSION="${CNPG_VERSION:-"0.24.0"}"
 readonly UPM_REPO_URL="https://github.com/upmio/upm-charts.git"
 readonly UPM_VERSION="${UPM_VERSION:-"1.2.4"}"
-readonly UPM_PWD="${UPM_PWD:-"UPM@2025!"}"
+readonly UPM_PWD="${UPM_PWD:-"Upm@2024!"}"
 readonly LVMLOCALPV_STORAGECLASS_NAME="lvm-localpv"
 
 # Network configuration constants
@@ -3007,6 +3007,22 @@ EOF
     echo -e "   ${GREEN}•${NC} Check Helm release: ${CYAN}helm list -n $upm_namespace${NC}"
     echo -e "   ${GREEN}•${NC} Check deployment config: ${CYAN}kubectl get deployment upm-platform-controller-manager -n $upm_namespace -o yaml${NC}"
     echo -e "${GREEN}✅ UPM Platform installed successfully${NC}\n"
+
+    # Get worker node IP for login URL (prioritize nodes with upm.platform.node label)
+    local worker_node_ip
+    worker_node_ip=$($KUBECTL get nodes -l upm.platform.node=enable -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null)
+    [[ -n "$worker_node_ip" ]] && echo "Worker node IP: $worker_node_ip" || error_exit "Failed to get worker node IP"
+    
+    # Display UPM Platform login information
+    echo -e "${WHITE}🌐 UPM Platform Access Information:${NC}"
+    if [[ -n "$worker_node_ip" ]]; then
+        echo -e "   ${GREEN}•${NC} Login URL: ${CYAN}http://$worker_node_ip:32010${NC}"
+    else
+        echo -e "   ${GREEN}•${NC} Login URL: ${CYAN}http://<node-ip>:32010${NC}"
+        echo -e "   ${GREEN}•${NC} Note: Replace <node-ip> with any worker node's IP address${NC}"
+    fi
+    echo -e "   ${GREEN}•${NC} Username: ${CYAN}super_root${NC}"
+    echo -e "   ${GREEN}•${NC} Default Password: ${CYAN}Upm@2024!${NC}\n"
 
     # Record installation end time
     local INSTALLATION_END_TIME
