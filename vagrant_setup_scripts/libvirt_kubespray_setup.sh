@@ -3,86 +3,55 @@
 # Kubespray Libvirt Environment Setup Script v3.0
 #
 # Description:
-#   Automated Kubespray environment setup with libvirt virtualization for RHEL-based
-#   distributions. Configures complete Kubernetes development environment with
-#   networking, virtualization, and interactive deployment capabilities.
-#   Supports both full environment setup and individual component installation.
+#   Automated setup of Kubespray environment with libvirt virtualization
+#   for RHEL-based distributions. Supports complete environment setup
+#   and standalone component installation.
 #
-# Usage Modes:
-#   1. Full Setup: Complete Kubespray environment with Kubernetes cluster
-#   2. Component Installation: Install individual components on existing clusters
-#      - OpenEBS LVM LocalPV (--install-lvmlocalpv)
-#      - CloudNative-PG (--install-cnpg)
-#      - UPM Engine (--install-upm-engine)
+# Usage:
+#   Complete setup: ./libvirt_kubespray_setup.sh
+#   Environment setup: ./libvirt_kubespray_setup.sh --setup-environment
+#   Component installation: ./libvirt_kubespray_setup.sh [--install-lvmlocalpv|--install-cnpg|--install-upm-engine|--install-upm-platform]
+#
+# System Requirements:
+#   - OS: RHEL/Rocky/AlmaLinux 8/9 (x86_64)
+#   - CPU: 12+ cores, Memory: 32GB+, Disk: 200GB+
+#   - Privileges: sudo access, Network: Internet connectivity
+#
+# Key Features:
+#   ✓ Complete Kubespray environment automation
+#   ✓ libvirt/KVM virtualization environment setup
+#   ✓ Python environment and dependency management (pyenv)
+#   ✓ Kubernetes cluster deployment and validation
+#   ✓ Optional standalone component installation
+#   ✓ Interactive installation confirmation and detailed logging
+#   ✓ Automatic network configuration and connectivity testing
+#   ✓ containerd registry configuration support
 #
 # Environment Variables:
-#   BRIDGE_INTERFACE   - Network interface for bridge (optional)
+#   PYTHON_VERSION     - Python version (default: 3.12.11)
 #   HTTP_PROXY         - HTTP proxy URL
-#   HTTPS_PROXY        - HTTPS proxy URL (defaults to HTTP_PROXY)
-#   NO_PROXY           - No-proxy addresses
-#   PYTHON_VERSION     - Python version to install (default: 3.12.11)
+#   BRIDGE_INTERFACE   - Bridge interface (optional)
 #
 # Fixed Paths:
-#   KUBESPRAY_DIR      - Fixed to $(pwd)/kubespray-upm (not configurable)
-#   KUBECONFIG         - Fixed to $HOME/.kube/config
-#   KUBECTL            - Fixed to $HOME/bin/kubectl
-#
-# Network Setup:
-#   Bridge:    br0 (uses BRIDGE_INTERFACE if set)
-#   NAT:       192.168.200.0/24 (DHCP: Enabled)
-#
-# Requirements:
-#   - RHEL-based Linux (x86_64)
-#   - sudo privileges
-#   - Internet connectivity
-#   - 200GB+ disk space
-#   - 32GB+ memory
-#   - 12+ CPU cores
-#
-# Software Installed (Full Setup):
-#   - Python: 3.12.11 (pyenv)
-#   - Vagrant: 2.4.7
-#   - Libvirt/QEMU: Latest
-#   - Kubespray-UPM: Latest
-#   - OpenEBS LVM LocalPV: Latest
-#   - CloudNative-PG: 0.24.0
-#   - UPM Engine: Latest
-#   - Helm: 3.x (auto-installed if needed)
-#
-# Features:
-#   - Interactive installation with confirmation prompts
-#   - Comprehensive logging and error handling
-#   - System validation and requirement checks
-#   - Network connectivity testing
-#   - Automatic node labeling for component scheduling
-#   - Installation timing and progress tracking
-#   - Post-installation verification commands
-#   - Automatic containerd registry configuration from local file
-#
-# Containerd Registry Configuration:
-#   Optional local file: containerd-config.yml (same directory as this script)
-#   If this file exists, containerd_registries_mirrors and containerd_registry_auth
-#   sections will be automatically merged into the kubespray containerd.yml before deployment.
-#   
-#   Example containerd-config.yml format:
-#   containerd_registries_mirrors:
-#     - prefix: docker.io
-#       mirrors:
-#         - host: https://your-registry.com
-#           capabilities: ["pull", "resolve"]
-#           skip_verify: false
-#   
-#   containerd_registry_auth:
-#     - registry: your-registry.com:5000
-#       username: your-username
-#       password: your-password
+#   KUBESPRAY_DIR      - ./kubespray-upm
+#   KUBECONFIG         - $HOME/.kube/config
+#   KUBECTL            - $HOME/bin/kubectl
 #
 # Command Line Options:
-#   --help, -h              Show help message
-#   --install-lvmlocalpv   Install OpenEBS LVM LocalPV only
-#   --install-cnpg          Install CloudNative-PG only
-#   --install-upm-engine    Install UPM Engine only
-#   --install-upm-platform  Install UPM Platform only
+#   -h, --help                Display help information
+#   --setup-environment       Run environment setup process only
+#   --install-lvmlocalpv      Install OpenEBS LVM LocalPV only
+#   --install-cnpg            Install CloudNative-PG only
+#   --install-upm-engine      Install UPM Engine only
+#   --install-upm-platform    Install UPM Platform only
+#
+# containerd Configuration:
+#   Optional config file: containerd-config.yml (same directory as script)
+#   If this file exists, registry configurations will be automatically
+#   merged into kubespray deployment
+#
+# Author: Kubespray UPM Team
+# Version: 3.0
 #
 
 set -eE
@@ -106,7 +75,6 @@ readonly KUBE_DIR="${HOME}/.kube"
 export KUBECONFIG="${KUBE_DIR}/config"
 
 # Default values
-readonly DEFAULT_PYTHON_VERSION="3.12.11"
 readonly KUBESPRAY_REPO_URL="https://github.com/upmio/kubespray-upm.git"
 readonly LVM_LOCALPV_VERSION="${LVM_LOCALPV_VERSION:-"1.6.2"}"
 readonly CNPG_VERSION="${CNPG_VERSION:-"0.24.0"}"
@@ -129,7 +97,7 @@ readonly PLUGIN_DEPENDENCIES="pkgconf-pkg-config libvirt-libs libvirt-devel libx
 readonly PYENV_DEPENDENCIES="gcc make patch zlib-devel bzip2 bzip2-devel readline-devel sqlite sqlite-devel openssl-devel tk-devel libffi-devel xz-devel"
 
 # Global configuration variables (initialized from environment)
-declare PYTHON_VERSION="${PYTHON_VERSION:-$DEFAULT_PYTHON_VERSION}"
+declare PYTHON_VERSION="${PYTHON_VERSION:-"3.12.11"}"
 declare HTTP_PROXY="${HTTP_PROXY:-${http_proxy:-""}}"
 declare HTTPS_PROXY="${HTTPS_PROXY:-${https_proxy:-$HTTP_PROXY}}"
 declare NO_PROXY="${NO_PROXY:-${no_proxy:-"localhost,127.0.0.1,192.168.0.0/16,10.0.0.0/8"}}"
@@ -683,16 +651,9 @@ validate_required_variables() {
         error_exit "Variable validation failed"
     fi
 
-    # Validate Python version format
-    if ! echo "$PYTHON_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-        error_exit "Invalid Python version format: $PYTHON_VERSION (expected: X.Y.Z)"
-    fi
-
     # Validate kubespray directory permissions
-    local parent_dir
-    parent_dir="$(dirname "$KUBESPRAY_DIR")"
-    if [[ ! -w "$parent_dir" ]]; then
-        error_exit "No write permission for kubespray directory parent: $parent_dir"
+    if [[ ! -w "$KUBESPRAY_DIR" ]]; then
+        error_exit "No write permission for kubespray directory parent: $KUBESPRAY_DIR"
     fi
 
     log_info "Variable validation passed"
@@ -3101,6 +3062,7 @@ Usage: $0 [OPTIONS]
 
 OPTIONS:
   -h, --help                    Show this help message
+  --setup-environment           Run environment setup process only
   --install-lvmlocalpv          Install OpenEBS LVM LocalPV only
   --install-cnpg                Install CloudNative-PG only
   --install-upm-engine          Install UPM Engine only
@@ -3134,6 +3096,36 @@ EOF
 }
 
 #######################################
+# Setup Environment Function
+#######################################
+setup_environment() {
+    log_info "Starting environment setup process..."
+    
+    # Network and proxy validation
+    validate_network_and_proxy
+    # System validation
+    check_sudo_privileges
+    check_system_requirements
+    check_ntp_synchronization
+    # Pre-installation confirmation
+    show_setup_confirmation
+    # Installation steps
+    configure_system_security
+    install_libvirt
+    setup_libvirt
+    install_vagrant
+    install_vagrant_libvirt_plugin
+    setup_python_environment
+    setup_kubespray_project
+    echo -e "\n${GREEN}🎉 Environment Setup Completed Successfully!${NC}"
+    # Post-installation confirmation
+    vagrant_and_run_kubespray
+    
+    log_info "Environment setup completed successfully!"
+    return 0
+}
+
+#######################################
 # Parse Command Line Arguments
 #######################################
 parse_arguments() {
@@ -3147,6 +3139,10 @@ parse_arguments() {
 
     while [[ $# -gt 0 ]]; do
         case $1 in
+        --setup-environment)
+            setup_environment
+            exit 0
+            ;;
         --install-lvmlocalpv)
             install_lvm_localpv
             exit 0
@@ -3176,29 +3172,12 @@ parse_arguments() {
 # Main Function
 #######################################
 main() {
-    # Parse command line arguments first
-    parse_arguments "$@"
     # Variable validation
     validate_required_variables
-    # Network and proxy validation
-    validate_network_and_proxy
-    # System validation
-    check_sudo_privileges
-    check_system_requirements
-    check_ntp_synchronization
-    # Pre-installation confirmation
-    show_setup_confirmation
-    # Installation steps
-    configure_system_security
-    install_libvirt
-    setup_libvirt
-    install_vagrant
-    install_vagrant_libvirt_plugin
-    setup_python_environment
-    setup_kubespray_project
-    echo -e "\n${GREEN}🎉 Environment Setup Completed Successfully!${NC}"
-    # Post-installation confirmation
-    vagrant_and_run_kubespray
+    # Parse command line arguments first
+    parse_arguments "$@"
+    # Run complete setup process
+    setup_environment
     # install lvm localpv
     install_lvm_localpv
     # install cnpg
