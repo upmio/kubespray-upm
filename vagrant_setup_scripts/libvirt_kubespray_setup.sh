@@ -2257,8 +2257,9 @@ install_lvm_localpv() {
     local openebs_namespace="openebs"
     local openebs_storagclass_name="lvm-localpv"
     local openebs_chart_repo="https://openebs.github.io/lvm-localpv"
-    local openebs_release_name="openebs-lvmlocalpv"
-    local openebs_chart_name="$openebs_release_name/lvm-localpv"
+    local openebs_repo_name="openebs-lvmlocalpv"
+    local openebs_release_name="lvm-localpv"
+    local openebs_chart_name="$openebs_repo_name/lvm-localpv"
     local openebs_chart_version="1.6.2"
 
     # Get volume group name from Vagrant configuration
@@ -2360,8 +2361,8 @@ install_lvm_localpv() {
 
     # Add OpenEBS Helm repository
     log_info "Adding OpenEBS Helm repository..."
-    helm repo add "$openebs_release_name" "$openebs_chart_repo" || {
-        error_exit "Failed to add OpenEBS Helm repository: $openebs_release_name, $openebs_chart_repo"
+    helm repo add "$openebs_repo_name" "$openebs_chart_repo" || {
+        error_exit "Failed to add OpenEBS Helm repository: $openebs_repo_name, $openebs_chart_repo"
     }
     helm repo update
 
@@ -2448,8 +2449,9 @@ install_cnpg() {
     # Configuration variables
     local cnpg_namespace="cnpg-system"
     local cnpg_chart_repo="https://cloudnative-pg.github.io/charts"
-    local cnpg_release_name="cnpg"
-    local cnpg_chart_name="$cnpg_release_name/cloudnative-pg"
+    local cnpg_repo_name="cnpg"
+    local cnpg_release_name="cloudnative-pg"
+    local cnpg_chart_name="$cnpg_repo_name/cloudnative-pg"
     local cnpg_chart_version="0.24.0"
 
     # Interactive confirmation for CloudNative-PG installation
@@ -2494,7 +2496,7 @@ install_cnpg() {
 
     # Add CloudNative-PG Helm repository
     log_info "Adding CloudNative-PG Helm repository..."
-    helm repo add "$cnpg_release_name" "$cnpg_chart_repo" || {
+    helm repo add "$cnpg_repo_name" "$cnpg_chart_repo" || {
         error_exit "Failed to add CloudNative-PG Helm repository"
     }
     helm repo update
@@ -2601,8 +2603,9 @@ install_upm_engine() {
     # Configuration variables
     local upm_namespace="upm-system"
     local upm_chart_repo="https://upmio.github.io/helm-charts"
-    local upm_release_name="upm-charts"
-    local upm_engine_chart_name="$upm_release_name/upm-engine"
+    local upm_repo_name="upm-charts"
+    local upm_engine_release_name="upm-engine"
+    local upm_engine_chart_name="$upm_repo_name/upm-engine"
     local upm_engine_chart_version="1.2.4"
 
     # Interactive confirmation for UPM Engine installation
@@ -2647,7 +2650,7 @@ install_upm_engine() {
 
     # Add UPM Engine Helm repository
     log_info "Adding UPM Engine Helm repository..."
-    helm repo add "$upm_release_name" "$upm_chart_repo" || {
+    helm repo add "$upm_repo_name" "$upm_chart_repo" || {
         error_exit "Failed to add UPM Engine Helm repository"
     }
     helm repo update
@@ -2676,7 +2679,7 @@ install_upm_engine() {
     done <<<"$nodes"
 
     log_info "Installing UPM Engine via Helm..."
-    helm upgrade --install "$upm_release_name" "$upm_engine_chart_name" \
+    helm upgrade --install "$upm_engine_release_name" "$upm_engine_chart_name" \
         --namespace "$upm_namespace" \
         --create-namespace \
         --version "$upm_engine_chart_version" \
@@ -2686,7 +2689,7 @@ install_upm_engine() {
 
     # Wait for operator to be ready
     log_info "Waiting for UPM Engine to be ready..."
-    "$KUBECTL" wait --for=condition=ready pod -l "app.kubernetes.io/instance=upm-engine" -n "$upm_namespace" --timeout=300s || {
+    "$KUBECTL" wait --for=condition=ready pod -l "app.kubernetes.io/instance=$upm_engine_release_name" -n "$upm_namespace" --timeout=300s || {
         error_exit "UPM Engine failed to become ready"
     }
 
