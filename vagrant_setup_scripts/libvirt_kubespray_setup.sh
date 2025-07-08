@@ -2603,7 +2603,7 @@ install_upm_engine() {
     local upm_chart_repo="https://upmio.github.io/helm-charts"
     local upm_release_name="upm-charts"
     local upm_engine_chart_name="$upm_release_name/upm-engine"
-    local upm_engine_chart_name="1.2.4"
+    local upm_engine_chart_version="1.2.4"
 
     # Interactive confirmation for UPM Engine installation
     echo -e "\n${YELLOW}📦 UPM Engine Installation${NC}\n"
@@ -2679,7 +2679,7 @@ install_upm_engine() {
     helm upgrade --install "$upm_release_name" "$upm_engine_chart_name" \
         --namespace "$upm_namespace" \
         --create-namespace \
-        --version "$upm_engine_chart_name" \
+        --version "$upm_engine_chart_version" \
         --wait --timeout=5m || {
         error_exit "Failed to upgrade UPM Engine"
     }
@@ -2695,7 +2695,7 @@ install_upm_engine() {
     echo -e "${WHITE}📦 Components:${NC}"
     echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$upm_namespace${NC}"
     echo -e "   ${GREEN}•${NC} Chart: ${CYAN}$upm_engine_chart_name${NC}"
-    echo -e "   ${GREEN}•${NC} Chart Version: ${CYAN}$upm_engine_chart_name${NC}\n"
+    echo -e "   ${GREEN}•${NC} Chart Version: ${CYAN}$upm_engine_chart_version${NC}\n"
 
     echo -e "${WHITE}🔍 Verification Commands:${NC}"
     echo -e "   ${GREEN}•${NC} Check pods: ${CYAN}kubectl get pods -n $upm_namespace${NC}"
