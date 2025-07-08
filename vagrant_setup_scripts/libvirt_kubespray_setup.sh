@@ -39,11 +39,11 @@
 #
 # Command Line Options:
 #   -h, --help                Display help information
-#   --setup-environment       Run environment setup process only
-#   --install-lvmlocalpv      Install OpenEBS LVM LocalPV only
-#   --install-cnpg            Install CloudNative-PG only
-#   --install-upm-engine      Install UPM Engine only
-#   --install-upm-platform    Install UPM Platform only
+#   --k8s       Run environment setup process only
+#   --lvmlocalpv      Install OpenEBS LVM LocalPV only
+#   --cnpg            Install CloudNative-PG only
+#   --upm-engine      Install UPM Engine only
+#   --upm-platform    Install UPM Platform only
 #
 # containerd Configuration:
 #   Optional config file: containerd-config.yml (same directory as script)
@@ -65,7 +65,6 @@ readonly SCRIPT_VERSION="3.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 readonly SCRIPT_DIR
 readonly KUBESPRAY_DIR="${SCRIPT_DIR}/kubespray-upm"
-readonly KUBESPRAY_DIR
 readonly VAGRANT_CONF_DIR="${KUBESPRAY_DIR}/vagrant"
 readonly VAGRANT_CONF_FILE="${VAGRANT_CONF_DIR}/config.rb"
 readonly VAGRANTFILE_PATH="${KUBESPRAY_DIR}/Vagrantfile"
@@ -85,8 +84,6 @@ readonly LVMLOCALPV_STORAGECLASS_NAME="lvm-localpv"
 
 # Network configuration constants
 readonly BRIDGE_NAME="br0"
-readonly PRIVATE_NETWORK_TYPE="private"
-readonly PUBLIC_NETWORK_TYPE="public"
 readonly DEFAULT_VM_INSTANCES="5"
 readonly DEFAULT_INSTANCE_PREFIX="k8s"
 
@@ -107,6 +104,9 @@ declare BRIDGE_INTERFACE="${BRIDGE_INTERFACE:-""}"
 
 # Global variable for prompt function results
 declare PROMPT_RESULT=""
+
+# Global variable for auto-confirm mode (-y parameter)
+declare AUTO_CONFIRM=false
 
 # Global variables for installation timing
 declare INSTALLATION_START_TIME=""
@@ -228,12 +228,20 @@ safe_sudo() {
 #######################################
 
 # Unified yes/no confirmation function
-# Usage: prompt_yes_no "question" [default_answer]
+# Usage: prompt_yes_no "question" [default_answer] [force_interactive]
 # Returns: 0 for yes, 1 for no
+# force_interactive: if true, ignores AUTO_CONFIRM mode (for network bridge inputs)
 prompt_yes_no() {
     local question="$1"
     local default="${2:-}"
+    local force_interactive="${3:-false}"
     local response
+
+    # Auto-confirm mode: automatically return 'yes' unless force_interactive is true
+    if [[ "$AUTO_CONFIRM" == "true" && "$force_interactive" != "true" ]]; then
+        echo -e "${CYAN}❓ $question${NC} ${GREEN}(auto-confirmed: yes)${NC}"
+        return 0
+    fi
 
     while true; do
         if [[ -n "$default" ]]; then
@@ -633,27 +641,18 @@ validate_required_variables() {
         if ! ip link show "$BRIDGE_INTERFACE" &>/dev/null; then
             error_exit "Network interface '$BRIDGE_INTERFACE' does not exist. Available interfaces: $(ip link show | grep -E '^[0-9]+:' | grep -v 'lo:' | cut -d: -f2 | tr -d ' ' | tr '\n' ' ')"
         fi
+
+        readonly NETWORK_TYPE="public"
     else
+        readonly NETWORK_TYPE="private"
         log_info "BRIDGE_INTERFACE not set - bridge network will be skipped"
     fi
 
-    local required_vars=("PYTHON_VERSION" "KUBESPRAY_REPO_URL" "KUBESPRAY_DIR")
-    local missing_vars=()
-
-    for var in "${required_vars[@]}"; do
-        if [[ -z "${!var}" ]]; then
-            missing_vars+=("$var")
-        fi
-    done
-
-    if [[ ${#missing_vars[@]} -gt 0 ]]; then
-        log_error "Required variables are not set: ${missing_vars[*]}"
-        error_exit "Variable validation failed"
-    fi
-
     # Validate kubespray directory permissions
-    if [[ ! -w "$KUBESPRAY_DIR" ]]; then
-        error_exit "No write permission for kubespray directory parent: $KUBESPRAY_DIR"
+    if [[ -d "$KUBESPRAY_DIR" ]]; then
+        if [[ ! -w "$KUBESPRAY_DIR" ]]; then
+            error_exit "No write permission for kubespray directory parent: $KUBESPRAY_DIR"
+        fi
     fi
 
     log_info "Variable validation passed"
@@ -1130,7 +1129,7 @@ setup_libvirt() {
             echo -e "${YELLOW}🌐 Current IP:${NC} ${WHITE}$current_ip${NC}"
             echo -e "${RED}⚠️  WARNING:${NC} Configuring bridge will remove this IP address and may disconnect existing connections!\n"
 
-            if ! prompt_yes_no "Continue with bridge configuration?"; then
+            if ! prompt_yes_no "Continue with bridge configuration?" "" true; then
                 echo -e "\n${YELLOW}⏸️  Bridge configuration cancelled by user.${NC}\n"
                 exit 0
             fi
@@ -1151,7 +1150,7 @@ setup_libvirt() {
             echo -e "${YELLOW}🔧 Interface:${NC} ${WHITE}$BRIDGE_INTERFACE${NC}"
             echo -e "${RED}⚠️  WARNING:${NC} Configuring bridge will modify interface configuration and may affect network connectivity!\n"
 
-            if ! prompt_yes_no "Continue with bridge configuration?"; then
+            if ! prompt_yes_no "Continue with bridge configuration?" "" true; then
                 echo -e "\n${YELLOW}⏸️  Bridge configuration cancelled by user.${NC}\n"
                 exit 0
             fi
@@ -1590,19 +1589,9 @@ configure_vagrant_config() {
     fi
 
     # Declare local variables
-    local network_type
     local template_file
     local temp_file
-
-    if [[ -n "${BRIDGE_INTERFACE:-}" ]]; then
-        network_type="$PUBLIC_NETWORK_TYPE"
-        template_file="$KUBESPRAY_DIR/vagrant_setup_scripts/vagrant-config/public_network-config.rb"
-        log_info "BRIDGE_INTERFACE detected: $BRIDGE_INTERFACE - Using public network configuration"
-    else
-        network_type="$PRIVATE_NETWORK_TYPE"
-        template_file="$KUBESPRAY_DIR/vagrant_setup_scripts/vagrant-config/private_network-config.rb"
-        log_info "BRIDGE_INTERFACE not set - Using private network configuration"
-    fi
+    template_file="$KUBESPRAY_DIR/vagrant_setup_scripts/vagrant-config/${NETWORK_TYPE}_network-config.rb"
 
     # Copy template to config.rb
     log_info "Copying template to $VAGRANT_CONF_FILE"
@@ -1616,7 +1605,7 @@ configure_vagrant_config() {
     }
 
     # Configure public network settings if using public network
-    if [[ "$network_type" == "$PUBLIC_NETWORK_TYPE" ]]; then
+    if [[ "$NETWORK_TYPE" == "public" ]]; then
         configure_public_network_settings
     fi
 
@@ -1866,7 +1855,7 @@ parse_vagrant_config() {
     echo -e "   ${GREEN}•${NC} Type: ${CYAN}$G_VM_NETWORK${NC}"
 
     if [[ "$G_VM_NETWORK" == "public_network" ]]; then
-        # PUBLIC_NETWORK_TYPE: Display configured bridge network information
+        # PUBLIC_NETWORK: Display configured bridge network information
         echo -e "   ${GREEN}•${NC} Mode: ${CYAN}Bridge Network${NC}"
         echo -e "${GREEN}✅ Network configuration summary:${NC}"
         echo -e "${GREEN}   ├─ Starting IP:${NC} ${CYAN}$G_SUBNET.${G_SUBNET_SPLIT4}+${NC}"
@@ -1875,7 +1864,7 @@ parse_vagrant_config() {
         echo -e "${GREEN}   ├─ DNS Server:${NC} ${WHITE}$G_DNS_SERVER${NC}"
         echo -e "${GREEN}   └─ Bridge Interface:${NC} ${WHITE}$G_BRIDGE_NIC${NC}"
     else
-        # PRIVATE_NETWORK_TYPE: Display NAT network information
+        # PRIVATE_NETWORK: Display NAT network information
         echo -e "   ${GREEN}•${NC} Mode: ${CYAN}NAT Network${NC}"
         echo -e "   ${GREEN}•${NC} Subnet: ${CYAN}192.168.200.0${NC}"
         echo -e "   ${GREEN}•${NC} Netmask: ${CYAN}255.255.255.0${NC}"
@@ -3062,11 +3051,12 @@ Usage: $0 [OPTIONS]
 
 OPTIONS:
   -h, --help                    Show this help message
-  --setup-environment           Run environment setup process only
-  --install-lvmlocalpv          Install OpenEBS LVM LocalPV only
-  --install-cnpg                Install CloudNative-PG only
-  --install-upm-engine          Install UPM Engine only
-  --install-upm-platform        Install UPM Platform only
+  -y                            Auto-confirm all yes/no prompts (except network bridge configuration)
+  --k8s                 Run environment setup process only
+  --lvmlocalpv          Install OpenEBS LVM LocalPV only
+  --cnpg                Install CloudNative-PG only
+  --upm-engine          Install UPM Engine only
+  --upm-platform        Install UPM Platform only
 
 DESCRIPTION:
   This script sets up a complete Kubespray environment with libvirt virtualization
@@ -3139,6 +3129,10 @@ parse_arguments() {
 
     while [[ $# -gt 0 ]]; do
         case $1 in
+        -y)
+            AUTO_CONFIRM=true
+            shift
+            ;;
         --k8s)
             setup_environment
             exit 0
@@ -3186,8 +3180,6 @@ main() {
     install_upm_engine
     # install upm platform
     install_upm_platform
-
-    log_info "Kubespray environment setup completed successfully!"
 }
 
 #######################################
