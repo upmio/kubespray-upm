@@ -92,7 +92,9 @@ set -eE
 
 # Script metadata
 readonly SCRIPT_VERSION="3.0"
-KUBESPRAY_DIR="$(pwd)/kubespray-upm"
+readonly SCRIPT_DIR
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+readonly KUBESPRAY_DIR="${SCRIPT_DIR}/kubespray-upm"
 readonly KUBESPRAY_DIR
 readonly VAGRANT_CONF_DIR="${KUBESPRAY_DIR}/vagrant"
 readonly VAGRANT_CONF_FILE="${VAGRANT_CONF_DIR}/config.rb"
@@ -166,7 +168,7 @@ declare SYS_MEMORY_MB=""
 declare SYS_CPU_CORES=""
 
 # Log file configuration
-LOG_FILE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/libvirt_kubespray_setup.log"
+LOG_FILE="${SCRIPT_DIR}/libvirt_kubespray_setup.log"
 
 #######################################
 # Color Definitions (Global)
@@ -1966,7 +1968,7 @@ configure_containerd_registries() {
     log_info "Configuring containerd registries and authentication..."
     
     local containerd_config_file
-    containerd_config_file="$(dirname "$0")/containerd-config.yml"
+    containerd_config_file="${SCRIPT_DIR}/containerd-config.yml"
     local target_containerd_file="${KUBESPRAY_DIR}/inventory/sample/group_vars/all/containerd.yml"
     
     # Check if local containerd config file exists
@@ -2040,16 +2042,12 @@ vagrant_and_run_kubespray() {
 
         # Change to kubespray directory
         echo -e "${YELLOW}📁 Changing to kubespray directory...${NC}"
-        cd "$KUBESPRAY_DIR" || {
-            error_exit "Failed to change to kubespray directory: $KUBESPRAY_DIR"
-        }
+        cd "$KUBESPRAY_DIR" || error_exit "Failed to change to kubespray directory: $KUBESPRAY_DIR"
 
         # Activate virtual environment
         echo -e "${YELLOW}🐍 Activating Python virtual environment...${NC}"
         # shellcheck disable=SC1091
-        source venv/bin/activate || {
-            error_exit "Failed to activate virtual environment"
-        }
+        source venv/bin/activate || error_exit "Failed to activate virtual environment"
 
         # Configure containerd registries before deployment
         configure_containerd_registries
