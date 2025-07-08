@@ -2002,7 +2002,7 @@ configure_containerd_registries() {
     
     # Append local configuration to target file
     {
-        echo "\n# Containerd configuration from local file ($(basename "$containerd_config_file"))"
+        echo -e "\n# Containerd configuration from local file ($(basename "$containerd_config_file"))"
         cat "$containerd_config_file"
     } >> "$target_containerd_file"
     
