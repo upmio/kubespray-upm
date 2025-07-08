@@ -303,9 +303,6 @@
     - /etc/cni
     - /etc/nerdctl
     - "{{ nginx_config_dir }}"
-    - /etc/dnsmasq.d
-    - /etc/dnsmasq.conf
-    - /etc/dnsmasq.d-available
     - /etc/systemd/resolved.conf.d/kubespray.conf
     - /etc/etcd.env
     - /etc/calico
@@ -398,6 +395,7 @@
     - files
     - dns
 
+  # TODO: remove after release 2.29
 - name: Reset | remove host entries from /etc/hosts
   blockinfile:
     path: "/etc/hosts"
