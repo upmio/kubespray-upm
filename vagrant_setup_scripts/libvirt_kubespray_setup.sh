@@ -9,8 +9,8 @@
 #
 # Usage:
 #   Complete setup: ./libvirt_kubespray_setup.sh
-#   Environment setup: ./libvirt_kubespray_setup.sh --setup-environment
-#   Component installation: ./libvirt_kubespray_setup.sh [--install-lvmlocalpv|--install-cnpg|--install-upm-engine|--install-upm-platform]
+#   Environment setup: ./libvirt_kubespray_setup.sh --k8s
+#   Component installation: ./libvirt_kubespray_setup.sh [--lvmlocalpv|--cnpg|--upm-engine|--upm-platform]
 #
 # System Requirements:
 #   - OS: RHEL/Rocky/AlmaLinux 8/9 (x86_64)
@@ -3139,23 +3139,23 @@ parse_arguments() {
 
     while [[ $# -gt 0 ]]; do
         case $1 in
-        --setup-environment)
+        --k8s)
             setup_environment
             exit 0
             ;;
-        --install-lvmlocalpv)
+        --lvmlocalpv)
             install_lvm_localpv
             exit 0
             ;;
-        --install-cnpg)
+        --cnpg)
             install_cnpg
             exit 0
             ;;
-        --install-upm-engine)
+        --upm-engine)
             install_upm_engine
             exit 0
             ;;
-        --install-upm-platform)
+        --upm-platform)
             install_upm_platform
             exit 0
             ;;
