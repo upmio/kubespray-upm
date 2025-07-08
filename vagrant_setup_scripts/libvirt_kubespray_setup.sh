@@ -1770,8 +1770,6 @@ extract_vagrant_config_variables() {
     G_NUM_INSTANCES=$(grep "^\$num_instances\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "$DEFAULT_VM_INSTANCES")
     G_KUBE_MASTER_INSTANCES=$(grep "^\$kube_master_instances\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "1")
     G_UPM_CTL_INSTANCES=$(grep "^\$upm_ctl_instances\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "1")
-    G_VM_CPUS=$(grep "^\$vm_cpus\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "8")
-    G_VM_MEMORY=$(grep "^\$vm_memory\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "16384")
     G_KUBE_MASTER_VM_CPUS=$(grep "^\$kube_master_vm_cpus\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "4")
     G_KUBE_MASTER_VM_MEMORY=$(grep "^\$kube_master_vm_memory\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "4096")
     G_UPM_CONTROL_PLANE_VM_CPUS=$(grep "^\$upm_control_plane_vm_cpus\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "12")
@@ -1804,8 +1802,6 @@ extract_vagrant_config_variables() {
     G_NUM_INSTANCES=${G_NUM_INSTANCES:-$DEFAULT_VM_INSTANCES}
     G_KUBE_MASTER_INSTANCES=${G_KUBE_MASTER_INSTANCES:-1}
     G_UPM_CTL_INSTANCES=${G_UPM_CTL_INSTANCES:-1}
-    G_VM_CPUS=${G_VM_CPUS:-8}
-    G_VM_MEMORY=${G_VM_MEMORY:-16384}
     G_KUBE_MASTER_VM_CPUS=${G_KUBE_MASTER_VM_CPUS:-4}
     G_KUBE_MASTER_VM_MEMORY=${G_KUBE_MASTER_VM_MEMORY:-4096}
     G_UPM_CONTROL_PLANE_VM_CPUS=${G_UPM_CONTROL_PLANE_VM_CPUS:-12}
