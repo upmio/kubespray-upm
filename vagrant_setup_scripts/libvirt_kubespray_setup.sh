@@ -472,7 +472,7 @@ select_network_interface() {
         if [[ $line =~ ^([^[:space:]]+)[[:space:]]+([^[:space:]]+)[[:space:]]+([^[:space:]]+)[[:space:]]*(.*)$ ]]; then
             interface_name="${BASH_REMATCH[1]}"
             interface_state="${BASH_REMATCH[2]}"
-            interface_mac="${BASH_REMATCH[3]}\t"
+            interface_mac="${BASH_REMATCH[3]}"
             
             # Skip loopback, bridge, and virtual interfaces
             if [[ "$interface_name" != "lo" && 
