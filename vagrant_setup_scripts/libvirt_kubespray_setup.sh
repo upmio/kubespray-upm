@@ -48,7 +48,7 @@ readonly KUBESPRAY_DIR
 readonly VAGRANT_CONF_DIR="${KUBESPRAY_DIR}/vagrant"
 readonly VAGRANT_CONF_FILE="${VAGRANT_CONF_DIR}/config.rb"
 readonly VAGRANTFILE_PATH="${KUBESPRAY_DIR}/Vagrantfile"
-readonly KUBCTL="${HOME}/.local/bin/kubectl"
+readonly KUBECTL="${HOME}/.local/bin/kubectl"
 export KUBECONFIG="${HOME}/.kube/config"
 
 # Default values
@@ -2123,11 +2123,11 @@ configure_kubectl_access() {
         log_info "kubectl configuration completed successfully ($success_count/$total_steps steps)"
 
         # Test kubectl connection
-        if [[ -x "$KUBCTL" && -f "$KUBECONFIG" ]]; then
+        if [[ -x "$KUBECTL" && -f "$KUBECONFIG" ]]; then
             log_info "Testing kubectl connection..."
             for attempt in {1..4}; do
                 log_info "Attempt $attempt/4: Testing kubectl connection..."
-                if timeout 10 "$KUBCTL" --kubeconfig="$KUBECONFIG" cluster-info &>/dev/null; then
+                if timeout 10 "$KUBECTL" --kubeconfig="$KUBECONFIG" cluster-info &>/dev/null; then
                     log_info "kubectl connection test successful"
                     break
                 elif [[ $attempt -eq 4 ]]; then
@@ -2223,7 +2223,7 @@ install_lvm_localpv() {
     local upm_end_index=$((G_KUBE_MASTER_INSTANCES + G_UPM_CTL_INSTANCES))
 
     local nodes
-    nodes=$("$KUBCTL" get nodes --no-headers -o custom-columns=":metadata.name")
+    nodes=$("$KUBECTL" get nodes --no-headers -o custom-columns=":metadata.name")
 
     while IFS= read -r node; do
         # Extract node number from node name (assuming format: prefix-number)
@@ -2231,7 +2231,7 @@ install_lvm_localpv() {
             local node_num="${BASH_REMATCH[1]}"
             if [[ "$node_num" -ge "$upm_start_index" ]] && [[ "$node_num" -le "$upm_end_index" ]]; then
                 log_info "Labeling UPM control plane node: $node (node number: $node_num)"
-                "$KUBCTL" label node "$node" "openebs.io/control-plane=enable" --overwrite || {
+                "$KUBECTL" label node "$node" "openebs.io/control-plane=enable" --overwrite || {
                     error_exit "Failed to label UPM control plane node: $node"
                 }
             fi
@@ -2249,7 +2249,7 @@ install_lvm_localpv() {
             local node_num="${BASH_REMATCH[1]}"
             if [[ "$node_num" -ge "$worker_start_index" ]] && [[ "$node_num" -le "$worker_end_index" ]]; then
                 log_info "Labeling worker node: $node"
-                "$KUBCTL" label node "$node" "openebs.io/node=enable" --overwrite || {
+                "$KUBECTL" label node "$node" "openebs.io/node=enable" --overwrite || {
                     error_exit "Failed to label worker node: $node"
                 }
             fi
@@ -2279,14 +2279,14 @@ install_lvm_localpv() {
 
     # Wait for pods to be ready
     log_info "Waiting for OpenEBS pods to be ready..."
-    "$KUBCTL" wait --for=condition=ready pod -l release="$openebs_release_name" -n "$openebs_namespace" --timeout=600s || {
+    "$KUBECTL" wait --for=condition=ready pod -l release="$openebs_release_name" -n "$openebs_namespace" --timeout=600s || {
         error_exit "OpenEBS pods failed to become ready"
     }
     log_info "OpenEBS LVM LocalPV installed successfully"
 
     # Create StorageClass
     log_info "Creating OpenEBS LVM LocalPV StorageClass..."
-    if "$KUBCTL" apply -f - <<EOF
+    if "$KUBECTL" apply -f - <<EOF
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
@@ -2405,7 +2405,7 @@ install_cnpg() {
     local cnpg_end_index=$((G_KUBE_MASTER_INSTANCES + G_UPM_CTL_INSTANCES))
 
     local nodes
-    nodes=$("$KUBCTL" get nodes --no-headers -o custom-columns=":metadata.name")
+    nodes=$("$KUBECTL" get nodes --no-headers -o custom-columns=":metadata.name")
 
     while IFS= read -r node; do
         # Extract node number from node name (assuming format: prefix-number)
@@ -2413,7 +2413,7 @@ install_cnpg() {
             local node_num="${BASH_REMATCH[1]}"
             if [[ "$node_num" -ge "$cnpg_start_index" ]] && [[ "$node_num" -le "$cnpg_end_index" ]]; then
                 log_info "Labeling CloudNative-PG control plane node: $node"
-                "$KUBCTL" label node "$node" "cnpg.io/control-plane=enable" --overwrite || {
+                "$KUBECTL" label node "$node" "cnpg.io/control-plane=enable" --overwrite || {
                     error_exit "Failed to label CloudNative-PG control plane node: $node"
                 }
             fi
@@ -2456,7 +2456,7 @@ EOF
 
     # Wait for operator to be ready
     log_info "Waiting for CloudNative-PG operator to be ready..."
-    "$KUBCTL" wait --for=condition=ready pod -l app.kubernetes.io/instance="$cnpg_release_name" -n "$cnpg_namespace" --timeout=300s || {
+    "$KUBECTL" wait --for=condition=ready pod -l app.kubernetes.io/instance="$cnpg_release_name" -n "$cnpg_namespace" --timeout=300s || {
         error_exit "CloudNative-PG operator failed to become ready"
     }
 
@@ -2499,7 +2499,7 @@ display_cluster_info() {
 
     # Display cluster info
     echo -e "${WHITE}📊 Cluster Status:${NC}"
-    if timeout 30 "$KUBCTL" cluster-info 2>/dev/null; then
+    if timeout 30 "$KUBECTL" cluster-info 2>/dev/null; then
         echo
     else
         echo -e "   ${RED}•${NC} ${RED}Unable to connect to cluster${NC}"
@@ -2508,7 +2508,7 @@ display_cluster_info() {
 
     # Display nodes
     echo -e "${WHITE}🖥️  Nodes:${NC}"
-    if timeout 30 "$KUBCTL" get nodes -o wide 2>/dev/null; then
+    if timeout 30 "$KUBECTL" get nodes -o wide 2>/dev/null; then
         echo
     else
         echo -e "   ${RED}•${NC} ${RED}Unable to retrieve node information${NC}\n"
@@ -2516,7 +2516,7 @@ display_cluster_info() {
 
     # Display namespaces
     echo -e "${WHITE}📦 Namespaces:${NC}"
-    if timeout 30 "$KUBCTL" get namespaces 2>/dev/null; then
+    if timeout 30 "$KUBECTL" get namespaces 2>/dev/null; then
         echo
     else
         echo -e "   ${RED}•${NC} ${RED}Unable to retrieve namespace information${NC}\n"
@@ -2524,7 +2524,7 @@ display_cluster_info() {
 
     # Display pods in kube-system
     echo -e "${WHITE}🔧 System Pods (kube-system):${NC}"
-    if timeout 30 "$KUBCTL" get pods -n kube-system 2>/dev/null; then
+    if timeout 30 "$KUBECTL" get pods -n kube-system 2>/dev/null; then
         echo
     else
         echo -e "   ${RED}•${NC} ${RED}Unable to retrieve pod information${NC}\n"
@@ -2533,7 +2533,7 @@ display_cluster_info() {
     # Display kubectl usage instructions
     echo -e "${WHITE}💡 kubectl Usage:${NC}"
     echo -e "   ${GREEN}•${NC} Config: ${CYAN}$KUBECONFIG${NC}"
-    echo -e "   ${GREEN}•${NC} Binary: ${CYAN}$KUBCTL${NC}"
+    echo -e "   ${GREEN}•${NC} Binary: ${CYAN}$KUBECTL${NC}"
     echo -e "   ${GREEN}•${NC} Get nodes: ${CYAN}kubectl get nodes${NC}"
     echo -e "   ${GREEN}•${NC} Get pods: ${CYAN}kubectl get pods --all-namespaces${NC}"
     echo -e "   ${GREEN}•${NC} Get services: ${CYAN}kubectl get services --all-namespaces${NC}\n"
