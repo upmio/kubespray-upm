@@ -38,12 +38,13 @@
 #   KUBECTL            - $HOME/bin/kubectl
 #
 # Command Line Options:
-#   -h, --help                Display help information
-#   --k8s       Run environment setup process only
-#   --lvmlocalpv      Install OpenEBS LVM LocalPV only
-#   --cnpg            Install CloudNative-PG only
-#   --upm-engine      Install UPM Engine only
-#   --upm-platform    Install UPM Platform only
+#   -h, --help               Display help information
+#   -y, --auto-confirm       Auto-confirm all prompts (default: false)
+#   --k8s                    Run environment setup process only
+#   --lvmlocalpv             Install OpenEBS LVM LocalPV only
+#   --cnpg                   Install CloudNative-PG only
+#   --upm-engine             Install UPM Engine only
+#   --upm-platform           Install UPM Platform only
 #
 # containerd Configuration:
 #   Optional config file: containerd-config.yml (same directory as script)
