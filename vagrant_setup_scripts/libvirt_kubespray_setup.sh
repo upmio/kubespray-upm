@@ -82,6 +82,7 @@
 #   --install-lvmlocalpv   Install OpenEBS LVM LocalPV only
 #   --install-cnpg          Install CloudNative-PG only
 #   --install-upm-engine    Install UPM Engine only
+#   --install-upm-platform  Install UPM Platform only
 #
 
 set -eE
@@ -107,6 +108,12 @@ export KUBECONFIG="${KUBE_DIR}/config"
 # Default values
 readonly DEFAULT_PYTHON_VERSION="3.12.11"
 readonly KUBESPRAY_REPO_URL="https://github.com/upmio/kubespray-upm.git"
+readonly LVM_LOCALPV_VERSION="${LVM_LOCALPV_VERSION:-"1.6.2"}"
+readonly CNPG_VERSION="${CNPG_VERSION:-"0.24.0"}"
+readonly UPM_REPO_URL="https://github.com/upmio/upm-charts.git"
+readonly UPM_VERSION="${UPM_VERSION:-"1.2.4"}"
+readonly UPM_PWD="${UPM_PWD:-"UPM@2025!"}"
+readonly LVMLOCALPV_STORAGECLASS_NAME="lvm-localpv"
 
 # Network configuration constants
 readonly BRIDGE_NAME="br0"
@@ -2350,12 +2357,10 @@ install_lvm_localpv() {
 
     echo -e "${YELLOW}🔧 Installing OpenEBS LVM LocalPV...${NC}"
     local openebs_namespace="openebs"
-    local openebs_storagclass_name="lvm-localpv"
     local openebs_chart_repo="https://openebs.github.io/lvm-localpv"
     local openebs_repo_name="openebs-lvmlocalpv"
     local openebs_release_name="lvm-localpv"
     local openebs_chart_name="$openebs_repo_name/lvm-localpv"
-    local openebs_chart_version="1.6.2"
 
     # Get volume group name from Vagrant configuration
     local vg_name="local_vg_dev" # default fallback
@@ -2381,8 +2386,8 @@ install_lvm_localpv() {
     echo -e "${WHITE}Installation details:${NC}"
     echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$openebs_namespace${NC}"
     echo -e "   ${GREEN}•${NC} Helm chart: ${CYAN}$openebs_chart_name${NC}"
-    echo -e "   ${GREEN}•${NC} Helm chart version: ${CYAN}$openebs_chart_version${NC}"
-    echo -e "   ${GREEN}•${NC} StorageClass: ${CYAN}$openebs_storagclass_name${NC}"
+    echo -e "   ${GREEN}•${NC} Helm chart version: ${CYAN}$LVM_LOCALPV_VERSION${NC}"
+    echo -e "   ${GREEN}•${NC} StorageClass: ${CYAN}$LVMLOCALPV_STORAGECLASS_NAME${NC}"
     echo -e "   ${GREEN}•${NC} VolumeGroup: ${CYAN}$vg_name${NC}"
     echo -e "   ${GREEN}•${NC} Installation timeout: ${CYAN}10 minutes${NC}\n"
 
@@ -2464,7 +2469,7 @@ install_lvm_localpv() {
     # Install OpenEBS LVM LocalPV
     log_info "Installing OpenEBS LVM LocalPV with Helm..."
     helm upgrade --install "$openebs_release_name" "$openebs_chart_name" \
-        --version "$openebs_chart_version" \
+        --version "$LVM_LOCALPV_VERSION" \
         --namespace "$openebs_namespace" \
         --create-namespace \
         --set lvmPlugin.allowedTopologies='kubernetes\.io/hostname\,openebs\.io/node' \
@@ -2488,7 +2493,7 @@ install_lvm_localpv() {
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
-  name: $openebs_storagclass_name
+  name: $LVMLOCALPV_STORAGECLASS_NAME
 allowVolumeExpansion: true
 volumeBindingMode: WaitForFirstConsumer
 parameters:
@@ -2512,12 +2517,12 @@ EOF
     echo -e "\n${GREEN}🎉 OpenEBS LVM LocalPV Installation Completed!${NC}\n"
     echo -e "${WHITE}📦 Components:${NC}"
     echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$openebs_namespace${NC}"
-    echo -e "   ${GREEN}•${NC} StorageClass: ${CYAN}$openebs_storagclass_name${NC}"
+    echo -e "   ${GREEN}•${NC} StorageClass: ${CYAN}$LVMLOCALPV_STORAGECLASS_NAME${NC}"
     echo -e "   ${GREEN}•${NC} Volume Group: ${CYAN}$vg_name${NC}\n"
 
     echo -e "${WHITE}🔍 Verification Commands:${NC}"
     echo -e "   ${GREEN}•${NC} Check pods: ${CYAN}kubectl get pods -n $openebs_namespace${NC}"
-    echo -e "   ${GREEN}•${NC} Check StorageClass: ${CYAN}kubectl get storageclass $openebs_storagclass_name${NC}"
+    echo -e "   ${GREEN}•${NC} Check StorageClass: ${CYAN}kubectl get storageclass $LVMLOCALPV_STORAGECLASS_NAME${NC}"
     echo -e "   ${GREEN}•${NC} Check node labels: ${CYAN}kubectl get nodes --show-labels${NC}"
     echo -e "${GREEN}✅ OpenEBS LVM LocalPV installed successfully${NC}\n"
 
@@ -2547,7 +2552,6 @@ install_cnpg() {
     local cnpg_repo_name="cnpg"
     local cnpg_release_name="cloudnative-pg"
     local cnpg_chart_name="$cnpg_repo_name/cloudnative-pg"
-    local cnpg_chart_version="0.24.0"
 
     # Interactive confirmation for CloudNative-PG installation
     echo -e "\n${YELLOW}📦 CloudNative-PG Installation${NC}\n"
@@ -2559,7 +2563,7 @@ install_cnpg() {
     echo -e "${WHITE}Installation details:${NC}"
     echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$cnpg_namespace${NC}"
     echo -e "   ${GREEN}•${NC} Helm chart: ${CYAN}$cnpg_chart_name${NC}"
-    echo -e "   ${GREEN}•${NC} Helm chart version: ${CYAN}$cnpg_chart_version${NC}"
+    echo -e "   ${GREEN}•${NC} Helm chart version: ${CYAN}$CNPG_VERSION${NC}"
     echo -e "   ${GREEN}•${NC} Installation timeout: ${CYAN}5 minutes${NC}\n"
 
     echo -e "${YELLOW}⚠️  Note: This installation will:${NC}"
@@ -2644,7 +2648,7 @@ EOF
     helm upgrade --install "$cnpg_release_name" "$cnpg_chart_name" \
         --namespace "$cnpg_namespace" \
         --create-namespace \
-        --version "$cnpg_chart_version" \
+        --version "$CNPG_VERSION" \
         --values "$values_file" \
         --wait --timeout=5m || {
         error_exit "Failed to upgrade CloudNative-PG"
@@ -2664,7 +2668,7 @@ EOF
     echo -e "${WHITE}📦 Components:${NC}"
     echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$cnpg_namespace${NC}"
     echo -e "   ${GREEN}•${NC} Chart: ${CYAN}$cnpg_chart_name${NC}"
-    echo -e "   ${GREEN}•${NC} Chart Version: ${CYAN}$cnpg_chart_version${NC}\n"
+    echo -e "   ${GREEN}•${NC} Chart Version: ${CYAN}$CNPG_VERSION${NC}\n"
 
     echo -e "${WHITE}🔍 Verification Commands:${NC}"
     echo -e "   ${GREEN}•${NC} Check pods: ${CYAN}kubectl get pods -n $cnpg_namespace${NC}"
@@ -2701,7 +2705,6 @@ install_upm_engine() {
     local upm_repo_name="upm-charts"
     local upm_engine_release_name="upm-engine"
     local upm_engine_chart_name="$upm_repo_name/upm-engine"
-    local upm_engine_chart_version="1.2.4"
 
     # Interactive confirmation for UPM Engine installation
     echo -e "\n${YELLOW}📦 UPM Engine Installation${NC}\n"
@@ -2713,7 +2716,7 @@ install_upm_engine() {
     echo -e "${WHITE}Installation details:${NC}"
     echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$upm_namespace${NC}"
     echo -e "   ${GREEN}•${NC} Helm chart: ${CYAN}$upm_engine_chart_name${NC}"
-    echo -e "   ${GREEN}•${NC} Helm chart version: ${CYAN}$upm_engine_chart_name${NC}"
+    echo -e "   ${GREEN}•${NC} Helm chart version: ${CYAN}$UPM_VERSION${NC}"
     echo -e "   ${GREEN}•${NC} Installation timeout: ${CYAN}5 minutes${NC}\n"
 
     echo -e "${YELLOW}⚠️  Note: This installation will:${NC}"
@@ -2819,6 +2822,245 @@ install_upm_engine() {
 }
 
 #######################################
+# Install UPM Platform
+#######################################
+install_upm_platform() {
+    log_info "Starting UPM Platform installation..."
+
+    # Configuration variables
+    local upm_namespace="upm-system"
+    local upm_chart_repo="https://upmio.github.io/helm-charts"
+    local upm_repo_name="upm-charts"
+    local upm_platform_release_name="upm-platform"
+    local upm_platform_chart_name="$upm_repo_name/upm-platform"
+
+    # Interactive confirmation for UPM Platform installation
+    echo -e "\n${YELLOW}📦 UPM Platform Installation${NC}\n"
+    echo -e "${WHITE}This will install UPM Platform with the following components:${NC}"
+    echo -e "   ${GREEN}•${NC} UPM Platform Helm chart"
+    echo -e "   ${GREEN}•${NC} Node labels for UPM Platform scheduling"
+    echo -e "   ${GREEN}•${NC} Helm repository configuration\n"
+
+    echo -e "${WHITE}Installation details:${NC}"
+    echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$upm_namespace${NC}"
+    echo -e "   ${GREEN}•${NC} Helm chart: ${CYAN}$upm_platform_chart_name${NC}"
+    echo -e "   ${GREEN}•${NC} Helm chart version: ${CYAN}$UPM_VERSION${NC}"
+    echo -e "   ${GREEN}•${NC} Installation timeout: ${CYAN}15 minutes${NC}\n"
+
+    echo -e "${YELLOW}⚠️  Note: This installation will:${NC}"
+    echo -e "   ${YELLOW}•${NC} Add node labels to worker nodes"
+    echo -e "   ${YELLOW}•${NC} Install Helm if not already present\n"
+
+    if ! prompt_yes_no "Do you want to proceed with UPM Platform installation?"; then
+        echo -e "${YELLOW}⏸️  UPM Platform installation skipped.${NC}\n"
+        log_info "UPM Platform installation skipped by user"
+        return 0
+    fi
+
+    echo -e "${GREEN}✅ Proceeding with UPM Platform installation...${NC}\n"
+    # Record installation start time
+    local INSTALLATION_START_TIME
+    INSTALLATION_START_TIME=$(date +%s)
+    log_info "Installation start time: $INSTALLATION_START_TIME"
+
+    # Check if helm is installed
+    if ! command -v helm >/dev/null 2>&1; then
+        log_info "Installing Helm..."
+        curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+        chmod 700 get_helm.sh
+        ./get_helm.sh
+        rm -f get_helm.sh
+    else
+        log_info "Helm is already installed"
+    fi
+
+    # Add UPM Platform Helm repository
+    log_info "Adding UPM Platform Helm repository..."
+    helm repo add "$upm_repo_name" "$upm_chart_repo" || {
+        error_exit "Failed to add UPM Platform Helm repository"
+    }
+    helm repo update
+
+    log_info "Labeling UPM Platform worker nodes..."
+    # Use global variables extracted from config
+    extract_vagrant_config_variables
+
+    local worker_start_index=$((G_KUBE_MASTER_INSTANCES + G_UPM_CTL_INSTANCES + 1))
+    local worker_end_index=$((G_KUBE_MASTER_INSTANCES + G_UPM_CTL_INSTANCES + G_KUBE_NODE_INSTANCES))
+
+    local nodes
+    nodes=$("$KUBECTL" get nodes --no-headers -o custom-columns=":metadata.name")
+
+    while IFS= read -r node; do
+        # Extract node number from node name (assuming format: prefix-number)
+        if [[ "$node" =~ ^${G_INSTANCE_NAME_PREFIX}-([0-9]+)$ ]]; then
+            local node_num="${BASH_REMATCH[1]}"
+            if [[ "$node_num" -ge "$worker_start_index" ]] && [[ "$node_num" -le "$worker_end_index" ]]; then
+                log_info "Labeling UPM Platform worker node: $node"
+                "$KUBECTL" label node "$node" "upm.platform.node=enable" --overwrite || {
+                    error_exit "Failed to label UPM Platform worker node: $node"
+                }
+            fi
+        fi
+    done <<<"$nodes"
+
+    # Create values file
+    local values_file="/tmp/upm_platform_values.yaml"
+    cat >"$values_file" <<EOF
+nginx:
+  service:
+    type: NodePort
+    ports:
+      http: 80
+    nodePorts:
+      http: 32010
+ui:
+  image:
+    tag: ${UPM_VERSION}
+apiserver:
+  upm:
+    mysqlUser:
+      name: "upm"
+      password: "${UPM_PWD}"
+    serviceGroup:
+      elasticsearch:
+        enabled: true
+      kafka:
+        enabled: true
+      mysql:
+        enabled: true
+      postgresql:
+        enabled: true
+      redis:
+        enabled: true
+      redis-cluster:
+        enabled: true
+      zookeeper:
+        enabled: true
+      cnpg:
+        enabled: true
+      innodb-cluster:
+        enabled: true
+  mysql:
+    auth:
+      rootPassword: "${UPM_PWD}"
+    primary:
+      persistence:
+        storageClass: "${LVMLOCALPV_STORAGECLASS_NAME}"
+      resourcesPreset: "large"
+    resources: {}
+  redis:
+    master:
+      persistence:
+        enabled: true
+        storageClass: "${LVMLOCALPV_STORAGECLASS_NAME}"
+      resources: {}
+    auth:
+      password: "${UPM_PWD}"
+  nacos:
+    service:
+      type: NodePort
+      loadBalancerIP: ""
+    persistence:
+      storageClass: "${LVMLOCALPV_STORAGECLASS_NAME}"
+    mysql:
+      external:
+        mysqlMasterHost: "3306"
+        mysqlMasterPassword: "${UPM_PWD}"
+  common:
+    image:
+      tag: ${UPM_VERSION}
+  gateway:
+    image:
+      tag: ${UPM_VERSION}
+  auth:
+    image:
+      tag: ${UPM_VERSION}
+  operatelog:
+    image:
+      tag: ${UPM_VERSION}
+  resource:
+    image:
+      tag: ${UPM_VERSION}
+  user:
+    image:
+      tag: ${UPM_VERSION}
+  elasticsearch-ms:
+    image:
+      tag: ${UPM_VERSION}
+  kafka-ms:
+    image:
+      tag: ${UPM_VERSION}
+  mysql-ms:
+    image:
+      tag: ${UPM_VERSION}
+  postgresql-ms:
+    image:
+      tag: ${UPM_VERSION}
+  redis-ms:
+    image:
+      tag: ${UPM_VERSION}
+  redis-cluster-ms:
+    image:
+      tag: ${UPM_VERSION}
+  zookeeper-ms:
+    image:
+      tag: ${UPM_VERSION}
+  cnpg-ms:
+    image:
+      tag: ${UPM_VERSION}
+  innodb-cluster-ms:
+    image:
+      tag: ${UPM_VERSION}
+EOF
+
+    log_info "Installing UPM Platform via Helm..."
+    helm upgrade --install "$upm_platform_release_name" "$upm_platform_chart_name" \
+        --namespace "$upm_namespace" \
+        --create-namespace \
+        --version "$UPM_VERSION" \
+        --values "$values_file" \
+        --wait --timeout=5m || {
+        error_exit "Failed to upgrade UPM Platform"
+    }
+
+    # Wait for platform to be ready
+    log_info "Waiting for UPM Platform to be ready..."
+    "$KUBECTL" wait --for=condition=ready pod -l "app.kubernetes.io/instance=$upm_platform_release_name" -n "$upm_namespace" --timeout=300s || {
+        error_exit "UPM Platform failed to become ready"
+    }
+
+    # Display installation status
+    echo -e "\n${GREEN}🎉 UPM Platform Installation Completed!${NC}\n"
+    echo -e "${WHITE}📦 Components:${NC}"
+    echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$upm_namespace${NC}"
+    echo -e "   ${GREEN}•${NC} Chart: ${CYAN}$upm_platform_chart_name${NC}"
+    echo -e "   ${GREEN}•${NC} Chart Version: ${CYAN}$upm_platform_chart_version${NC}\n"
+
+    echo -e "${WHITE}🔍 Verification Commands:${NC}"
+    echo -e "   ${GREEN}•${NC} Check pods: ${CYAN}kubectl get pods -n $upm_namespace${NC}"
+    echo -e "   ${GREEN}•${NC} Check platform logs: ${CYAN}kubectl logs -n $upm_namespace deployment/upm-platform-controller-manager${NC}"
+    echo -e "   ${GREEN}•${NC} Check CRDs: ${CYAN}kubectl get crd | grep upm${NC}"
+    echo -e "   ${GREEN}•${NC} Check Helm release: ${CYAN}helm list -n $upm_namespace${NC}"
+    echo -e "   ${GREEN}•${NC} Check deployment config: ${CYAN}kubectl get deployment upm-platform-controller-manager -n $upm_namespace -o yaml${NC}"
+    echo -e "${GREEN}✅ UPM Platform installed successfully${NC}\n"
+
+    # Record installation end time
+    local INSTALLATION_END_TIME
+    INSTALLATION_END_TIME=$(date +%s)
+    local INSTALLATION_DURATION=$((INSTALLATION_END_TIME - INSTALLATION_START_TIME))
+    # Display installation timing information
+    if [[ -n "$INSTALLATION_START_TIME" && -n "$INSTALLATION_END_TIME" ]]; then
+        echo -e "\n${WHITE}⏱️  Installation Steps Timing:${NC}"
+        echo -e "   ${GREEN}•${NC} Start Time: ${CYAN}$(date -d @"$INSTALLATION_START_TIME" '+%Y-%m-%d %H:%M:%S')${NC}"
+        echo -e "   ${GREEN}•${NC} End Time: ${CYAN}$(date -d @"$INSTALLATION_END_TIME" '+%Y-%m-%d %H:%M:%S')${NC}"
+        echo -e "   ${GREEN}•${NC} Duration: ${YELLOW}$(printf '%02d:%02d:%02d' $((INSTALLATION_DURATION / 3600)) $((INSTALLATION_DURATION % 3600 / 60)) $((INSTALLATION_DURATION % 60)))${NC}"
+    fi
+
+    return 0
+}
+
+#######################################
 # Display cluster information
 #######################################
 display_cluster_info() {
@@ -2879,23 +3121,18 @@ Kubespray Setup Script v${SCRIPT_VERSION}
 Usage: $0 [OPTIONS]
 
 OPTIONS:
-  -h, --help              Show this help message
-  --install-lvmlocalpv   Install OpenEBS LVM LocalPV only
-  --install-cnpg          Install CloudNative-PG only
-  --install-upm-engine    Install UPM Engine only
-
-EXAMPLES:
-  $0                      Run full Kubespray setup
-  $0 --install-lvmlocalpv    Install OpenEBS LVM LocalPV only
-  $0 --install-cnpg       Install CloudNative-PG only
-  $0 --install-upm-engine Install UPM Engine only
+  -h, --help                    Show this help message
+  --install-lvmlocalpv          Install OpenEBS LVM LocalPV only
+  --install-cnpg                Install CloudNative-PG only
+  --install-upm-engine          Install UPM Engine only
+  --install-upm-platform        Install UPM Platform only
 
 DESCRIPTION:
   This script sets up a complete Kubespray environment with libvirt virtualization
   for RHEL-based distributions. It can also be used to install OpenEBS LVM LocalPV
   or CloudNative-PG independently on an existing Kubernetes cluster.
 
-REQUIREMENTS for OpenEBS installation:
+REQUIREMENTS for OpenEBS LVM LocalPV installation:
   - Existing Kubernetes cluster with kubectl access
   - Helm 3.x (will be installed if not present)
   - Proper node labeling for OpenEBS scheduling
@@ -2907,7 +3144,7 @@ REQUIREMENTS for CloudNative-PG installation:
   - Cluster admin privileges for CRD installation
   - Internet access to download Helm charts
 
-REQUIREMENTS for UPM Engine installation:
+REQUIREMENTS for UPM Engine And UPM Platform installation:
   - Existing Kubernetes cluster with kubectl access
   - Helm 3.x (will be installed if not present)
   - Cluster admin privileges for CRD installation
@@ -2941,6 +3178,10 @@ parse_arguments() {
             ;;
         --install-upm-engine)
             install_upm_engine
+            exit 0
+            ;;
+        --install-upm-platform)
+            install_upm_platform
             exit 0
             ;;
         *)
@@ -2985,6 +3226,8 @@ main() {
     install_cnpg
     # install upm engine
     install_upm_engine
+    # install upm platform
+    install_upm_platform
 
     log_info "Kubespray environment setup completed successfully!"
 }
