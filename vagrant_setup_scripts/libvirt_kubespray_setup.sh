@@ -2027,9 +2027,19 @@ configure_containerd_registries() {
         return 1
     fi
     
+    # Check if configuration has already been appended
+    local config_marker
+    config_marker="# Containerd configuration from local file ($(basename "$containerd_config_file"))"
+    
+    if grep -Fq "$config_marker" "$target_containerd_file"; then
+        echo -e "${YELLOW}⚠️  Containerd configuration already exists in target file${NC}"
+        log_info "Containerd configuration already appended, skipping to avoid duplication"
+        return 0
+    fi
+    
     # Create backup of original containerd.yml
     local backup_file
-    backup_file="${target_containerd_file}.backup.$(date +%Y%m%d_%H%M%S)"
+    backup_file="${SCRIPT_DIR}/containerd-config.yml.backup.$(date +%Y%m%d_%H%M%S)"
     if cp "$target_containerd_file" "$backup_file"; then
         log_info "Created backup: $backup_file"
     else
@@ -2041,7 +2051,7 @@ configure_containerd_registries() {
     
     # Append local configuration to target file
     {
-        echo -e "\n# Containerd configuration from local file ($(basename "$containerd_config_file"))"
+        echo -e "\n$config_marker"
         cat "$containerd_config_file"
     } >> "$target_containerd_file"
     
