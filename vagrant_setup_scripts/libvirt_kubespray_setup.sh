@@ -3020,13 +3020,13 @@ EOF
         --create-namespace \
         --version "$UPM_VERSION" \
         --values "$values_file" \
-        --wait --timeout=5m || {
+        --wait --timeout=15m || {
         error_exit "Failed to upgrade UPM Platform"
     }
 
     # Wait for platform to be ready
     log_info "Waiting for UPM Platform to be ready..."
-    "$KUBECTL" wait --for=condition=ready pod -l "app.kubernetes.io/instance=$upm_platform_release_name" -n "$upm_namespace" --timeout=300s || {
+    "$KUBECTL" wait --for=condition=ready pod -l "app.kubernetes.io/instance=$upm_platform_release_name" -n "$upm_namespace" --timeout=900s || {
         error_exit "UPM Platform failed to become ready"
     }
 
