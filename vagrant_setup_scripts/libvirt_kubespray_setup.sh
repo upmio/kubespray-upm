@@ -2126,7 +2126,7 @@ configure_kubectl_access() {
 
     # Copy kubectl binary
     if [[ -f "$kubectl_binary" ]]; then
-        if cp "$kubectl_binary" "$local_bin_dir/kubectl" && chmod +x "$local_bin_dir/kubectl"; then
+        if cp "$kubectl_binary" "$LOCAL_BIN_DIR/kubectl" && chmod +x "$LOCAL_BIN_DIR/kubectl"; then
             ((success_count++))
             log_info "kubectl binary configured successfully"
         else
