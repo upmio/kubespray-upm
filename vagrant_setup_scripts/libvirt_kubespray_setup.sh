@@ -57,6 +57,25 @@
 #   - Automatic node labeling for component scheduling
 #   - Installation timing and progress tracking
 #   - Post-installation verification commands
+#   - Automatic containerd registry configuration from local file
+#
+# Containerd Registry Configuration:
+#   Optional local file: containerd-config.yml (same directory as this script)
+#   If this file exists, containerd_registries_mirrors and containerd_registry_auth
+#   sections will be automatically merged into the kubespray containerd.yml before deployment.
+#   
+#   Example containerd-config.yml format:
+#   containerd_registries_mirrors:
+#     - prefix: docker.io
+#       mirrors:
+#         - host: https://your-registry.com
+#           capabilities: ["pull", "resolve"]
+#           skip_verify: false
+#   
+#   containerd_registry_auth:
+#     - registry: your-registry.com:5000
+#       username: your-username
+#       password: your-password
 #
 # Command Line Options:
 #   --help, -h              Show help message
@@ -1945,6 +1964,55 @@ show_setup_confirmation() {
 }
 
 #######################################
+# Configure containerd registries and authentication
+#######################################
+configure_containerd_registries() {
+    log_info "Configuring containerd registries and authentication..."
+    
+    local containerd_config_file
+    containerd_config_file="$(dirname "$0")/containerd-config.yml"
+    local target_containerd_file="${KUBESPRAY_DIR}/inventory/sample/group_vars/all/containerd.yml"
+    
+    # Check if local containerd config file exists
+    if [[ ! -f "$containerd_config_file" ]]; then
+        log_info "Local containerd config file not found: $containerd_config_file"
+        log_info "Skipping containerd registry configuration"
+        return 0
+    fi
+    
+    echo -e "${YELLOW}🔧 Found local containerd configuration file: ${CYAN}$containerd_config_file${NC}"
+    
+    # Check if target containerd.yml exists
+    if [[ ! -f "$target_containerd_file" ]]; then
+        log_error "Target containerd.yml not found: $target_containerd_file"
+        return 1
+    fi
+    
+    # Create backup of original containerd.yml
+    local backup_file
+    backup_file="${target_containerd_file}.backup.$(date +%Y%m%d_%H%M%S)"
+    if cp "$target_containerd_file" "$backup_file"; then
+        log_info "Created backup: $backup_file"
+    else
+        log_error "Failed to create backup of containerd.yml"
+        return 1
+    fi
+    
+    echo -e "${YELLOW}📝 Appending containerd configuration...${NC}"
+    
+    # Append local configuration to target file
+    {
+        echo "\n# Containerd configuration from local file ($(basename "$containerd_config_file"))"
+        cat "$containerd_config_file"
+    } >> "$target_containerd_file"
+    
+    echo -e "${GREEN}✅ Successfully appended containerd configuration${NC}"
+    log_info "Containerd configuration appended from $containerd_config_file to $target_containerd_file"
+    
+    return 0
+}
+
+#######################################
 # Create VM And Deploy Kubernetes Cluster
 #######################################
 vagrant_and_run_kubespray() {
@@ -1986,6 +2054,9 @@ vagrant_and_run_kubespray() {
         source venv/bin/activate || {
             error_exit "Failed to activate virtual environment"
         }
+
+        # Configure containerd registries before deployment
+        configure_containerd_registries
 
         # Check vagrant box existence
         # Get Box Name

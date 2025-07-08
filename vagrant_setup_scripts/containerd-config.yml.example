@@ -1,0 +1,24 @@
+# Example containerd registry configuration file
+# Copy this file to containerd-config.yml and modify as needed
+
+# Registry mirrors configuration
+containerd_registries_mirrors:
+  - prefix: docker.io
+    mirrors:
+      - host: https://registry-mirror.example.com
+        capabilities: ["pull", "resolve"]
+        skip_verify: false
+  - prefix: quay.io
+    mirrors:
+      - host: https://quay-mirror.example.com
+        capabilities: ["pull", "resolve"]
+        skip_verify: false
+
+# Registry authentication configuration
+containerd_registry_auth:
+  - registry: registry.example.com:5000
+    username: username
+    password: password
+  - registry: private-registry.example.com
+    username: username
+    password: password
