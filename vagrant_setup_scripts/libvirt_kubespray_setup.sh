@@ -28,9 +28,9 @@
 #   ✓ containerd registry configuration support
 #
 # Environment Variables:
-#   PYTHON_VERSION     - Python version (default: 3.12.11)
 #   HTTP_PROXY         - HTTP proxy URL
-#   BRIDGE_INTERFACE   - Bridge interface (optional)
+#   HTTPS_PROXY        - HTTPS proxy URL
+#   NO_PROXY           - No proxy URLs
 #
 # Fixed Paths:
 #   KUBESPRAY_DIR      - ./kubespray-upm
@@ -40,6 +40,8 @@
 # Command Line Options:
 #   -h, --help               Display help information
 #   -y, --auto-confirm       Auto-confirm all prompts (default: false)
+#   -n <type>                Set network type: private|public (default: private)
+#                            Only effective with --k8s or full setup mode
 #   --k8s                    Run environment setup process only
 #   --lvmlocalpv             Install OpenEBS LVM LocalPV only
 #   --cnpg                   Install CloudNative-PG only
@@ -100,7 +102,7 @@ declare HTTPS_PROXY="${HTTPS_PROXY:-${https_proxy:-$HTTP_PROXY}}"
 declare NO_PROXY="${NO_PROXY:-${no_proxy:-"localhost,127.0.0.1,192.168.0.0/16,10.0.0.0/8"}}"
 declare PIP_PROXY="${PIP_PROXY:-${HTTP_PROXY:-""}}"
 declare GIT_PROXY="${GIT_PROXY:-${HTTP_PROXY:-""}}"
-declare BRIDGE_INTERFACE="${BRIDGE_INTERFACE:-""}"
+declare BRIDGE_INTERFACE=""
 
 # Global variable for prompt function results
 declare PROMPT_RESULT=""
@@ -449,6 +451,201 @@ validate_vm_ip_range() {
     return 0
 }
 
+# Function to list and select network interface
+# Usage: select_network_interface
+# Returns: selected interface name via global variable SELECTED_INTERFACE
+select_network_interface() {
+    local interfaces=()
+    local interface_data=()
+    local choice
+    local interface_name
+    local interface_state
+    local interface_mac
+    local interface_ip
+    local interface_speed
+    
+    log_info "Detecting available network interfaces..."
+    
+    # Get all non-bridge, non-loopback interfaces using ip -br link
+    while IFS= read -r line; do
+        # Parse ip -br link output: interface_name state mac_address flags
+        if [[ $line =~ ^([^[:space:]]+)[[:space:]]+([^[:space:]]+)[[:space:]]+([^[:space:]]+)[[:space:]]*(.*)$ ]]; then
+            interface_name="${BASH_REMATCH[1]}"
+            interface_state="${BASH_REMATCH[2]}"
+            interface_mac="${BASH_REMATCH[3]}\t"
+            
+            # Skip loopback, bridge, and virtual interfaces
+            if [[ "$interface_name" != "lo" && 
+                  "$interface_name" != *"br"* && 
+                  "$interface_name" != *"virbr"* && 
+                  "$interface_name" != *"docker"* &&
+                  "$interface_name" != *"vnet"* &&
+                  "$interface_name" != *"veth"* ]]; then
+                
+                # Get IP address if available
+                interface_ip=$(ip addr show "$interface_name" 2>/dev/null | grep -oP 'inet \K[0-9.]+' | head -1)
+                if [[ -z "$interface_ip" ]]; then
+                    interface_ip="No IP"
+                fi
+                
+                # Normalize state (UNKNOWN -> DOWN for display purposes)
+                if [[ "$interface_state" == "UNKNOWN" ]]; then
+                    interface_state="DOWN"
+                fi
+                
+                # Get interface speed
+                if [[ -r "/sys/class/net/$interface_name/speed" ]]; then
+                    local speed_value
+                    speed_value=$(cat "/sys/class/net/$interface_name/speed" 2>/dev/null)
+                    if [[ "$speed_value" =~ ^[0-9]+$ ]] && [[ "$speed_value" -gt 0 ]]; then
+                        if [[ "$speed_value" -ge 1000 ]]; then
+                            interface_speed="$((speed_value / 1000))Gbps"
+                        else
+                            interface_speed="${speed_value}Mbps"
+                        fi
+                    else
+                        interface_speed="Unknown"
+                    fi
+                else
+                    interface_speed="Unknown"
+                fi
+                
+                interfaces+=("$interface_name")
+                interface_data+=("$interface_name|$interface_ip|$interface_state|$interface_mac|$interface_speed")
+            fi
+        fi
+    done < <(ip -br link)
+    
+    if [[ ${#interfaces[@]} -eq 0 ]]; then
+        log_error "No suitable network interfaces found"
+        return 1
+    fi
+    
+    echo -e "\n${YELLOW}🌐 Available Network Interfaces:${NC}"
+    printf "  ${CYAN}%-3s %-12s %-15s %-7s %-20s %-10s${NC}\n" "No." "Interface" "IP Address" "State" "MAC Address" "Speed"
+    printf "  ${CYAN}%-3s %-12s %-15s %-7s %-20s %-10s${NC}\n" "---" "----------" "-----------" "-----" "-----------" "-----"
+    
+    for i in "${!interface_data[@]}"; do
+        IFS='|' read -r name ip state mac speed <<< "${interface_data[i]}"
+        
+        # Apply color to state
+        if [[ "$state" == "UP" ]]; then
+            colored_state="${GREEN}UP${NC}\t  "
+        else
+            colored_state="${RED}DOWN${NC}\t  "
+        fi
+        
+        printf "  ${CYAN}%-3s${NC} %-12s %-15s %b %-20s %-10s\n" "$((i+1))." "$name" "$ip" "$colored_state" "$mac" "$speed"
+    done
+    echo
+    
+    while true; do
+        printf "${CYAN}🔗 Select network interface (1-${#interfaces[@]}): ${NC}"
+        read -r choice
+        
+        if [[ "$choice" =~ ^[0-9]+$ ]] && [[ "$choice" -ge 1 ]] && [[ "$choice" -le ${#interfaces[@]} ]]; then
+            SELECTED_INTERFACE="${interfaces[$((choice-1))]}"
+            echo -e "${GREEN}✅ Selected interface: ${CYAN}$SELECTED_INTERFACE${NC}\n"
+            return 0
+        else
+            echo -e "${RED}❌ Invalid choice. Please enter a number between 1 and ${#interfaces[@]}${NC}"
+        fi
+    done
+}
+
+# Function to interactively configure public network settings
+# Usage: configure_public_network_interactive
+# Sets global variables: BRIDGE_INTERFACE, subnet, netmask, gateway, dns_server, subnet_split4
+configure_public_network_interactive() {
+    log_info "Starting interactive public network configuration..."
+    echo
+    echo -e "${YELLOW}🌐 Public Network Configuration${NC}"
+    echo -e "${WHITE}Please provide the network configuration for public network:${NC}"
+    echo
+
+    # Step 1: Select bridge interface
+    if ! select_network_interface; then
+        error_exit "Failed to select network interface"
+    fi
+    BRIDGE_INTERFACE="$SELECTED_INTERFACE"
+    
+    # Step 2: Get starting IP with CIDR notation
+    local starting_ip_cidr
+    local starting_ip
+    local cidr_prefix
+    
+    while true; do
+        read -r -p "$(echo -e "${WHITE}Enter starting IP for VM allocation with CIDR (e.g., 192.168.1.90/24): ${NC}")" starting_ip_cidr
+        
+        # Validate CIDR format
+        if [[ "$starting_ip_cidr" =~ ^([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})/([0-9]{1,2})$ ]]; then
+            starting_ip="${BASH_REMATCH[1]}"
+            cidr_prefix="${BASH_REMATCH[2]}"
+            
+            # Validate IP address
+            if validate_vm_ip_range "$starting_ip"; then
+                # Validate CIDR prefix (8-30 for practical use)
+                if [[ "$cidr_prefix" -ge 8 && "$cidr_prefix" -le 30 ]]; then
+                    break
+                else
+                    echo -e "${RED}Invalid CIDR prefix. Please use a value between 8 and 30.${NC}"
+                fi
+            else
+                echo -e "${RED}Invalid IP address format.${NC}"
+            fi
+        else
+            echo -e "${RED}Invalid CIDR format. Please use format like 192.168.1.90/24${NC}"
+        fi
+    done
+
+    # Extract subnet and fourth octet from IP
+    IFS='.' read -ra octets <<<"$starting_ip"
+    subnet="${octets[0]}.${octets[1]}.${octets[2]}"
+    subnet_split4="${octets[3]}"
+
+    # Convert CIDR prefix to netmask using lookup table
+    if [[ "$cidr_prefix" -ge 8 && "$cidr_prefix" -le 30 ]]; then
+        local netmasks=(
+            [8]="255.0.0.0"     [9]="255.128.0.0"   [10]="255.192.0.0"  [11]="255.224.0.0"
+            [12]="255.240.0.0"  [13]="255.248.0.0"  [14]="255.252.0.0"  [15]="255.254.0.0"
+            [16]="255.255.0.0"  [17]="255.255.128.0" [18]="255.255.192.0" [19]="255.255.224.0"
+            [20]="255.255.240.0" [21]="255.255.248.0" [22]="255.255.252.0" [23]="255.255.254.0"
+            [24]="255.255.255.0" [25]="255.255.255.128" [26]="255.255.255.192" [27]="255.255.255.224"
+            [28]="255.255.255.240" [29]="255.255.255.248" [30]="255.255.255.252"
+        )
+        netmask="${netmasks[$cidr_prefix]}"
+    else
+        log_error "Invalid CIDR prefix: $cidr_prefix. Must be between /8 and /30."
+        return 1
+    fi
+    
+    echo -e "${GREEN}✅ Parsed network configuration:${NC}"
+    echo -e "   ${GREEN}•${NC} Starting IP: ${CYAN}$starting_ip${NC}"
+    echo -e "   ${GREEN}•${NC} Subnet: ${CYAN}$subnet.0${NC}"
+    echo -e "   ${GREEN}•${NC} Netmask: ${CYAN}$netmask${NC}"
+    echo -e "   ${GREEN}•${NC} CIDR: ${CYAN}/$cidr_prefix${NC}\n"
+
+    # Step 3: Get gateway using unified function
+    prompt_ip_input "Enter gateway IP (e.g., $subnet.1)"
+    gateway="$PROMPT_RESULT"
+
+    # Step 4: Get DNS server using unified function
+    prompt_ip_input "Enter DNS server IP (e.g., 8.8.8.8 or $gateway)"
+    dns_server="$PROMPT_RESULT"
+    
+    # Display final configuration
+    echo -e "\n${GREEN}🎯 Final Public Network Configuration:${NC}"
+    echo -e "   ${GREEN}•${NC} Bridge Interface: ${CYAN}$BRIDGE_INTERFACE${NC}"
+    echo -e "   ${GREEN}•${NC} Subnet: ${CYAN}$subnet${NC}"
+    echo -e "   ${GREEN}•${NC} Netmask: ${CYAN}$netmask${NC}"
+    echo -e "   ${GREEN}•${NC} Gateway: ${CYAN}$gateway${NC}"
+    echo -e "   ${GREEN}•${NC} DNS Server: ${CYAN}$dns_server${NC}"
+    echo -e "   ${GREEN}•${NC} Starting IP: ${CYAN}$subnet.$subnet_split4${NC}\n"
+    
+    log_info "Public network configuration completed successfully"
+    return 0
+}
+
 install_packages() {
     local packages="$1"
     local max_retries="${2:-3}"
@@ -632,21 +829,6 @@ validate_required_variables() {
         LOG_FILE="/dev/stdout"
     }
     chmod 666 "$LOG_FILE" 2>/dev/null || true
-
-    # Validate optional environment variables
-    if [[ -n "${BRIDGE_INTERFACE:-}" ]]; then
-        log_info "Using bridge interface: $BRIDGE_INTERFACE"
-
-        # Verify the specified interface exists
-        if ! ip link show "$BRIDGE_INTERFACE" &>/dev/null; then
-            error_exit "Network interface '$BRIDGE_INTERFACE' does not exist. Available interfaces: $(ip link show | grep -E '^[0-9]+:' | grep -v 'lo:' | cut -d: -f2 | tr -d ' ' | tr '\n' ' ')"
-        fi
-
-        readonly NETWORK_TYPE="public"
-    else
-        readonly NETWORK_TYPE="private"
-        log_info "BRIDGE_INTERFACE not set - bridge network will be skipped"
-    fi
 
     # Validate kubespray directory permissions
     if [[ -d "$KUBESPRAY_DIR" ]]; then
@@ -1470,84 +1652,30 @@ setup_virtual_environment() {
 
 # Function to configure public network settings interactively
 configure_public_network_settings() {
-    # Declare local variables
+    # This function now only handles the configuration application
+    # Network information should be gathered beforehand via configure_public_network_interactive
+    
     local temp_file
-    local subnet
-    local subnet_split4
-    local netmask
-    local gateway
-    local dns_server
-
     temp_file="${VAGRANT_CONF_FILE}.tmp"
 
-    log_info "Configuring public network settings..."
-    echo
-    echo -e "${YELLOW}🌐 Public Network Configuration${NC}"
-    echo -e "${WHITE}Please provide the network configuration for public network:${NC}"
-    echo
-
-    # Get starting IP with CIDR notation
-    local starting_ip_cidr
-    local starting_ip
-    local cidr_prefix
+    log_info "Applying public network settings to configuration..."
     
-    while true; do
-        read -r -p "$(echo -e "${WHITE}Enter starting IP for VM allocation with CIDR (e.g., 192.168.1.90/24): ${NC}")" starting_ip_cidr
-        
-        # Validate CIDR format
-        if [[ "$starting_ip_cidr" =~ ^([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})/([0-9]{1,2})$ ]]; then
-            starting_ip="${BASH_REMATCH[1]}"
-            cidr_prefix="${BASH_REMATCH[2]}"
-            
-            # Validate IP address
-            if validate_vm_ip_range "$starting_ip"; then
-                # Validate CIDR prefix (8-30 for practical use)
-                if [[ "$cidr_prefix" -ge 8 && "$cidr_prefix" -le 30 ]]; then
-                    break
-                else
-                    echo -e "${RED}Invalid CIDR prefix. Please use a value between 8 and 30.${NC}"
-                fi
-            else
-                echo -e "${RED}Invalid IP address format.${NC}"
-            fi
-        else
-            echo -e "${RED}Invalid CIDR format. Please use format like 192.168.1.90/24${NC}"
-        fi
-    done
-
-    # Extract subnet and fourth octet from IP
-    IFS='.' read -ra octets <<<"$starting_ip"
-    subnet="${octets[0]}.${octets[1]}.${octets[2]}"
-    subnet_split4="${octets[3]}"
-# Convert CIDR prefix to netmask using lookup table
-    if [[ "$cidr_prefix" -ge 8 && "$cidr_prefix" -le 30 ]]; then
-        local netmasks=(
-            [8]="255.0.0.0"     [9]="255.128.0.0"   [10]="255.192.0.0"  [11]="255.224.0.0"
-            [12]="255.240.0.0"  [13]="255.248.0.0"  [14]="255.252.0.0"  [15]="255.254.0.0"
-            [16]="255.255.0.0"  [17]="255.255.128.0" [18]="255.255.192.0" [19]="255.255.224.0"
-            [20]="255.255.240.0" [21]="255.255.248.0" [22]="255.255.252.0" [23]="255.255.254.0"
-            [24]="255.255.255.0" [25]="255.255.255.128" [26]="255.255.255.192" [27]="255.255.255.224"
-            [28]="255.255.255.240" [29]="255.255.255.248" [30]="255.255.255.252"
-        )
-        netmask="${netmasks[$cidr_prefix]}"
-    else
-        log_error "Invalid CIDR prefix: $cidr_prefix. Must be between /8 and /30."
+    # Validate that required global variables are set
+    if [[ -z "${subnet:-}" || -z "${netmask:-}" || -z "${gateway:-}" || 
+          -z "${dns_server:-}" || -z "${subnet_split4:-}" || -z "${BRIDGE_INTERFACE:-}" ]]; then
+        log_error "Required network configuration variables are not set"
+        log_error "Please run configure_public_network_interactive first"
         return 1
     fi
     
-    echo -e "${GREEN}✅ Parsed network configuration:${NC}"
-    echo -e "   ${GREEN}•${NC} Starting IP: ${CYAN}$starting_ip${NC}"
-    echo -e "   ${GREEN}•${NC} Subnet: ${CYAN}$subnet.0${NC}"
+    # Display configuration being applied
+    echo -e "\n${YELLOW}📝 Applying Network Configuration:${NC}"
+    echo -e "   ${GREEN}•${NC} Bridge Interface: ${CYAN}$BRIDGE_INTERFACE${NC}"
+    echo -e "   ${GREEN}•${NC} Subnet: ${CYAN}$subnet${NC}"
     echo -e "   ${GREEN}•${NC} Netmask: ${CYAN}$netmask${NC}"
-    echo -e "   ${GREEN}•${NC} CIDR: ${CYAN}/$cidr_prefix${NC}\n"
-
-    # Get gateway using unified function
-    prompt_ip_input "Enter gateway IP (e.g., $subnet.1)"
-    gateway="$PROMPT_RESULT"
-
-    # Get DNS server using unified function
-    prompt_ip_input "Enter DNS server IP (e.g., 8.8.8.8 or $gateway)"
-    dns_server="$PROMPT_RESULT"
+    echo -e "   ${GREEN}•${NC} Gateway: ${CYAN}$gateway${NC}"
+    echo -e "   ${GREEN}•${NC} DNS Server: ${CYAN}$dns_server${NC}"
+    echo -e "   ${GREEN}•${NC} Starting IP: ${CYAN}$subnet.$subnet_split4${NC}\n"
 
     # Apply the configuration to the config file
     awk -v subnet="$subnet" \
@@ -1555,8 +1683,8 @@ configure_public_network_settings() {
         -v gateway="$gateway" \
         -v dns_server="$dns_server" \
         -v subnet_split4="$subnet_split4" \
-        -v bridge_name="$BRIDGE_NAME" '
-    {
+        -v bridge_name="$BRIDGE_NAME" \
+    '{
         if ($0 ~ /^\$subnet = /) {
             print "$subnet = \"" subnet "\""
         } else if ($0 ~ /^\$netmask = /) {
@@ -1575,9 +1703,13 @@ configure_public_network_settings() {
     }' "$VAGRANT_CONF_FILE" >"$temp_file"
 
     # Replace the original file
-    mv "$temp_file" "$VAGRANT_CONF_FILE"
-
-    log_info "Public network configuration applied to $VAGRANT_CONF_FILE"
+    if mv "$temp_file" "$VAGRANT_CONF_FILE"; then
+        log_info "Public network configuration applied successfully to $VAGRANT_CONF_FILE"
+        return 0
+    else
+        log_error "Failed to apply configuration to $VAGRANT_CONF_FILE"
+        return 1
+    fi
 }
 
 configure_vagrant_config() {
@@ -1744,16 +1876,6 @@ setup_kubespray_project() {
     fi
 
     log_info "Kubespray project setup completed"
-}
-
-#######################################
-# Get box name from SUPPORTED_OS configuration in Vagrantfile
-#######################################
-get_box_name() {
-    local os_type="$1"
-    local box_name=""
-
-
 }
 
 #######################################
@@ -2057,6 +2179,12 @@ vagrant_and_run_kubespray() {
         # shellcheck disable=SC1091
         source venv/bin/activate || error_exit "Failed to activate virtual environment"
 
+        # Apply public network configuration if needed
+        if [[ "$NETWORK_TYPE" == "public" ]]; then
+            log_info "Applying public network configuration..."
+            configure_public_network_settings
+        fi
+        
         # Configure containerd registries before deployment
         configure_containerd_registries
 
@@ -2130,10 +2258,11 @@ vagrant_and_run_kubespray() {
         # Check for existing VMs and offer cleanup option
         echo -e "${YELLOW}🔍 Checking for existing virtual machines...${NC}"
         local vm_status
-        vm_status=$(vagrant status 2>/dev/null | grep -E "(running|poweroff|saved|aborted)" | grep -v "not created" || true)
+        # Check for VMs matching kubespray+k8s+<number> pattern using virsh
+        vm_status=$(sudo virsh list --all 2>/dev/null | grep -E "kubespray${G_INSTANCE_NAME_PREFIX}.*[0-9]+" || true)
         
         if [[ -n "$vm_status" ]]; then
-            echo -e "${YELLOW}⚠️  Found existing virtual machines:${NC}"
+            echo -e "${YELLOW}⚠️  Found existing kubespray virtual machines:${NC}"
             echo "$vm_status"
             echo -e "\n${YELLOW}These VMs may interfere with the new deployment.${NC}"
             echo -e "${WHITE}Do you want to clean up existing VMs and continue?${NC}"
@@ -2153,12 +2282,12 @@ vagrant_and_run_kubespray() {
                 echo -e "${YELLOW}⏸️  Deployment cancelled by user${NC}"
                 echo -e "${WHITE}Manual cleanup commands:${NC}"
                 echo -e "   ${CYAN}vagrant destroy -f${NC}    # Destroy all VMs"
-                echo -e "   ${CYAN}vagrant status${NC}        # Check VM status"
+                echo -e "   ${CYAN}sudo virsh list --all${NC}        # Check VM status"
                 echo -e "\n${WHITE}After cleanup, run this script again.${NC}"
                 return 0
             fi
         else
-            echo -e "${GREEN}✅ No existing VMs found${NC}"
+            echo -e "${GREEN}✅ No existing kubespray VMs found${NC}"
         fi
 
         if vagrant up --provider=libvirt --no-parallel; then
@@ -3040,6 +3169,9 @@ Usage: $0 [OPTIONS]
 OPTIONS:
   -h, --help                    Show this help message
   -y                            Auto-confirm all yes/no prompts (except network bridge configuration)
+  -n <network_type>             Set network type (private|public, default: private)
+                                Only effective with --k8s or full setup mode
+                                When set to 'public', interactive configuration will be required
   --k8s                 Run environment setup process only
   --lvmlocalpv          Install OpenEBS LVM LocalPV only
   --cnpg                Install CloudNative-PG only
@@ -3081,6 +3213,13 @@ setup_environment() {
     
     # Network and proxy validation
     validate_network_and_proxy
+    
+    # Configure public network if needed
+    if [[ "$NETWORK_TYPE" == "public" ]]; then
+        log_info "Configuring public network settings..."
+        configure_public_network_interactive
+    fi
+    
     # System validation
     check_sudo_privileges
     check_system_requirements
@@ -3107,6 +3246,9 @@ setup_environment() {
 # Parse Command Line Arguments
 #######################################
 parse_arguments() {
+    local network_type_specified=false
+    local component_mode=false
+    
     # Check for help first
     for arg in "$@"; do
         if [[ "$arg" == "-h" || "$arg" == "--help" ]]; then
@@ -3121,23 +3263,65 @@ parse_arguments() {
             AUTO_CONFIRM=true
             shift
             ;;
+        -n)
+            if [[ -n "$2" && "$2" != -* ]]; then
+                NETWORK_TYPE="$2"
+                network_type_specified=true
+                shift 2
+                # Validate network type
+                if [[ -n "${NETWORK_TYPE:-}" ]]; then
+                    case "$NETWORK_TYPE" in
+                    private|public)
+                        log_info "Network type set to: $NETWORK_TYPE"
+                        ;;
+                    *)
+                        log_error "Invalid network type: $NETWORK_TYPE. Valid options: private, public"
+                        exit 1
+                        ;;
+                    esac
+                else
+                    NETWORK_TYPE="private"  # Default value
+                    log_info "Using default network type: $NETWORK_TYPE"
+                fi
+            else
+                log_error "Option -n requires a network type argument (private|public)"
+                show_help
+                exit 1
+            fi
+            ;;
         --k8s)
             setup_environment
             exit 0
             ;;
         --lvmlocalpv)
+            component_mode=true
+            if [[ "$network_type_specified" == true ]]; then
+                log_warn "Warning: -n parameter has no effect with --lvmlocalpv option"
+            fi
             install_lvm_localpv
             exit 0
             ;;
         --cnpg)
+            component_mode=true
+            if [[ "$network_type_specified" == true ]]; then
+                log_warn "Warning: -n parameter has no effect with --cnpg option"
+            fi
             install_cnpg
             exit 0
             ;;
         --upm-engine)
+            component_mode=true
+            if [[ "$network_type_specified" == true ]]; then
+                log_warn "Warning: -n parameter has no effect with --upm-engine option"
+            fi
             install_upm_engine
             exit 0
             ;;
         --upm-platform)
+            component_mode=true
+            if [[ "$network_type_specified" == true ]]; then
+                log_warn "Warning: -n parameter has no effect with --upm-platform option"
+            fi
             install_upm_platform
             exit 0
             ;;
