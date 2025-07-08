@@ -92,8 +92,8 @@ set -eE
 
 # Script metadata
 readonly SCRIPT_VERSION="3.0"
-readonly SCRIPT_DIR
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+readonly SCRIPT_DIR
 readonly KUBESPRAY_DIR="${SCRIPT_DIR}/kubespray-upm"
 readonly KUBESPRAY_DIR
 readonly VAGRANT_CONF_DIR="${KUBESPRAY_DIR}/vagrant"
