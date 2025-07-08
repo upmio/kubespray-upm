@@ -6,15 +6,26 @@
 #   Automated Kubespray environment setup with libvirt virtualization for RHEL-based
 #   distributions. Configures complete Kubernetes development environment with
 #   networking, virtualization, and interactive deployment capabilities.
+#   Supports both full environment setup and individual component installation.
+#
+# Usage Modes:
+#   1. Full Setup: Complete Kubespray environment with Kubernetes cluster
+#   2. Component Installation: Install individual components on existing clusters
+#      - OpenEBS LVM LocalPV (--install-lvmlocalpv)
+#      - CloudNative-PG (--install-cnpg)
+#      - UPM Engine (--install-upm-engine)
 #
 # Environment Variables:
 #   BRIDGE_INTERFACE   - Network interface for bridge (optional)
 #   HTTP_PROXY         - HTTP proxy URL
 #   HTTPS_PROXY        - HTTPS proxy URL (defaults to HTTP_PROXY)
 #   NO_PROXY           - No-proxy addresses
+#   PYTHON_VERSION     - Python version to install (default: 3.12.11)
 #
 # Fixed Paths:
-#   KUBESPRAY_DIR      - Fixed to $(pwd)/kubespray (not configurable)
+#   KUBESPRAY_DIR      - Fixed to $(pwd)/kubespray-upm (not configurable)
+#   KUBECONFIG         - Fixed to $HOME/.kube/config
+#   KUBECTL            - Fixed to $HOME/bin/kubectl
 #
 # Network Setup:
 #   Bridge:    br0 (uses BRIDGE_INTERFACE if set)
@@ -28,11 +39,30 @@
 #   - 32GB+ memory
 #   - 12+ CPU cores
 #
-# Software Installed:
-#   - Python: 3.11.10 (pyenv)
+# Software Installed (Full Setup):
+#   - Python: 3.12.11 (pyenv)
 #   - Vagrant: 2.4.7
 #   - Libvirt/QEMU: Latest
-#   - Kubespray: Latest
+#   - Kubespray-UPM: Latest
+#   - OpenEBS LVM LocalPV: Latest
+#   - CloudNative-PG: 0.24.0
+#   - UPM Engine: Latest
+#   - Helm: 3.x (auto-installed if needed)
+#
+# Features:
+#   - Interactive installation with confirmation prompts
+#   - Comprehensive logging and error handling
+#   - System validation and requirement checks
+#   - Network connectivity testing
+#   - Automatic node labeling for component scheduling
+#   - Installation timing and progress tracking
+#   - Post-installation verification commands
+#
+# Command Line Options:
+#   --help, -h              Show help message
+#   --install-lvmlocalpv   Install OpenEBS LVM LocalPV only
+#   --install-cnpg          Install CloudNative-PG only
+#   --install-upm-engine    Install UPM Engine only
 #
 
 set -eE
@@ -48,8 +78,10 @@ readonly KUBESPRAY_DIR
 readonly VAGRANT_CONF_DIR="${KUBESPRAY_DIR}/vagrant"
 readonly VAGRANT_CONF_FILE="${VAGRANT_CONF_DIR}/config.rb"
 readonly VAGRANTFILE_PATH="${KUBESPRAY_DIR}/Vagrantfile"
-readonly KUBECTL="${HOME}/.local/bin/kubectl"
-export KUBECONFIG="${HOME}/.kube/config"
+readonly LOCAL_BIN_DIR="${HOME}/bin"
+readonly KUBECTL="${LOCAL_BIN_DIR}/kubectl"
+readonly KUBE_DIR="${HOME}/.kube"
+export KUBECONFIG="${KUBE_DIR}/config"
 
 # Default values
 readonly DEFAULT_PYTHON_VERSION="3.12.11"
@@ -72,8 +104,9 @@ readonly PYENV_DEPENDENCIES="gcc make patch zlib-devel bzip2 bzip2-devel readlin
 declare PYTHON_VERSION="${PYTHON_VERSION:-$DEFAULT_PYTHON_VERSION}"
 declare HTTP_PROXY="${HTTP_PROXY:-${http_proxy:-""}}"
 declare HTTPS_PROXY="${HTTPS_PROXY:-${https_proxy:-$HTTP_PROXY}}"
-declare PIP_PROXY="${PIP_PROXY:-$HTTP_PROXY}"
-declare GIT_PROXY="${GIT_PROXY:-$HTTP_PROXY}"
+declare NO_PROXY="${NO_PROXY:-${no_proxy:-"localhost,127.0.0.1,192.168.0.0/16,10.0.0.0/8"}}"
+declare PIP_PROXY="${PIP_PROXY:-${HTTP_PROXY:-""}}"
+declare GIT_PROXY="${GIT_PROXY:-${HTTP_PROXY:-""}}"
 declare BRIDGE_INTERFACE="${BRIDGE_INTERFACE:-""}"
 
 # Global variable for prompt function results
@@ -908,26 +941,65 @@ check_ntp_synchronization() {
     log_info "NTP synchronization check completed"
 }
 
-validate_configuration() {
-    log_info "Validating proxy configuration..."
+# Combined network connectivity and proxy validation function
+validate_network_and_proxy() {
+    log_info "Validating network connectivity and proxy configuration..."
 
-    # Validate HTTP proxy configuration
+    local test_urls=("http://www.google.com" "https://github.com" "https://pypi.org")
+    local connectivity_passed=false
+
+    # Test HTTP proxy if configured
     if [[ -n "$HTTP_PROXY" ]]; then
-
-        if ! curl -s --proxy "$HTTP_PROXY" --connect-timeout 10 http://www.google.com >/dev/null; then
+        log_info "Testing HTTP proxy: $HTTP_PROXY"
+        if curl -s --proxy "$HTTP_PROXY" --connect-timeout 10 "http://www.google.com" >/dev/null; then
+            log_info "HTTP proxy validation passed"
+            connectivity_passed=true
+        else
             log_warn "HTTP proxy $HTTP_PROXY may not be working correctly"
         fi
     fi
 
-    # Validate HTTPS proxy configuration
+    # Test HTTPS proxy if configured and different from HTTP proxy
     if [[ -n "$HTTPS_PROXY" && "$HTTPS_PROXY" != "$HTTP_PROXY" ]]; then
-
-        if ! curl -s --proxy "$HTTPS_PROXY" --connect-timeout 10 https://www.google.com >/dev/null; then
+        log_info "Testing HTTPS proxy: $HTTPS_PROXY"
+        if curl -s --proxy "$HTTPS_PROXY" --connect-timeout 10 "https://www.google.com" >/dev/null; then
+            log_info "HTTPS proxy validation passed"
+            connectivity_passed=true
+        else
             log_warn "HTTPS proxy $HTTPS_PROXY may not be working correctly"
         fi
     fi
 
-    log_info "Proxy configuration validation completed"
+    # Test general network connectivity
+    if [[ "$connectivity_passed" == "false" ]]; then
+        log_info "Testing general network connectivity..."
+        local proxy_set=""
+        if [ -n "$HTTP_PROXY" ]; then
+            proxy_set="$HTTP_PROXY"
+        fi
+
+        for url in "${test_urls[@]}"; do
+            if curl -s --proxy "$proxy_set" --connect-timeout 10 "$url" >/dev/null; then
+                log_info "Network connectivity test passed for $url"
+                connectivity_passed=true
+                break
+            fi
+        done
+    fi
+
+    if [ -n "$HTTP_PROXY" ]; then
+        export http_proxy="$HTTP_PROXY"
+        export https_proxy="$HTTPS_PROXY"
+        export no_proxy="$NO_PROXY"
+    fi
+
+    if [[ "$connectivity_passed" == "false" ]]; then
+        log_warn "Network connectivity test failed. Please check your internet connection and proxy settings."
+        return 1
+    fi
+
+    log_info "Network connectivity and proxy validation completed successfully"
+    return 0
 }
 
 check_sudo_privileges() {
@@ -944,26 +1016,6 @@ check_sudo_privileges() {
 #######################################
 # Network and Proxy Functions
 #######################################
-test_network_connectivity() {
-    log_info "Testing network connectivity..."
-
-    local test_urls=("http://www.google.com" "https://github.com" "https://pypi.org")
-    local proxy_set=""
-
-    if [ -n "$HTTP_PROXY" ]; then
-        proxy_set="$HTTP_PROXY"
-    fi
-
-    for url in "${test_urls[@]}"; do
-        if curl -s --proxy "$proxy_set" --connect-timeout 10 "$url" >/dev/null; then
-            log_info "Network connectivity test passed for $url"
-            return 0
-        fi
-    done
-
-    log_warn "Network connectivity test failed. Please check your internet connection and proxy settings."
-    return 1
-}
 
 configure_git_proxy() {
     if [ -n "$GIT_PROXY" ]; then
@@ -1213,12 +1265,6 @@ install_vagrant_libvirt_plugin() {
     # Configure proxy for plugin installation
     if [ -n "$HTTP_PROXY" ] || [ -n "$HTTPS_PROXY" ]; then
         log_info "Configuring proxy for vagrant plugin installation..."
-        export http_proxy="$HTTP_PROXY"
-        export https_proxy="$HTTPS_PROXY"
-        export HTTP_PROXY="$HTTP_PROXY"
-        export HTTPS_PROXY="$HTTPS_PROXY"
-        export no_proxy="localhost,127.0.0.1,::1"
-        export NO_PROXY="localhost,127.0.0.1,::1"
         export BUNDLE_HTTP_PROXY="$HTTP_PROXY"
         export BUNDLE_HTTPS_PROXY="$HTTPS_PROXY"
         export GEM_HTTP_PROXY="$HTTP_PROXY"
@@ -1313,12 +1359,6 @@ install_pyenv() {
 
     # Execute the downloaded script with proxy environment variables
     log_info "Executing pyenv installer script..."
-    if [ -n "$HTTP_PROXY" ]; then
-        export HTTP_PROXY
-        export HTTPS_PROXY="$HTTP_PROXY"
-        export http_proxy="$HTTP_PROXY"
-        export https_proxy="$HTTP_PROXY"
-    fi
 
     if ! bash "$temp_script"; then
         rm -f "$temp_script"
@@ -1332,6 +1372,7 @@ install_pyenv() {
         log_error "Current proxy settings:"
         log_error "  HTTP_PROXY: ${HTTP_PROXY:-Not set}"
         log_error "  HTTPS_PROXY: ${HTTPS_PROXY:-Not set}"
+        log_error "  NO_PROXY: ${NO_PROXY:-Not set}"
         log_error ""
         log_error "Troubleshooting steps:"
         log_error "  1. Check network connectivity: curl -I https://raw.githubusercontent.com"
@@ -1556,17 +1597,11 @@ configure_vagrant_config() {
         # Create a temporary file for safe editing
         temp_file="${VAGRANT_CONF_FILE}.tmp"
 
-        # Set $https_proxy (use HTTP_PROXY if HTTPS_PROXY is not set)
-        local https_proxy_value="${HTTPS_PROXY:-$HTTP_PROXY}"
-
-        # Set $no_proxy with common local addresses
-        local no_proxy_value="localhost,127.0.0.1,10.0.0.0/8,192.168.0.0/16,172.16.0.0/12,.local"
-
         # Use awk for safer text replacement
         awk -v http_proxy="$HTTP_PROXY" \
-            -v https_proxy="$https_proxy_value" \
-            -v no_proxy="$no_proxy_value" \
-            -v additional_no_proxy="$no_proxy_value" '
+            -v https_proxy="$HTTPS_PROXY" \
+            -v no_proxy="$NO_PROXY" \
+            -v additional_no_proxy="$NO_PROXY" '
         {
             if ($0 ~ /^# \$http_proxy = ""/) {
                 print "$http_proxy = \"" http_proxy "\""
@@ -1586,11 +1621,9 @@ configure_vagrant_config() {
 
         log_info "Proxy configuration completed:"
         log_info "  HTTP_PROXY: $HTTP_PROXY"
-        log_info "  HTTPS_PROXY: $https_proxy_value"
-        log_info "  NO_PROXY: $no_proxy_value"
-        if [ -n "${NO_PROXY:-}" ]; then
-            log_info "  ADDITIONAL_NO_PROXY: $NO_PROXY"
-        fi
+        log_info "  HTTPS_PROXY: $HTTPS_PROXY"
+        log_info "  NO_PROXY: $NO_PROXY"
+        log_info "  ADDITIONAL_NO_PROXY: $NO_PROXY"
     else
         log_info "No HTTP_PROXY set, keeping proxy settings commented out"
     fi
@@ -2076,8 +2109,6 @@ configure_kubectl_access() {
     local artifacts_dir="$KUBESPRAY_DIR/inventory/sample/artifacts"
     local kubectl_binary="$artifacts_dir/kubectl"
     local kubeconfig_file="$artifacts_dir/admin.conf"
-    local local_bin_dir="$HOME/.local/bin"
-    local kube_dir="$HOME/.kube"
     local success_count=0
     local total_steps=2
 
@@ -2088,7 +2119,7 @@ configure_kubectl_access() {
     fi
 
     # Create directories
-    mkdir -p "$local_bin_dir" "$kube_dir" || {
+    mkdir -p "$LOCAL_BIN_DIR" "$KUBE_DIR" || {
         log_error "Failed to create directories"
         return 1
     }
@@ -2219,8 +2250,8 @@ install_lvm_localpv() {
     # Use global variables extracted from config
     extract_vagrant_config_variables
 
-    local upm_start_index=$((G_KUBE_MASTER_INSTANCES + 1))
-    local upm_end_index=$((G_KUBE_MASTER_INSTANCES + G_UPM_CTL_INSTANCES))
+    local ctl_start_index=$((G_KUBE_MASTER_INSTANCES + 1))
+    local ctl_end_index=$((G_KUBE_MASTER_INSTANCES + G_UPM_CTL_INSTANCES))
 
     local nodes
     nodes=$("$KUBECTL" get nodes --no-headers -o custom-columns=":metadata.name")
@@ -2229,10 +2260,10 @@ install_lvm_localpv() {
         # Extract node number from node name (assuming format: prefix-number)
         if [[ "$node" =~ ^${G_INSTANCE_NAME_PREFIX}-([0-9]+)$ ]]; then
             local node_num="${BASH_REMATCH[1]}"
-            if [[ "$node_num" -ge "$upm_start_index" ]] && [[ "$node_num" -le "$upm_end_index" ]]; then
-                log_info "Labeling UPM control plane node: $node (node number: $node_num)"
+            if [[ "$node_num" -ge "$ctl_start_index" ]] && [[ "$node_num" -le "$ctl_end_index" ]]; then
+                log_info "Labeling control plane node: $node (node number: $node_num)"
                 "$KUBECTL" label node "$node" "openebs.io/control-plane=enable" --overwrite || {
-                    error_exit "Failed to label UPM control plane node: $node"
+                    error_exit "Failed to label OpenEBS LVM LocalPV control plane node: $node"
                 }
             fi
         fi
@@ -2240,7 +2271,7 @@ install_lvm_localpv() {
 
     # Label data nodes (openebs.io/node=enable)
     log_info "Labeling data nodes..."
-    local worker_start_index=$upm_start_index
+    local worker_start_index=$ctl_start_index
     local worker_end_index=$((G_NUM_INSTANCES))
 
     while IFS= read -r node; do
@@ -2401,8 +2432,8 @@ install_cnpg() {
     # Use global variables extracted from config
     extract_vagrant_config_variables
 
-    local cnpg_start_index=$((G_KUBE_MASTER_INSTANCES + 1))
-    local cnpg_end_index=$((G_KUBE_MASTER_INSTANCES + G_UPM_CTL_INSTANCES))
+    local ctl_start_index=$((G_KUBE_MASTER_INSTANCES + 1))
+    local ctl_end_index=$((G_KUBE_MASTER_INSTANCES + G_UPM_CTL_INSTANCES))
 
     local nodes
     nodes=$("$KUBECTL" get nodes --no-headers -o custom-columns=":metadata.name")
@@ -2411,7 +2442,7 @@ install_cnpg() {
         # Extract node number from node name (assuming format: prefix-number)
         if [[ "$node" =~ ^${G_INSTANCE_NAME_PREFIX}-([0-9]+)$ ]]; then
             local node_num="${BASH_REMATCH[1]}"
-            if [[ "$node_num" -ge "$cnpg_start_index" ]] && [[ "$node_num" -le "$cnpg_end_index" ]]; then
+            if [[ "$node_num" -ge "$ctl_start_index" ]] && [[ "$node_num" -le "$ctl_end_index" ]]; then
                 log_info "Labeling CloudNative-PG control plane node: $node"
                 "$KUBECTL" label node "$node" "cnpg.io/control-plane=enable" --overwrite || {
                     error_exit "Failed to label CloudNative-PG control plane node: $node"
@@ -2464,6 +2495,7 @@ EOF
     echo -e "\n${GREEN}🎉 CloudNative-PG Installation Completed!${NC}\n"
     echo -e "${WHITE}📦 Components:${NC}"
     echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$cnpg_namespace${NC}"
+    echo -e "   ${GREEN}•${NC} Chart: ${CYAN}$cnpg_chart_name${NC}"
     echo -e "   ${GREEN}•${NC} Chart Version: ${CYAN}$cnpg_chart_version${NC}\n"
 
     echo -e "${WHITE}🔍 Verification Commands:${NC}"
@@ -2473,6 +2505,134 @@ EOF
     echo -e "   ${GREEN}•${NC} Check Helm release: ${CYAN}helm list -n $cnpg_namespace${NC}"
     echo -e "   ${GREEN}•${NC} Check deployment config: ${CYAN}kubectl get deployment cnpg-controller-manager -n $cnpg_namespace -o yaml${NC}"
     echo -e "${GREEN}✅ CloudNative-PG installed successfully${NC}\n"
+
+    # Record installation end time
+    local INSTALLATION_END_TIME
+    INSTALLATION_END_TIME=$(date +%s)
+    local INSTALLATION_DURATION=$((INSTALLATION_END_TIME - INSTALLATION_START_TIME))
+    # Display installation timing information
+    if [[ -n "$INSTALLATION_START_TIME" && -n "$INSTALLATION_END_TIME" ]]; then
+        echo -e "\n${WHITE}⏱️  Installation Steps Timing:${NC}"
+        echo -e "   ${GREEN}•${NC} Start Time: ${CYAN}$(date -d @"$INSTALLATION_START_TIME" '+%Y-%m-%d %H:%M:%S')${NC}"
+        echo -e "   ${GREEN}•${NC} End Time: ${CYAN}$(date -d @"$INSTALLATION_END_TIME" '+%Y-%m-%d %H:%M:%S')${NC}"
+        echo -e "   ${GREEN}•${NC} Duration: ${YELLOW}$(printf '%02d:%02d:%02d' $((INSTALLATION_DURATION / 3600)) $((INSTALLATION_DURATION % 3600 / 60)) $((INSTALLATION_DURATION % 60)))${NC}"
+    fi
+
+    return 0
+}
+
+#######################################
+# Install UPM Engine
+#######################################
+install_upm_engine() {
+    log_info "Starting UPM Engine installation..."
+
+    # Configuration variables
+    local upm_namespace="upm-system"
+    local upm_chart_repo="https://upmio.github.io/helm-charts"
+    local upm_release_name="upm-charts"
+    local upm_engine_chart_name="$upm_release_name/upm-engine"
+    local upm_engine_chart_name="1.2.4"
+
+    # Interactive confirmation for UPM Engine installation
+    echo -e "\n${YELLOW}📦 UPM Engine Installation${NC}\n"
+    echo -e "${WHITE}This will install UPM Engine with the following components:${NC}"
+    echo -e "   ${GREEN}•${NC} UPM Engine Helm chart"
+    echo -e "   ${GREEN}•${NC} Node labels for UPM Engine scheduling"
+    echo -e "   ${GREEN}•${NC} Helm repository configuration\n"
+
+    echo -e "${WHITE}Installation details:${NC}"
+    echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$upm_namespace${NC}"
+    echo -e "   ${GREEN}•${NC} Helm chart: ${CYAN}$upm_engine_chart_name${NC}"
+    echo -e "   ${GREEN}•${NC} Helm chart version: ${CYAN}$upm_engine_chart_name${NC}"
+    echo -e "   ${GREEN}•${NC} Installation timeout: ${CYAN}5 minutes${NC}\n"
+
+    echo -e "${YELLOW}⚠️  Note: This installation will:${NC}"
+    echo -e "   ${YELLOW}•${NC} Add node labels to control plane"
+    echo -e "   ${YELLOW}•${NC} Install Helm if not already present\n"
+
+    if ! prompt_yes_no "Do you want to proceed with UPM Engine installation?"; then
+        echo -e "${YELLOW}⏸️  UPM Engine installation skipped.${NC}\n"
+        log_info "UPM Engine installation skipped by user"
+        return 0
+    fi
+
+    echo -e "${GREEN}✅ Proceeding with UPM Engine installation...${NC}\n"
+    # Record installation start time
+    local INSTALLATION_START_TIME
+    INSTALLATION_START_TIME=$(date +%s)
+    log_info "Installation start time: $INSTALLATION_START_TIME"
+
+    # Check if helm is installed
+    if ! command -v helm >/dev/null 2>&1; then
+        log_info "Installing Helm..."
+        curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+        chmod 700 get_helm.sh
+        ./get_helm.sh
+        rm -f get_helm.sh
+    else
+        log_info "Helm is already installed"
+    fi
+
+    # Add UPM Engine Helm repository
+    log_info "Adding UPM Engine Helm repository..."
+    helm repo add "$upm_release_name" "$upm_chart_repo" || {
+        error_exit "Failed to add UPM Engine Helm repository"
+    }
+    helm repo update
+
+    log_info "Labeling UPM Engine control plane nodes..."
+    # Use global variables extracted from config
+    extract_vagrant_config_variables
+
+    local ctl_start_index=$((G_KUBE_MASTER_INSTANCES + 1))
+    local ctl_end_index=$((G_KUBE_MASTER_INSTANCES + G_UPM_CTL_INSTANCES))
+
+    local nodes
+    nodes=$("$KUBECTL" get nodes --no-headers -o custom-columns=":metadata.name")
+
+    while IFS= read -r node; do
+        # Extract node number from node name (assuming format: prefix-number)
+        if [[ "$node" =~ ^${G_INSTANCE_NAME_PREFIX}-([0-9]+)$ ]]; then
+            local node_num="${BASH_REMATCH[1]}"
+            if [[ "$node_num" -ge "$ctl_start_index" ]] && [[ "$node_num" -le "$ctl_end_index" ]]; then
+                log_info "Labeling UPM Engine control plane node: $node"
+                "$KUBECTL" label node "$node" "upm.engine.node=enable" --overwrite || {
+                    error_exit "Failed to label UPM Engine control plane node: $node"
+                }
+            fi
+        fi
+    done <<<"$nodes"
+
+    log_info "Installing UPM Engine via Helm..."
+    helm upgrade --install "$upm_release_name" "$upm_engine_chart_name" \
+        --namespace "$upm_namespace" \
+        --create-namespace \
+        --version "$upm_engine_chart_name" \
+        --wait --timeout=5m || {
+        error_exit "Failed to upgrade UPM Engine"
+    }
+
+    # Wait for operator to be ready
+    log_info "Waiting for UPM Engine to be ready..."
+    "$KUBECTL" wait --for=condition=ready pod -l "app.kubernetes.io/instance=upm-engine" -n "$upm_namespace" --timeout=300s || {
+        error_exit "UPM Engine failed to become ready"
+    }
+
+    # Display installation status
+    echo -e "\n${GREEN}🎉 UPM Engine Installation Completed!${NC}\n"
+    echo -e "${WHITE}📦 Components:${NC}"
+    echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$upm_namespace${NC}"
+    echo -e "   ${GREEN}•${NC} Chart: ${CYAN}$upm_engine_chart_name${NC}"
+    echo -e "   ${GREEN}•${NC} Chart Version: ${CYAN}$upm_engine_chart_name${NC}\n"
+
+    echo -e "${WHITE}🔍 Verification Commands:${NC}"
+    echo -e "   ${GREEN}•${NC} Check pods: ${CYAN}kubectl get pods -n $upm_namespace${NC}"
+    echo -e "   ${GREEN}•${NC} Check operator logs: ${CYAN}kubectl logs -n $upm_namespace deployment/upm-engine-controller-manager${NC}"
+    echo -e "   ${GREEN}•${NC} Check CRDs: ${CYAN}kubectl get crd | grep upm${NC}"
+    echo -e "   ${GREEN}•${NC} Check Helm release: ${CYAN}helm list -n $upm_namespace${NC}"
+    echo -e "   ${GREEN}•${NC} Check deployment config: ${CYAN}kubectl get deployment upm-engine-controller-manager -n $upm_namespace -o yaml${NC}"
+    echo -e "${GREEN}✅ UPM Engine installed successfully${NC}\n"
 
     # Record installation end time
     local INSTALLATION_END_TIME
@@ -2553,11 +2713,13 @@ OPTIONS:
   -h, --help              Show this help message
   --install-lvmlocalpv   Install OpenEBS LVM LocalPV only
   --install-cnpg          Install CloudNative-PG only
+  --install-upm-engine    Install UPM Engine only
 
 EXAMPLES:
   $0                      Run full Kubespray setup
   $0 --install-lvmlocalpv    Install OpenEBS LVM LocalPV only
   $0 --install-cnpg       Install CloudNative-PG only
+  $0 --install-upm-engine Install UPM Engine only
 
 DESCRIPTION:
   This script sets up a complete Kubespray environment with libvirt virtualization
@@ -2575,6 +2737,13 @@ REQUIREMENTS for CloudNative-PG installation:
   - Helm 3.x (will be installed if not present)
   - Cluster admin privileges for CRD installation
   - Internet access to download Helm charts
+
+REQUIREMENTS for UPM Engine installation:
+  - Existing Kubernetes cluster with kubectl access
+  - Helm 3.x (will be installed if not present)
+  - Cluster admin privileges for CRD installation
+  - Internet access to download Helm charts
+  - Proper node labeling for UPM Engine scheduling
 
 EOF
 }
@@ -2601,6 +2770,10 @@ parse_arguments() {
             install_cnpg
             exit 0
             ;;
+        --install-upm-engine)
+            install_upm_engine
+            exit 0
+            ;;
         *)
             log_error "Unknown option: $1"
             show_help
@@ -2618,12 +2791,12 @@ main() {
     parse_arguments "$@"
     # Variable validation
     validate_required_variables
+    # Network and proxy validation
+    validate_network_and_proxy
     # System validation
     check_sudo_privileges
     check_system_requirements
     check_ntp_synchronization
-    validate_configuration
-    test_network_connectivity
     # Pre-installation confirmation
     show_setup_confirmation
     # Installation steps
@@ -2641,6 +2814,8 @@ main() {
     install_lvm_localpv
     # install cnpg
     install_cnpg
+    # install upm engine
+    install_upm_engine
 
     log_info "Kubespray environment setup completed successfully!"
 }
