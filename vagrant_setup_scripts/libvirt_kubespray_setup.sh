@@ -2119,6 +2119,56 @@ vagrant_and_run_kubespray() {
             echo -e "${GREEN}✅ Box found.${NC}"
         fi
 
+        # Check for existing VMs and offer cleanup option
+        echo -e "${YELLOW}🔍 Checking for existing virtual machines...${NC}"
+        local vm_status
+        vm_status=$(vagrant status 2>/dev/null | grep -E "(running|poweroff|saved|aborted)" | grep -v "not created" || true)
+        
+        if [[ -n "$vm_status" ]]; then
+            echo -e "${YELLOW}⚠️  Found existing virtual machines:${NC}"
+            echo "$vm_status"
+            echo -e "\n${YELLOW}These VMs may interfere with the new deployment.${NC}"
+            echo -e "${WHITE}Options:${NC}"
+            echo -e "   ${RED}1.${NC} Clean up automatically with ${CYAN}vagrant destroy -f${NC}"
+            echo -e "   ${YELLOW}2.${NC} Cancel and clean up manually"
+            echo -e "   ${GREEN}3.${NC} Continue anyway (not recommended)\n"
+            
+            local choice
+            while true; do
+                read -p "$(echo -e "${WHITE}Please choose an option [1/2/3]: ${NC}")" choice
+                case $choice in
+                    1)
+                        echo -e "${YELLOW}🧹 Cleaning up existing VMs...${NC}"
+                        if vagrant destroy -f; then
+                            echo -e "${GREEN}✅ VMs cleaned up successfully${NC}"
+                            break
+                        else
+                            echo -e "${RED}❌ Failed to clean up VMs automatically${NC}"
+                            echo -e "${YELLOW}Please clean up manually and run the script again${NC}"
+                            return 1
+                        fi
+                        ;;
+                    2)
+                        echo -e "${YELLOW}⏸️  Deployment cancelled for manual cleanup${NC}"
+                        echo -e "${WHITE}Manual cleanup commands:${NC}"
+                        echo -e "   ${CYAN}vagrant destroy -f${NC}    # Destroy all VMs"
+                        echo -e "   ${CYAN}vagrant status${NC}        # Check VM status"
+                        echo -e "\n${WHITE}After cleanup, run this script again.${NC}"
+                        return 0
+                        ;;
+                    3)
+                        echo -e "${YELLOW}⚠️  Continuing with existing VMs (may cause conflicts)${NC}"
+                        break
+                        ;;
+                    *)
+                        echo -e "${RED}Invalid choice. Please enter 1, 2, or 3.${NC}"
+                        ;;
+                esac
+            done
+        else
+            echo -e "${GREEN}✅ No existing VMs found${NC}"
+        fi
+
         if vagrant up --provider=libvirt --no-parallel; then
             echo -e "\n${GREEN}🎉 Deployment Completed Successfully!${NC}\n"
             # Configure kubectl for local access
