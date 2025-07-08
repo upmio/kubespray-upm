@@ -78,7 +78,6 @@ export KUBECONFIG="${KUBE_DIR}/config"
 readonly KUBESPRAY_REPO_URL="https://github.com/upmio/kubespray-upm.git"
 readonly LVM_LOCALPV_VERSION="${LVM_LOCALPV_VERSION:-"1.6.2"}"
 readonly CNPG_VERSION="${CNPG_VERSION:-"0.24.0"}"
-readonly UPM_REPO_URL="https://github.com/upmio/upm-charts.git"
 readonly UPM_VERSION="${UPM_VERSION:-"1.2.4"}"
 readonly UPM_PWD="${UPM_PWD:-"Upm@2024!"}"
 readonly LVMLOCALPV_STORAGECLASS_NAME="lvm-localpv"
@@ -2137,43 +2136,27 @@ vagrant_and_run_kubespray() {
             echo -e "${YELLOW}⚠️  Found existing virtual machines:${NC}"
             echo "$vm_status"
             echo -e "\n${YELLOW}These VMs may interfere with the new deployment.${NC}"
-            echo -e "${WHITE}Options:${NC}"
-            echo -e "   ${RED}1.${NC} Clean up automatically with ${CYAN}vagrant destroy -f${NC}"
-            echo -e "   ${YELLOW}2.${NC} Cancel and clean up manually"
-            echo -e "   ${GREEN}3.${NC} Continue anyway (not recommended)\n"
+            echo -e "${WHITE}Do you want to clean up existing VMs and continue?${NC}"
+            echo -e "   ${GREEN}•${NC} Yes: Clean up automatically with ${CYAN}vagrant destroy -f${NC}"
+            echo -e "   ${RED}•${NC} No: Cancel deployment\n"
             
-            local choice
-            while true; do
-                read -r -p "$(echo -e "${WHITE}Please choose an option [1/2/3]: ${NC}")" choice
-                case $choice in
-                    1)
-                        echo -e "${YELLOW}🧹 Cleaning up existing VMs...${NC}"
-                        if vagrant destroy -f; then
-                            echo -e "${GREEN}✅ VMs cleaned up successfully${NC}"
-                            break
-                        else
-                            echo -e "${RED}❌ Failed to clean up VMs automatically${NC}"
-                            echo -e "${YELLOW}Please clean up manually and run the script again${NC}"
-                            return 1
-                        fi
-                        ;;
-                    2)
-                        echo -e "${YELLOW}⏸️  Deployment cancelled for manual cleanup${NC}"
-                        echo -e "${WHITE}Manual cleanup commands:${NC}"
-                        echo -e "   ${CYAN}vagrant destroy -f${NC}    # Destroy all VMs"
-                        echo -e "   ${CYAN}vagrant status${NC}        # Check VM status"
-                        echo -e "\n${WHITE}After cleanup, run this script again.${NC}"
-                        return 0
-                        ;;
-                    3)
-                        echo -e "${YELLOW}⚠️  Continuing with existing VMs (may cause conflicts)${NC}"
-                        break
-                        ;;
-                    *)
-                        echo -e "${RED}Invalid choice. Please enter 1, 2, or 3.${NC}"
-                        ;;
-                esac
-            done
+            if prompt_yes_no "Clean up existing VMs and continue?"; then
+                echo -e "${YELLOW}🧹 Cleaning up existing VMs...${NC}"
+                if vagrant destroy -f; then
+                    echo -e "${GREEN}✅ VMs cleaned up successfully${NC}"
+                else
+                    echo -e "${RED}❌ Failed to clean up VMs automatically${NC}"
+                    echo -e "${YELLOW}Please clean up manually and run the script again${NC}"
+                    return 1
+                fi
+            else
+                echo -e "${YELLOW}⏸️  Deployment cancelled by user${NC}"
+                echo -e "${WHITE}Manual cleanup commands:${NC}"
+                echo -e "   ${CYAN}vagrant destroy -f${NC}    # Destroy all VMs"
+                echo -e "   ${CYAN}vagrant status${NC}        # Check VM status"
+                echo -e "\n${WHITE}After cleanup, run this script again.${NC}"
+                return 0
+            fi
         else
             echo -e "${GREEN}✅ No existing VMs found${NC}"
         fi
@@ -2731,7 +2714,7 @@ install_upm_engine() {
     helm upgrade --install "$upm_engine_release_name" "$upm_engine_chart_name" \
         --namespace "$upm_namespace" \
         --create-namespace \
-        --version "$upm_engine_chart_version" \
+        --version "$UPM_VERSION" \
         --wait --timeout=5m || {
         error_exit "Failed to upgrade UPM Engine"
     }
@@ -2747,7 +2730,7 @@ install_upm_engine() {
     echo -e "${WHITE}📦 Components:${NC}"
     echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$upm_namespace${NC}"
     echo -e "   ${GREEN}•${NC} Chart: ${CYAN}$upm_engine_chart_name${NC}"
-    echo -e "   ${GREEN}•${NC} Chart Version: ${CYAN}$upm_engine_chart_version${NC}\n"
+    echo -e "   ${GREEN}•${NC} Chart Version: ${CYAN}$UPM_VERSION${NC}\n"
 
     echo -e "${WHITE}🔍 Verification Commands:${NC}"
     echo -e "   ${GREEN}•${NC} Check pods: ${CYAN}kubectl get pods -n $upm_namespace${NC}"
@@ -2949,7 +2932,7 @@ EOF
     echo -e "${WHITE}📦 Components:${NC}"
     echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$upm_namespace${NC}"
     echo -e "   ${GREEN}•${NC} Chart: ${CYAN}$upm_platform_chart_name${NC}"
-    echo -e "   ${GREEN}•${NC} Chart Version: ${CYAN}$upm_platform_chart_version${NC}\n"
+    echo -e "   ${GREEN}•${NC} Chart Version: ${CYAN}$UPM_VERSION${NC}\n"
 
     echo -e "${WHITE}🔍 Verification Commands:${NC}"
     echo -e "   ${GREEN}•${NC} Check pods: ${CYAN}kubectl get pods -n $upm_namespace${NC}"
@@ -2962,7 +2945,11 @@ EOF
     # Get worker node IP for login URL (prioritize nodes with upm.platform.node label)
     local worker_node_ip
     worker_node_ip=$($KUBECTL get nodes -l upm.platform.node=enable -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null)
-    [[ -n "$worker_node_ip" ]] && echo "Worker node IP: $worker_node_ip" || error_exit "Failed to get worker node IP"
+    if [[ -n "$worker_node_ip" ]]; then
+        echo "Worker node IP: $worker_node_ip"
+    else
+        error_exit "Failed to get worker node IP"
+    fi
     
     # Display UPM Platform login information
     echo -e "${WHITE}🌐 UPM Platform Access Information:${NC}"
