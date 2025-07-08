@@ -1916,8 +1916,8 @@ show_setup_confirmation() {
         echo -e "   ${GREEN}•${NC} Bridge: ${CYAN}$BRIDGE_NAME (using interface: ${YELLOW}$BRIDGE_INTERFACE${NC})"
     else
         echo -e "   ${YELLOW}•${NC} Bridge: ${YELLOW}Not configured${NC}"
+        echo -e "   ${GREEN}•${NC} NAT: ${CYAN}192.168.200.0/24${NC} (DHCP: Enabled)"
     fi
-    echo -e "   ${GREEN}•${NC} NAT: ${CYAN}192.168.200.0/24${NC} (DHCP: Enabled)"
 
     # Proxy Configuration
     if [[ -n "${HTTP_PROXY:-}" ]]; then
