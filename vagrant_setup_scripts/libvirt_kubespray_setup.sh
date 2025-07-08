@@ -47,6 +47,7 @@ KUBESPRAY_DIR="$(pwd)/kubespray-upm"
 readonly KUBESPRAY_DIR
 readonly VAGRANT_CONF_DIR="${KUBESPRAY_DIR}/vagrant"
 readonly VAGRANT_CONF_FILE="${VAGRANT_CONF_DIR}/config.rb"
+readonly VAGRANTFILE_PATH="${KUBESPRAY_DIR}/Vagrantfile"
 readonly KUBCTL="${HOME}/.local/bin/kubectl"
 export KUBECONFIG="${HOME}/.kube/config"
 
@@ -1677,10 +1678,9 @@ setup_kubespray_project() {
     # Replace project Vagrantfile with vagrant_setup_scripts version
     log_info "Replacing project Vagrantfile with vagrant_setup_scripts version..."
     local source_vagrantfile="$KUBESPRAY_DIR/vagrant_setup_scripts/Vagrantfile"
-    local target_vagrantfile="$KUBESPRAY_DIR/Vagrantfile"
 
     if [[ -f "$source_vagrantfile" ]]; then
-        if cp "$source_vagrantfile" "$target_vagrantfile"; then
+        if cp "$source_vagrantfile" "$VAGRANTFILE_PATH"; then
             log_info "Successfully replaced Vagrantfile"
         else
             log_error "Failed to replace Vagrantfile"
@@ -1692,6 +1692,16 @@ setup_kubespray_project() {
     fi
 
     log_info "Kubespray project setup completed"
+}
+
+#######################################
+# Get box name from SUPPORTED_OS configuration in Vagrantfile
+#######################################
+get_box_name() {
+    local os_type="$1"
+    local box_name=""
+
+
 }
 
 #######################################
@@ -1946,13 +1956,24 @@ vagrant_and_run_kubespray() {
 
         # Check vagrant box existence
         # Get Box Name
-        local box_name=""
-        if G_OS="rockylinux9"; then
-            box_name="bento/rockylinux-9"
-        elif G_OS="ubuntu2404"; then
-            box_name="bento/ubuntu-24.04"
+        local box_name
+        # Try to extract box name from Vagrantfile SUPPORTED_OS configuration
+        if [[ -f "${VAGRANTFILE_PATH}" ]]; then
+            # Extract the SUPPORTED_OS hash and find the box name for the given OS
+            local supported_os_section
+            supported_os_section=$(awk '/SUPPORTED_OS\s*=\s*{/,/^}/' "${VAGRANTFILE_PATH}" 2>/dev/null)
+            
+            if [[ -n "$supported_os_section" ]]; then
+                # Look for the OS entry and extract the box name
+                 # Format: "rockylinux9" => {box: "rockylinux/9", user: "vagrant"},
+                 box_name=$(echo "$supported_os_section" | grep "\"$G_OS\"" | grep -o 'box: "[^"]*"' | cut -d'"' -f2 | head -n1)
+            else
+                log_error "Could not extract box name for OS '$G_OS' from $VAGRANTFILE_PATH"
+                error_exit "Failed to extract box name"
+            fi
         else
-            error_exit "Unsupported OS: $G_OS"
+            log_error "Could not find $VAGRANTFILE_PATH"
+            error_exit "Failed to find Vagrant configuration file"
         fi
 
         # Check vagrant box existence with retry mechanism
@@ -2258,7 +2279,7 @@ install_lvm_localpv() {
 
     # Wait for pods to be ready
     log_info "Waiting for OpenEBS pods to be ready..."
-    "$KUBCTL" wait --for=condition=ready pod -l release="$openebs_release_name" -n "$openebs_namespace" --timeout=300s || {
+    "$KUBCTL" wait --for=condition=ready pod -l release="$openebs_release_name" -n "$openebs_namespace" --timeout=600s || {
         error_exit "OpenEBS pods failed to become ready"
     }
     log_info "OpenEBS LVM LocalPV installed successfully"
