@@ -86,8 +86,6 @@ readonly LVMLOCALPV_STORAGECLASS_NAME="lvm-localpv"
 
 # Network configuration constants
 readonly BRIDGE_NAME="br0"
-readonly DEFAULT_VM_INSTANCES="5"
-readonly DEFAULT_INSTANCE_PREFIX="k8s"
 
 # Package lists
 readonly SYSTEM_PACKAGES="curl git rsync yum-utils"
@@ -116,7 +114,7 @@ declare INSTALLATION_END_TIME=""
 declare INSTALLATION_DURATION=""
 
 # Global variables for Vagrant configuration (extracted from config.rb)
-declare G_NUM_INSTANCES=""
+declare G_NUM_INSTANCES="5"
 declare G_KUBE_MASTER_INSTANCES=""
 declare G_UPM_CTL_INSTANCES=""
 declare G_VM_CPUS=""
@@ -311,14 +309,6 @@ prompt_ip_input() {
         return 1
     fi
 
-    # Check required constants for VM range validation
-    if [[ "$validation_func" == "validate_vm_ip_range" ]]; then
-        if [[ -z "${DEFAULT_VM_INSTANCES:-}" ]]; then
-            log_error "Required constant DEFAULT_VM_INSTANCES not defined for VM IP range validation"
-            return 1
-        fi
-    fi
-
     while true; do
         printf "${CYAN}🌐 %s: ${NC}" "$prompt"
         # Improved output buffer flushing
@@ -339,8 +329,8 @@ prompt_ip_input() {
                 local fourth_octet
                 fourth_octet=$(echo "$ip_input" | cut -d'.' -f4)
                 if validate_ip_address "$ip_input"; then
-                    echo -e "${RED}❌ Fourth octet ($fourth_octet) must be between 1 and $((254 - DEFAULT_VM_INSTANCES)) for VM allocation${NC}"
-                    echo -e "${YELLOW}💡 Please enter an IP with fourth octet between 1 and $((254 - DEFAULT_VM_INSTANCES)) (e.g., 192.168.1.10)${NC}"
+                    echo -e "${RED}❌ Fourth octet ($fourth_octet) must be between 1 and $((254 - G_NUM_INSTANCES)) for VM allocation${NC}"
+                    echo -e "${YELLOW}💡 Please enter an IP with fourth octet between 1 and $((254 - G_NUM_INSTANCES)) (e.g., 192.168.1.10)${NC}"
                 else
                     echo -e "${RED}❌ Invalid IP address format: $ip_input${NC}"
                     echo -e "${YELLOW}💡 Please enter a valid IP address (e.g., 192.168.1.10)${NC}"
@@ -443,7 +433,7 @@ validate_vm_ip_range() {
     fourth_octet="${octets[3]}"
 
     # Check if the fourth octet is in valid range for VM allocation
-    if [[ $fourth_octet -lt 1 || $fourth_octet -gt $((254 - DEFAULT_VM_INSTANCES)) ]]; then
+    if [[ $fourth_octet -lt 1 || $fourth_octet -gt $((254 - G_NUM_INSTANCES)) ]]; then
         # Don't echo here as it interferes with prompt_ip_input return value
         return 1
     fi
@@ -540,7 +530,7 @@ select_network_interface() {
     echo
     
     while true; do
-        printf "${CYAN}🔗 Select network interface (1-${#interfaces[@]}): ${NC}"
+        printf "${CYAN}🔗 Select network interface (1-%s): ${NC}" "${#interfaces[@]}"
         read -r choice
         
         if [[ "$choice" =~ ^[0-9]+$ ]] && [[ "$choice" -ge 1 ]] && [[ "$choice" -le ${#interfaces[@]} ]]; then
@@ -1667,15 +1657,6 @@ configure_public_network_settings() {
         log_error "Please run configure_public_network_interactive first"
         return 1
     fi
-    
-    # Display configuration being applied
-    echo -e "\n${YELLOW}📝 Applying Network Configuration:${NC}"
-    echo -e "   ${GREEN}•${NC} Bridge Interface: ${CYAN}$BRIDGE_INTERFACE${NC}"
-    echo -e "   ${GREEN}•${NC} Subnet: ${CYAN}$subnet${NC}"
-    echo -e "   ${GREEN}•${NC} Netmask: ${CYAN}$netmask${NC}"
-    echo -e "   ${GREEN}•${NC} Gateway: ${CYAN}$gateway${NC}"
-    echo -e "   ${GREEN}•${NC} DNS Server: ${CYAN}$dns_server${NC}"
-    echo -e "   ${GREEN}•${NC} Starting IP: ${CYAN}$subnet.$subnet_split4${NC}\n"
 
     # Apply the configuration to the config file
     awk -v subnet="$subnet" \
@@ -1752,8 +1733,8 @@ configure_vagrant_config() {
         awk -v http_proxy="$HTTP_PROXY" \
             -v https_proxy="$HTTPS_PROXY" \
             -v no_proxy="$NO_PROXY" \
-            -v additional_no_proxy="$NO_PROXY" '
-        {
+            -v additional_no_proxy="$NO_PROXY" \
+        '{
             if ($0 ~ /^# \$http_proxy = ""/) {
                 print "$http_proxy = \"" http_proxy "\""
             } else if ($0 ~ /^# \$https_proxy = ""/) {
@@ -1808,8 +1789,8 @@ configure_vagrant_config() {
     temp_file="${VAGRANT_CONF_FILE}.tmp"
     # Add VM resource configuration to config.rb
     awk -v vm_cpus="$G_VM_CPUS" \
-        -v vm_memory="$G_VM_MEMORY" '
-    {
+        -v vm_memory="$G_VM_MEMORY" \
+    '{
         if ($0 ~ /^# \$vm_cpus = ""/) {
             print "$vm_cpus = " vm_cpus
         } else if ($0 ~ /^# \$vm_memory = ""/) {
@@ -1889,7 +1870,7 @@ extract_vagrant_config_variables() {
     log_info "Extracting Vagrant configuration variables from: $VAGRANT_CONF_FILE"
 
     # Extract configuration values from config.rb and set as global variables
-    G_NUM_INSTANCES=$(grep "^\$num_instances\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "$DEFAULT_VM_INSTANCES")
+    G_NUM_INSTANCES=$(grep "^\$num_instances\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "5")
     G_KUBE_MASTER_INSTANCES=$(grep "^\$kube_master_instances\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "1")
     G_UPM_CTL_INSTANCES=$(grep "^\$upm_ctl_instances\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "1")
     G_KUBE_MASTER_VM_CPUS=$(grep "^\$kube_master_vm_cpus\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "4")
@@ -1899,7 +1880,7 @@ extract_vagrant_config_variables() {
     G_KUBE_VERSION=$(grep "^\$kube_version\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "1.33.2")
     G_OS=$(grep "^\$os\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "rockylinux9")
     G_NETWORK_PLUGIN=$(grep "^\$network_plugin\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "calico")
-    G_INSTANCE_NAME_PREFIX=$(grep "^\$instance_name_prefix\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "$DEFAULT_INSTANCE_PREFIX")
+    G_INSTANCE_NAME_PREFIX=$(grep "^\$instance_name_prefix\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "k8s")
     G_SUBNET_SPLIT4=$(grep "^\$subnet_split4\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "100")
 
     # Extract network configuration
@@ -1921,7 +1902,7 @@ extract_vagrant_config_variables() {
     fi
 
     # Ensure all numeric variables have valid default values to prevent arithmetic errors
-    G_NUM_INSTANCES=${G_NUM_INSTANCES:-$DEFAULT_VM_INSTANCES}
+    G_NUM_INSTANCES=${G_NUM_INSTANCES:-5}
     G_KUBE_MASTER_INSTANCES=${G_KUBE_MASTER_INSTANCES:-1}
     G_UPM_CTL_INSTANCES=${G_UPM_CTL_INSTANCES:-1}
     G_KUBE_MASTER_VM_CPUS=${G_KUBE_MASTER_VM_CPUS:-4}
@@ -3247,8 +3228,7 @@ setup_environment() {
 #######################################
 parse_arguments() {
     local network_type_specified=false
-    local component_mode=false
-    
+
     # Check for help first
     for arg in "$@"; do
         if [[ "$arg" == "-h" || "$arg" == "--help" ]]; then
@@ -3294,7 +3274,6 @@ parse_arguments() {
             exit 0
             ;;
         --lvmlocalpv)
-            component_mode=true
             if [[ "$network_type_specified" == true ]]; then
                 log_warn "Warning: -n parameter has no effect with --lvmlocalpv option"
             fi
@@ -3302,7 +3281,6 @@ parse_arguments() {
             exit 0
             ;;
         --cnpg)
-            component_mode=true
             if [[ "$network_type_specified" == true ]]; then
                 log_warn "Warning: -n parameter has no effect with --cnpg option"
             fi
@@ -3310,7 +3288,6 @@ parse_arguments() {
             exit 0
             ;;
         --upm-engine)
-            component_mode=true
             if [[ "$network_type_specified" == true ]]; then
                 log_warn "Warning: -n parameter has no effect with --upm-engine option"
             fi
@@ -3318,7 +3295,6 @@ parse_arguments() {
             exit 0
             ;;
         --upm-platform)
-            component_mode=true
             if [[ "$network_type_specified" == true ]]; then
                 log_warn "Warning: -n parameter has no effect with --upm-platform option"
             fi
