@@ -2885,8 +2885,8 @@ install_upm_platform() {
     # Use global variables extracted from config
     extract_vagrant_config_variables
 
-    local worker_start_index=$((G_KUBE_MASTER_INSTANCES + G_UPM_CTL_INSTANCES + 1))
-    local worker_end_index=$((G_KUBE_MASTER_INSTANCES + G_UPM_CTL_INSTANCES + G_KUBE_NODE_INSTANCES))
+    local ctl_start_index=$((G_KUBE_MASTER_INSTANCES + 1))
+    local ctl_end_index=$((G_KUBE_MASTER_INSTANCES + G_UPM_CTL_INSTANCES))
 
     local nodes
     nodes=$("$KUBECTL" get nodes --no-headers -o custom-columns=":metadata.name")
@@ -2895,10 +2895,19 @@ install_upm_platform() {
         # Extract node number from node name (assuming format: prefix-number)
         if [[ "$node" =~ ^${G_INSTANCE_NAME_PREFIX}-([0-9]+)$ ]]; then
             local node_num="${BASH_REMATCH[1]}"
-            if [[ "$node_num" -ge "$worker_start_index" ]] && [[ "$node_num" -le "$worker_end_index" ]]; then
-                log_info "Labeling UPM Platform worker node: $node"
+            if [[ "$node_num" -ge "$ctl_start_index" ]] && [[ "$node_num" -le "$ctl_end_index" ]]; then
+                log_info "Labeling UPM Platform control plane node: $node"
                 "$KUBECTL" label node "$node" "upm.platform.node=enable" --overwrite || {
-                    error_exit "Failed to label UPM Platform worker node: $node"
+                    error_exit "Failed to label UPM Platform control plane node: $node"
+                }
+                "$KUBECTL" label node "$node" 'nacos.io/control-plane=enable' --overwrite || {
+                    error_exit "Failed to label UPM Platform nacos node: $node"
+                }
+                "$KUBECTL" label node "$node" 'mysql.standalone.node=enable' --overwrite || {
+                    error_exit "Failed to label UPM Platform database node: $node"
+                }
+                "$KUBECTL" label node "$node" 'redis.standalone.node=enable' --overwrite || {
+                    error_exit "Failed to label UPM Platform cache node: $node"
                 }
             fi
         fi
@@ -2914,9 +2923,7 @@ nginx:
       http: 80
     nodePorts:
       http: 32010
-ui:
-  image:
-    tag: ${UPM_VERSION}
+
 apiserver:
   upm:
     mysqlUser:
@@ -2967,51 +2974,7 @@ apiserver:
       external:
         mysqlMasterHost: "3306"
         mysqlMasterPassword: "${UPM_PWD}"
-  common:
-    image:
-      tag: ${UPM_VERSION}
-  gateway:
-    image:
-      tag: ${UPM_VERSION}
-  auth:
-    image:
-      tag: ${UPM_VERSION}
-  operatelog:
-    image:
-      tag: ${UPM_VERSION}
-  resource:
-    image:
-      tag: ${UPM_VERSION}
-  user:
-    image:
-      tag: ${UPM_VERSION}
-  elasticsearch-ms:
-    image:
-      tag: ${UPM_VERSION}
-  kafka-ms:
-    image:
-      tag: ${UPM_VERSION}
-  mysql-ms:
-    image:
-      tag: ${UPM_VERSION}
-  postgresql-ms:
-    image:
-      tag: ${UPM_VERSION}
-  redis-ms:
-    image:
-      tag: ${UPM_VERSION}
-  redis-cluster-ms:
-    image:
-      tag: ${UPM_VERSION}
-  zookeeper-ms:
-    image:
-      tag: ${UPM_VERSION}
-  cnpg-ms:
-    image:
-      tag: ${UPM_VERSION}
-  innodb-cluster-ms:
-    image:
-      tag: ${UPM_VERSION}
+ 
 EOF
 
     log_info "Installing UPM Platform via Helm..."
