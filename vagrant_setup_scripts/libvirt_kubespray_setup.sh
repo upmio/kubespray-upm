@@ -136,11 +136,6 @@ declare AUTO_CONFIRM=false
 # Global array for installation options
 declare -a INSTALLATION_OPTIONS=()
 
-# Global variables for installation timing
-declare INSTALLATION_START_TIME=""
-declare INSTALLATION_END_TIME=""
-declare INSTALLATION_DURATION=""
-
 # Global variables for Vagrant configuration (extracted from config.rb)
 declare G_NUM_INSTANCES="5"
 declare G_KUBE_MASTER_INSTANCES=""
@@ -2068,9 +2063,6 @@ show_setup_confirmation() {
     if prompt_yes_no "Do you want to proceed with the installation?"; then
         echo -e "\n${GREEN}✅ Installation confirmed. Proceeding...${NC}\n"
         log_info "User confirmed installation. Starting setup process..."
-        # Record installation start time
-        INSTALLATION_START_TIME=$(date +%s)
-        log_info "Installation started at: $(date -d @"$INSTALLATION_START_TIME" '+%Y-%m-%d %H:%M:%S')"
         return 0
     else
         echo -e "\n${RED}❌ Installation cancelled by user.${NC}\n"
@@ -2343,17 +2335,6 @@ vagrant_and_run_kubespray() {
             echo -e "${YELLOW}🔄 Retry: ${CYAN}cd $KUBESPRAY_DIR && source venv/bin/activate && vagrant up --provider=libvirt --no-parallel${NC}\n"
             return 1
         fi
-
-        # Record installation end time
-        INSTALLATION_END_TIME=$(date +%s)
-        INSTALLATION_DURATION=$((INSTALLATION_END_TIME - INSTALLATION_START_TIME))
-        # Display installation timing information
-        if [[ -n "$INSTALLATION_START_TIME" && -n "$INSTALLATION_END_TIME" ]]; then
-            echo -e "\n${WHITE}⏱️  Installation Steps Timing:${NC}"
-            echo -e "   ${GREEN}•${NC} Start Time: ${CYAN}$(date -d @"$INSTALLATION_START_TIME" '+%Y-%m-%d %H:%M:%S')${NC}"
-            echo -e "   ${GREEN}•${NC} End Time: ${CYAN}$(date -d @"$INSTALLATION_END_TIME" '+%Y-%m-%d %H:%M:%S')${NC}"
-            echo -e "   ${GREEN}•${NC} Duration: ${YELLOW}$(printf '%02d:%02d:%02d' $((INSTALLATION_DURATION / 3600)) $((INSTALLATION_DURATION % 3600 / 60)) $((INSTALLATION_DURATION % 60)))${NC}"
-        fi
     else
         echo -e "\n${YELLOW}⏸️  Deployment cancelled.${NC}\n"
         echo -e "${WHITE}📝 Config: ${CYAN}$VAGRANT_CONF_FILE${NC}\n"
@@ -2492,8 +2473,8 @@ install_lvm_localpv() {
 
     echo -e "${GREEN}✅ Proceeding with OpenEBS LVM LocalPV installation...${NC}\n"
     # Record installation start time
-    INSTALLATION_START_TIME=$(date +%s)
-    log_info "Installation started at: $(date -d @"$INSTALLATION_START_TIME" '+%Y-%m-%d %H:%M:%S')"
+    local start_time
+    start_time=$(date +%s)
 
     # Check if helm is installed
     if ! command -v helm >/dev/null 2>&1; then
@@ -2616,14 +2597,14 @@ EOF
     echo -e "${GREEN}✅ OpenEBS LVM LocalPV installed successfully${NC}\n"
 
     # Record installation end time
-    INSTALLATION_END_TIME=$(date +%s)
-    INSTALLATION_DURATION=$((INSTALLATION_END_TIME - INSTALLATION_START_TIME))
+    local end_time=$(date +%s)
+    local duration=$((end_time - start_time))
     # Display installation timing information
-    if [[ -n "$INSTALLATION_START_TIME" && -n "$INSTALLATION_END_TIME" ]]; then
+    if [[ -n "$start_time" && -n "$end_time" ]]; then
         echo -e "\n${WHITE}⏱️  Installation Steps Timing:${NC}"
-        echo -e "   ${GREEN}•${NC} Start Time: ${CYAN}$(date -d @"$INSTALLATION_START_TIME" '+%Y-%m-%d %H:%M:%S')${NC}"
-        echo -e "   ${GREEN}•${NC} End Time: ${CYAN}$(date -d @"$INSTALLATION_END_TIME" '+%Y-%m-%d %H:%M:%S')${NC}"
-        echo -e "   ${GREEN}•${NC} Duration: ${YELLOW}$(printf '%02d:%02d:%02d' $((INSTALLATION_DURATION / 3600)) $((INSTALLATION_DURATION % 3600 / 60)) $((INSTALLATION_DURATION % 60)))${NC}"
+        echo -e "   ${GREEN}•${NC} Start Time: ${CYAN}$(date -d @"$start_time" '+%Y-%m-%d %H:%M:%S')${NC}"
+        echo -e "   ${GREEN}•${NC} End Time: ${CYAN}$(date -d @"$end_time" '+%Y-%m-%d %H:%M:%S')${NC}"
+        echo -e "   ${GREEN}•${NC} Duration: ${YELLOW}$(printf '%02d:%02d:%02d' $((duration / 3600)) $((duration % 3600 / 60)) $((duration % 60)))${NC}"
     fi
 
     return 0
@@ -2667,9 +2648,8 @@ install_cnpg() {
 
     echo -e "${GREEN}✅ Proceeding with CloudNative-PG installation...${NC}\n"
     # Record installation start time
-    local INSTALLATION_START_TIME
-    INSTALLATION_START_TIME=$(date +%s)
-    log_info "Installation start time: $INSTALLATION_START_TIME"
+    local start_time
+    start_time=$(date +%s)
 
     # Check if helm is installed
     if ! command -v helm >/dev/null 2>&1; then
@@ -2768,15 +2748,15 @@ EOF
     echo -e "${GREEN}✅ CloudNative-PG installed successfully${NC}\n"
 
     # Record installation end time
-    local INSTALLATION_END_TIME
-    INSTALLATION_END_TIME=$(date +%s)
-    local INSTALLATION_DURATION=$((INSTALLATION_END_TIME - INSTALLATION_START_TIME))
+    local end_time
+    end_time=$(date +%s)
+    local duration=$((end_time - start_time))
     # Display installation timing information
-    if [[ -n "$INSTALLATION_START_TIME" && -n "$INSTALLATION_END_TIME" ]]; then
+    if [[ -n "$start_time" && -n "$end_time" ]]; then
         echo -e "\n${WHITE}⏱️  Installation Steps Timing:${NC}"
-        echo -e "   ${GREEN}•${NC} Start Time: ${CYAN}$(date -d @"$INSTALLATION_START_TIME" '+%Y-%m-%d %H:%M:%S')${NC}"
-        echo -e "   ${GREEN}•${NC} End Time: ${CYAN}$(date -d @"$INSTALLATION_END_TIME" '+%Y-%m-%d %H:%M:%S')${NC}"
-        echo -e "   ${GREEN}•${NC} Duration: ${YELLOW}$(printf '%02d:%02d:%02d' $((INSTALLATION_DURATION / 3600)) $((INSTALLATION_DURATION % 3600 / 60)) $((INSTALLATION_DURATION % 60)))${NC}"
+        echo -e "   ${GREEN}•${NC} Start Time: ${CYAN}$(date -d @"$start_time" '+%Y-%m-%d %H:%M:%S')${NC}"
+        echo -e "   ${GREEN}•${NC} End Time: ${CYAN}$(date -d @"$end_time" '+%Y-%m-%d %H:%M:%S')${NC}"
+        echo -e "   ${GREEN}•${NC} Duration: ${YELLOW}$(printf '%02d:%02d:%02d' $((duration / 3600)) $((duration % 3600 / 60)) $((duration % 60)))${NC}"
     fi
 
     return 0
@@ -2820,9 +2800,8 @@ install_upm_engine() {
 
     echo -e "${GREEN}✅ Proceeding with UPM Engine installation...${NC}\n"
     # Record installation start time
-    local INSTALLATION_START_TIME
-    INSTALLATION_START_TIME=$(date +%s)
-    log_info "Installation start time: $INSTALLATION_START_TIME"
+    local start_time
+    start_time=$(date +%s)
 
     # Check if helm is installed
     if ! command -v helm >/dev/null 2>&1; then
@@ -2895,17 +2874,6 @@ install_upm_engine() {
     echo -e "   ${GREEN}•${NC} Check deployment config: ${CYAN}kubectl get deployment upm-engine-controller-manager -n $upm_namespace -o yaml${NC}"
     echo -e "${GREEN}✅ UPM Engine installed successfully${NC}\n"
 
-    # Record installation end time
-    INSTALLATION_END_TIME=$(date +%s)
-    INSTALLATION_DURATION=$((INSTALLATION_END_TIME - INSTALLATION_START_TIME))
-    # Display installation timing information
-    if [[ -n "$INSTALLATION_START_TIME" && -n "$INSTALLATION_END_TIME" ]]; then
-        echo -e "\n${WHITE}⏱️  Installation Steps Timing:${NC}"
-        echo -e "   ${GREEN}•${NC} Start Time: ${CYAN}$(date -d @"$INSTALLATION_START_TIME" '+%Y-%m-%d %H:%M:%S')${NC}"
-        echo -e "   ${GREEN}•${NC} End Time: ${CYAN}$(date -d @"$INSTALLATION_END_TIME" '+%Y-%m-%d %H:%M:%S')${NC}"
-        echo -e "   ${GREEN}•${NC} Duration: ${YELLOW}$(printf '%02d:%02d:%02d' $((INSTALLATION_DURATION / 3600)) $((INSTALLATION_DURATION % 3600 / 60)) $((INSTALLATION_DURATION % 60)))${NC}"
-    fi
-
     return 0
 }
 
@@ -2947,9 +2915,8 @@ install_upm_platform() {
 
     echo -e "${GREEN}✅ Proceeding with UPM Platform installation...${NC}\n"
     # Record installation start time
-    local INSTALLATION_START_TIME
-    INSTALLATION_START_TIME=$(date +%s)
-    log_info "Installation start time: $INSTALLATION_START_TIME"
+    local start_time
+    local start_time=$(date +%s)
 
     # Check if helm is installed
     if ! command -v helm >/dev/null 2>&1; then
@@ -3117,14 +3084,14 @@ EOF
     echo -e "   ${GREEN}•${NC} Default Password: ${CYAN}Upm@2024!${NC}\n"
 
     # Record installation end time
-    INSTALLATION_END_TIME=$(date +%s)
-    INSTALLATION_DURATION=$((INSTALLATION_END_TIME - INSTALLATION_START_TIME))
+    local end_time=$(date +%s)
+    local duration=$((end_time - start_time))
     # Display installation timing information
-    if [[ -n "$INSTALLATION_START_TIME" && -n "$INSTALLATION_END_TIME" ]]; then
+    if [[ -n "$start_time" && -n "$end_time" ]]; then
         echo -e "\n${WHITE}⏱️  Installation Steps Timing:${NC}"
-        echo -e "   ${GREEN}•${NC} Start Time: ${CYAN}$(date -d @"$INSTALLATION_START_TIME" '+%Y-%m-%d %H:%M:%S')${NC}"
-        echo -e "   ${GREEN}•${NC} End Time: ${CYAN}$(date -d @"$INSTALLATION_END_TIME" '+%Y-%m-%d %H:%M:%S')${NC}"
-        echo -e "   ${GREEN}•${NC} Duration: ${YELLOW}$(printf '%02d:%02d:%02d' $((INSTALLATION_DURATION / 3600)) $((INSTALLATION_DURATION % 3600 / 60)) $((INSTALLATION_DURATION % 60)))${NC}"
+        echo -e "   ${GREEN}•${NC} Start Time: ${CYAN}$(date -d @"$start_time" '+%Y-%m-%d %H:%M:%S')${NC}"
+        echo -e "   ${GREEN}•${NC} End Time: ${CYAN}$(date -d @"$end_time" '+%Y-%m-%d %H:%M:%S')${NC}"
+        echo -e "   ${GREEN}•${NC} Duration: ${YELLOW}$(printf '%02d:%02d:%02d' $((duration / 3600)) $((duration % 3600 / 60)) $((duration % 60)))${NC}"
     fi
 
     return 0
@@ -3262,6 +3229,8 @@ setup_environment() {
     check_ntp_synchronization
     # Pre-installation confirmation
     show_setup_confirmation
+    # Record installation start time
+    local start_time=$(date +%s)
     # Installation steps
     configure_system_security
     install_libvirt
@@ -3273,7 +3242,17 @@ setup_environment() {
     echo -e "\n${GREEN}🎉 Environment Setup Completed Successfully!${NC}"
     # Post-installation confirmation
     vagrant_and_run_kubespray
-    
+
+    # Record installation end time
+    local end_time=$(date +%s)
+    local duration=$((end_time - start_time))
+    # Display installation timing information
+    if [[ -n "$start_time" && -n "$end_time" ]]; then
+        echo -e "\n${WHITE}⏱️  Installation Steps Timing:${NC}"
+        echo -e "   ${GREEN}•${NC} Start Time: ${CYAN}$(date -d @"$start_time" '+%Y-%m-%d %H:%M:%S')${NC}"
+        echo -e "   ${GREEN}•${NC} End Time: ${CYAN}$(date -d @"$end_time" '+%Y-%m-%d %H:%M:%S')${NC}"
+        echo -e "   ${GREEN}•${NC} Duration: ${YELLOW}$(printf '%02d:%02d:%02d' $((duration / 3600)) $((duration % 3600 / 60)) $((duration % 60)))${NC}"
+    fi
     log_info "Environment setup completed successfully!"
     return 0
 }
