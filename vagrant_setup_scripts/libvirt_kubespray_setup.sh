@@ -94,6 +94,8 @@ readonly SCRIPT_VERSION="1.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 readonly SCRIPT_DIR
 readonly KUBESPRAY_DIR="${SCRIPT_DIR}/kubespray-upm"
+readonly KUBESPRAY_REPO_URL="https://github.com/upmio/kubespray-upm.git"
+readonly PYTHON_VERSION="3.12.11"
 readonly VAGRANT_CONF_DIR="${KUBESPRAY_DIR}/vagrant"
 readonly VAGRANT_CONF_FILE="${VAGRANT_CONF_DIR}/config.rb"
 readonly VAGRANTFILE_PATH="${KUBESPRAY_DIR}/Vagrantfile"
@@ -102,8 +104,6 @@ readonly KUBECTL="${LOCAL_BIN_DIR}/kubectl"
 readonly KUBE_DIR="${HOME}/.kube"
 export KUBECONFIG="${KUBE_DIR}/config"
 
-# Default values
-readonly KUBESPRAY_REPO_URL="https://github.com/upmio/kubespray-upm.git"
 readonly LVM_LOCALPV_NAMESPACE="openebs"
 readonly LVM_LOCALPV_CHART_VERSION="${LVM_LOCALPV_CHART_VERSION:-"1.6.2"}"
 readonly LVM_LOCALPV_STORAGECLASS_NAME="lvm-localpv"
@@ -114,7 +114,6 @@ readonly UPM_CHART_VERSION="1.2.4"
 readonly UPM_PWD="${UPM_PWD:-"Upm@2024!"}"
 readonly PROMETHEUS_CHART_VERSION="${PROMETHEUS_CHART_VERSION:-"70.8.0"}"
 readonly PROMETHEUS_NAMESPACE="prometheus"
-
 # Network configuration constants
 readonly BRIDGE_NAME="br0"
 
@@ -125,7 +124,6 @@ readonly PLUGIN_DEPENDENCIES="pkgconf-pkg-config libvirt-libs libvirt-devel libx
 readonly PYENV_DEPENDENCIES="gcc make patch zlib-devel bzip2 bzip2-devel readline-devel sqlite sqlite-devel openssl-devel tk-devel libffi-devel xz-devel"
 
 # Global configuration variables (initialized from environment)
-declare PYTHON_VERSION="${PYTHON_VERSION:-"3.12.11"}"
 declare HTTP_PROXY="${HTTP_PROXY:-${http_proxy:-""}}"
 declare HTTPS_PROXY="${HTTPS_PROXY:-${https_proxy:-$HTTP_PROXY}}"
 declare NO_PROXY="${NO_PROXY:-${no_proxy:-"localhost,127.0.0.1,192.168.0.0/16,10.0.0.0/8"}}"
