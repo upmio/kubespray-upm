@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Kubespray Libvirt Environment Setup Script v3.0
+# Kubespray Libvirt Environment Setup Script v1.0
 #
 # Description:
 #   Automated setup of Kubespray environment with libvirt virtualization
@@ -54,7 +54,7 @@
 #   merged into kubespray deployment
 #
 # Author: Kubespray UPM Team
-# Version: 3.0
+# Version: 1.0
 #
 
 set -eE
@@ -64,7 +64,7 @@ set -eE
 #######################################
 
 # Script metadata
-readonly SCRIPT_VERSION="3.0"
+readonly SCRIPT_VERSION="1.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 readonly SCRIPT_DIR
 readonly KUBESPRAY_DIR="${SCRIPT_DIR}/kubespray-upm"
@@ -78,11 +78,11 @@ export KUBECONFIG="${KUBE_DIR}/config"
 
 # Default values
 readonly KUBESPRAY_REPO_URL="https://github.com/upmio/kubespray-upm.git"
-readonly LVM_LOCALPV_VERSION="${LVM_LOCALPV_VERSION:-"1.6.2"}"
-readonly CNPG_VERSION="${CNPG_VERSION:-"0.24.0"}"
-readonly UPM_VERSION="${UPM_VERSION:-"1.2.4"}"
+readonly LVM_LOCALPV_CHART_VERSION="${LVM_LOCALPV_CHART_VERSION:-"1.6.2"}"
+readonly LVM_LOCALPV_STORAGECLASS_NAME="lvm-localpv"
+readonly CNPG_CHART_VERSION="${CNPG_CHART_VERSION:-"0.24.0"}"
+readonly UPM_CHART_VERSION="1.2.4"
 readonly UPM_PWD="${UPM_PWD:-"Upm@2024!"}"
-readonly LVMLOCALPV_STORAGECLASS_NAME="lvm-localpv"
 
 # Network configuration constants
 readonly BRIDGE_NAME="br0"
@@ -101,12 +101,16 @@ declare NO_PROXY="${NO_PROXY:-${no_proxy:-"localhost,127.0.0.1,192.168.0.0/16,10
 declare PIP_PROXY="${PIP_PROXY:-${HTTP_PROXY:-""}}"
 declare GIT_PROXY="${GIT_PROXY:-${HTTP_PROXY:-""}}"
 declare BRIDGE_INTERFACE=""
+declare NETWORK_TYPE="private"
 
 # Global variable for prompt function results
 declare PROMPT_RESULT=""
 
 # Global variable for auto-confirm mode (-y parameter)
 declare AUTO_CONFIRM=false
+
+# Global array for installation options
+declare -a INSTALLATION_OPTIONS=()
 
 # Global variables for installation timing
 declare INSTALLATION_START_TIME=""
@@ -236,6 +240,9 @@ prompt_yes_no() {
     local default="${2:-}"
     local force_interactive="${3:-false}"
     local response
+
+    # Debug AUTO_CONFIRM value
+    echo "Debug AUTO_CONFIRM: $AUTO_CONFIRM"
 
     # Auto-confirm mode: automatically return 'yes' unless force_interactive is true
     if [[ "$AUTO_CONFIRM" == "true" && "$force_interactive" != "true" ]]; then
@@ -2247,23 +2254,51 @@ vagrant_and_run_kubespray() {
             echo "$vm_status"
             echo -e "\n${YELLOW}These VMs may interfere with the new deployment.${NC}"
             echo -e "${WHITE}Do you want to clean up existing VMs and continue?${NC}"
-            echo -e "   ${GREEN}•${NC} Yes: Clean up automatically with ${CYAN}vagrant destroy -f${NC}"
+            echo -e "   ${GREEN}•${NC} Yes: Clean up automatically with ${CYAN}virsh destroy/undefine${NC}"
             echo -e "   ${RED}•${NC} No: Cancel deployment\n"
             
             if prompt_yes_no "Clean up existing VMs and continue?"; then
                 echo -e "${YELLOW}🧹 Cleaning up existing VMs...${NC}"
-                if vagrant destroy -f; then
+                
+                # Extract VM names from vm_status and delete them using virsh
+                local vm_names
+                vm_names=$(echo "$vm_status" | awk '{print $2}' | grep -E "kubespray${G_INSTANCE_NAME_PREFIX}.*[0-9]+")
+                
+                local cleanup_success=true
+                while IFS= read -r vm_name; do
+                    if [[ -n "$vm_name" ]]; then
+                        echo -e "${YELLOW}  Destroying VM: $vm_name${NC}"
+                        
+                        # First try to destroy (shutdown) the VM if it's running
+                        if sudo virsh destroy "$vm_name" 2>/dev/null; then
+                            echo -e "${GREEN}    ✓ VM $vm_name destroyed${NC}"
+                        else
+                            echo -e "${YELLOW}    ⚠ VM $vm_name was not running${NC}"
+                        fi
+                        
+                        # Then undefine (remove) the VM completely
+                        if sudo virsh undefine "$vm_name" --remove-all-storage 2>/dev/null; then
+                            echo -e "${GREEN}    ✓ VM $vm_name undefined and storage removed${NC}"
+                        else
+                            echo -e "${RED}    ✗ Failed to undefine VM $vm_name${NC}"
+                            cleanup_success=false
+                        fi
+                    fi
+                done <<< "$vm_names"
+                
+                if $cleanup_success; then
                     echo -e "${GREEN}✅ VMs cleaned up successfully${NC}"
                 else
-                    echo -e "${RED}❌ Failed to clean up VMs automatically${NC}"
+                    echo -e "${RED}❌ Failed to clean up some VMs automatically${NC}"
                     echo -e "${YELLOW}Please clean up manually and run the script again${NC}"
                     return 1
                 fi
             else
                 echo -e "${YELLOW}⏸️  Deployment cancelled by user${NC}"
                 echo -e "${WHITE}Manual cleanup commands:${NC}"
-                echo -e "   ${CYAN}vagrant destroy -f${NC}    # Destroy all VMs"
-                echo -e "   ${CYAN}sudo virsh list --all${NC}        # Check VM status"
+                echo -e "   ${CYAN}sudo virsh destroy <vm_name>${NC}     # Shutdown VM"
+                echo -e "   ${CYAN}sudo virsh undefine <vm_name> --remove-all-storage${NC}  # Remove VM"
+                echo -e "   ${CYAN}sudo virsh list --all${NC}            # Check VM status"
                 echo -e "\n${WHITE}After cleanup, run this script again.${NC}"
                 return 0
             fi
@@ -2292,7 +2327,7 @@ vagrant_and_run_kubespray() {
             echo -e "${WHITE}⚙️  Management:${NC}"
             echo -e "   ${RED}•${NC} Stop: ${CYAN}vagrant halt${NC}"
             echo -e "   ${GREEN}•${NC} Start: ${CYAN}vagrant up${NC}"
-            echo -e "   ${YELLOW}•${NC} Destroy: ${CYAN}vagrant destroy -f${NC}\n"
+            echo -e "   ${YELLOW}•${NC} Destroy: ${CYAN}sudo virsh destroy <vm_name> && sudo virsh undefine <vm_name> --remove-all-storage${NC}\n"
         else
             echo -e "\n${RED}❌ Deployment failed! Check logs above.${NC}\n"
             echo -e "${YELLOW}🔄 Retry: ${CYAN}cd $KUBESPRAY_DIR && source venv/bin/activate && vagrant up --provider=libvirt --no-parallel${NC}\n"
@@ -2430,8 +2465,8 @@ install_lvm_localpv() {
     echo -e "${WHITE}Installation details:${NC}"
     echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$openebs_namespace${NC}"
     echo -e "   ${GREEN}•${NC} Helm chart: ${CYAN}$openebs_chart_name${NC}"
-    echo -e "   ${GREEN}•${NC} Helm chart version: ${CYAN}$LVM_LOCALPV_VERSION${NC}"
-    echo -e "   ${GREEN}•${NC} StorageClass: ${CYAN}$LVMLOCALPV_STORAGECLASS_NAME${NC}"
+    echo -e "   ${GREEN}•${NC} Helm chart version: ${CYAN}$LVM_LOCALPV_CHART_VERSION${NC}"
+    echo -e "   ${GREEN}•${NC} StorageClass: ${CYAN}$LVM_LOCALPV_STORAGECLASS_NAME${NC}"
     echo -e "   ${GREEN}•${NC} VolumeGroup: ${CYAN}$vg_name${NC}"
     echo -e "   ${GREEN}•${NC} Installation timeout: ${CYAN}10 minutes${NC}\n"
 
@@ -2513,7 +2548,7 @@ install_lvm_localpv() {
     # Install OpenEBS LVM LocalPV
     log_info "Installing OpenEBS LVM LocalPV with Helm..."
     helm upgrade --install "$openebs_release_name" "$openebs_chart_name" \
-        --version "$LVM_LOCALPV_VERSION" \
+        --version "$LVM_LOCALPV_CHART_VERSION" \
         --namespace "$openebs_namespace" \
         --create-namespace \
         --set lvmPlugin.allowedTopologies='kubernetes\.io/hostname\,openebs\.io/node' \
@@ -2537,7 +2572,7 @@ install_lvm_localpv() {
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
-  name: $LVMLOCALPV_STORAGECLASS_NAME
+  name: $LVM_LOCALPV_STORAGECLASS_NAME
 allowVolumeExpansion: true
 volumeBindingMode: WaitForFirstConsumer
 parameters:
@@ -2561,12 +2596,12 @@ EOF
     echo -e "\n${GREEN}🎉 OpenEBS LVM LocalPV Installation Completed!${NC}\n"
     echo -e "${WHITE}📦 Components:${NC}"
     echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$openebs_namespace${NC}"
-    echo -e "   ${GREEN}•${NC} StorageClass: ${CYAN}$LVMLOCALPV_STORAGECLASS_NAME${NC}"
+    echo -e "   ${GREEN}•${NC} StorageClass: ${CYAN}$LVM_LOCALPV_STORAGECLASS_NAME${NC}"
     echo -e "   ${GREEN}•${NC} Volume Group: ${CYAN}$vg_name${NC}\n"
 
     echo -e "${WHITE}🔍 Verification Commands:${NC}"
     echo -e "   ${GREEN}•${NC} Check pods: ${CYAN}kubectl get pods -n $openebs_namespace${NC}"
-    echo -e "   ${GREEN}•${NC} Check StorageClass: ${CYAN}kubectl get storageclass $LVMLOCALPV_STORAGECLASS_NAME${NC}"
+    echo -e "   ${GREEN}•${NC} Check StorageClass: ${CYAN}kubectl get storageclass $LVM_LOCALPV_STORAGECLASS_NAME${NC}"
     echo -e "   ${GREEN}•${NC} Check node labels: ${CYAN}kubectl get nodes --show-labels${NC}"
     echo -e "${GREEN}✅ OpenEBS LVM LocalPV installed successfully${NC}\n"
 
@@ -2607,7 +2642,7 @@ install_cnpg() {
     echo -e "${WHITE}Installation details:${NC}"
     echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$cnpg_namespace${NC}"
     echo -e "   ${GREEN}•${NC} Helm chart: ${CYAN}$cnpg_chart_name${NC}"
-    echo -e "   ${GREEN}•${NC} Helm chart version: ${CYAN}$CNPG_VERSION${NC}"
+    echo -e "   ${GREEN}•${NC} Helm chart version: ${CYAN}$CNPG_CHART_VERSION${NC}"
     echo -e "   ${GREEN}•${NC} Installation timeout: ${CYAN}5 minutes${NC}\n"
 
     echo -e "${YELLOW}⚠️  Note: This installation will:${NC}"
@@ -2692,7 +2727,7 @@ EOF
     helm upgrade --install "$cnpg_release_name" "$cnpg_chart_name" \
         --namespace "$cnpg_namespace" \
         --create-namespace \
-        --version "$CNPG_VERSION" \
+        --version "$CNPG_CHART_VERSION" \
         --values "$values_file" \
         --wait --timeout=5m || {
         error_exit "Failed to upgrade CloudNative-PG"
@@ -2712,7 +2747,7 @@ EOF
     echo -e "${WHITE}📦 Components:${NC}"
     echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$cnpg_namespace${NC}"
     echo -e "   ${GREEN}•${NC} Chart: ${CYAN}$cnpg_chart_name${NC}"
-    echo -e "   ${GREEN}•${NC} Chart Version: ${CYAN}$CNPG_VERSION${NC}\n"
+    echo -e "   ${GREEN}•${NC} Chart Version: ${CYAN}$CNPG_CHART_VERSION${NC}\n"
 
     echo -e "${WHITE}🔍 Verification Commands:${NC}"
     echo -e "   ${GREEN}•${NC} Check pods: ${CYAN}kubectl get pods -n $cnpg_namespace${NC}"
@@ -2760,7 +2795,7 @@ install_upm_engine() {
     echo -e "${WHITE}Installation details:${NC}"
     echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$upm_namespace${NC}"
     echo -e "   ${GREEN}•${NC} Helm chart: ${CYAN}$upm_engine_chart_name${NC}"
-    echo -e "   ${GREEN}•${NC} Helm chart version: ${CYAN}$UPM_VERSION${NC}"
+    echo -e "   ${GREEN}•${NC} Helm chart version: ${CYAN}$UPM_CHART_VERSION${NC}"
     echo -e "   ${GREEN}•${NC} Installation timeout: ${CYAN}5 minutes${NC}\n"
 
     echo -e "${YELLOW}⚠️  Note: This installation will:${NC}"
@@ -2824,7 +2859,7 @@ install_upm_engine() {
     helm upgrade --install "$upm_engine_release_name" "$upm_engine_chart_name" \
         --namespace "$upm_namespace" \
         --create-namespace \
-        --version "$UPM_VERSION" \
+        --version "$UPM_CHART_VERSION" \
         --wait --timeout=5m || {
         error_exit "Failed to upgrade UPM Engine"
     }
@@ -2840,7 +2875,7 @@ install_upm_engine() {
     echo -e "${WHITE}📦 Components:${NC}"
     echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$upm_namespace${NC}"
     echo -e "   ${GREEN}•${NC} Chart: ${CYAN}$upm_engine_chart_name${NC}"
-    echo -e "   ${GREEN}•${NC} Chart Version: ${CYAN}$UPM_VERSION${NC}\n"
+    echo -e "   ${GREEN}•${NC} Chart Version: ${CYAN}$UPM_CHART_VERSION${NC}\n"
 
     echo -e "${WHITE}🔍 Verification Commands:${NC}"
     echo -e "   ${GREEN}•${NC} Check pods: ${CYAN}kubectl get pods -n $upm_namespace${NC}"
@@ -2888,7 +2923,7 @@ install_upm_platform() {
     echo -e "${WHITE}Installation details:${NC}"
     echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$upm_namespace${NC}"
     echo -e "   ${GREEN}•${NC} Helm chart: ${CYAN}$upm_platform_chart_name${NC}"
-    echo -e "   ${GREEN}•${NC} Helm chart version: ${CYAN}$UPM_VERSION${NC}"
+    echo -e "   ${GREEN}•${NC} Helm chart version: ${CYAN}$UPM_CHART_VERSION${NC}"
     echo -e "   ${GREEN}•${NC} Installation timeout: ${CYAN}15 minutes${NC}\n"
 
     echo -e "${YELLOW}⚠️  Note: This installation will:${NC}"
@@ -2997,14 +3032,14 @@ apiserver:
       rootPassword: "${UPM_PWD}"
     primary:
       persistence:
-        storageClass: "${LVMLOCALPV_STORAGECLASS_NAME}"
+        storageClass: "${LVM_LOCALPV_STORAGECLASS_NAME}"
       resourcesPreset: "large"
     resources: {}
   redis:
     master:
       persistence:
         enabled: true
-        storageClass: "${LVMLOCALPV_STORAGECLASS_NAME}"
+        storageClass: "${LVM_LOCALPV_STORAGECLASS_NAME}"
       resources: {}
     auth:
       password: "${UPM_PWD}"
@@ -3013,7 +3048,7 @@ apiserver:
       type: NodePort
       loadBalancerIP: ""
     persistence:
-      storageClass: "${LVMLOCALPV_STORAGECLASS_NAME}"
+      storageClass: "${LVM_LOCALPV_STORAGECLASS_NAME}"
     mysql:
       external:
         mysqlMasterHost: "3306"
@@ -3025,7 +3060,7 @@ EOF
     helm upgrade --install "$upm_platform_release_name" "$upm_platform_chart_name" \
         --namespace "$upm_namespace" \
         --create-namespace \
-        --version "$UPM_VERSION" \
+        --version "$UPM_CHART_VERSION" \
         --values "$values_file" \
         --wait --timeout=15m || {
         error_exit "Failed to upgrade UPM Platform"
@@ -3042,7 +3077,7 @@ EOF
     echo -e "${WHITE}📦 Components:${NC}"
     echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$upm_namespace${NC}"
     echo -e "   ${GREEN}•${NC} Chart: ${CYAN}$upm_platform_chart_name${NC}"
-    echo -e "   ${GREEN}•${NC} Chart Version: ${CYAN}$UPM_VERSION${NC}\n"
+    echo -e "   ${GREEN}•${NC} Chart Version: ${CYAN}$UPM_CHART_VERSION${NC}\n"
 
     echo -e "${WHITE}🔍 Verification Commands:${NC}"
     echo -e "   ${GREEN}•${NC} Check pods: ${CYAN}kubectl get pods -n $upm_namespace${NC}"
@@ -3145,7 +3180,7 @@ display_cluster_info() {
 show_help() {
     cat <<EOF
 Kubespray Setup Script v${SCRIPT_VERSION}
-Usage: $0 [OPTIONS]
+Usage: $0 [OPTIONS] INSTALLATION_OPTIONS
 
 OPTIONS:
   -h, --help                    Show this help message
@@ -3153,11 +3188,23 @@ OPTIONS:
   -n <network_type>             Set network type (private|public, default: private)
                                 Only effective with --k8s or full setup mode
                                 When set to 'public', interactive configuration will be required
-  --k8s                 Run environment setup process only
-  --lvmlocalpv          Install OpenEBS LVM LocalPV only
-  --cnpg                Install CloudNative-PG only
-  --upm-engine          Install UPM Engine only
-  --upm-platform        Install UPM Platform only
+
+INSTALLATION_OPTIONS (at least one required):
+  --k8s                         Run environment setup process only
+  --lvmlocalpv                  Install OpenEBS LVM LocalPV only
+  --cnpg                        Install CloudNative-PG only
+  --upm-engine                  Install UPM Engine only
+  --upm-platform                Install UPM Platform only
+  --all                         Install all components (k8s + lvmlocalpv + cnpg + upm-engine + upm-platform)
+
+IMPORTANT: At least one installation option must be specified.
+
+COMBINATION USAGE:
+  Multiple installation options can be combined (except --all):
+  Examples:
+    $0 --k8s --lvmlocalpv         # Setup environment and install LVM LocalPV
+    $0 --cnpg --upm-engine        # Install CloudNative-PG and UPM Engine
+    $0 --all                      # Install all components (cannot combine with other options)
 
 DESCRIPTION:
   This script sets up a complete Kubespray environment with libvirt virtualization
@@ -3227,87 +3274,57 @@ setup_environment() {
 # Parse Command Line Arguments
 #######################################
 parse_arguments() {
-    local network_type_specified=false
-
-    # Check for help first
-    for arg in "$@"; do
-        if [[ "$arg" == "-h" || "$arg" == "--help" ]]; then
-            show_help
-            exit 0
-        fi
-    done
-
+    # Use a global array to store installation options
+    INSTALLATION_OPTIONS=()
+    
+    # Process arguments in a single pass
     while [[ $# -gt 0 ]]; do
         case $1 in
+        -h|--help)
+            show_help
+            exit 0
+            ;;
         -y)
             AUTO_CONFIRM=true
             shift
             ;;
         -n)
-            if [[ -n "$2" && "$2" != -* ]]; then
-                NETWORK_TYPE="$2"
-                network_type_specified=true
-                shift 2
-                # Validate network type
-                if [[ -n "${NETWORK_TYPE:-}" ]]; then
-                    case "$NETWORK_TYPE" in
-                    private|public)
-                        log_info "Network type set to: $NETWORK_TYPE"
-                        ;;
-                    *)
-                        log_error "Invalid network type: $NETWORK_TYPE. Valid options: private, public"
-                        exit 1
-                        ;;
-                    esac
-                else
-                    NETWORK_TYPE="private"  # Default value
-                    log_info "Using default network type: $NETWORK_TYPE"
-                fi
-            else
+            [[ -z "$2" || "$2" == -* ]] && {
                 log_error "Option -n requires a network type argument (private|public)"
                 show_help
                 exit 1
-            fi
+            }
+            case "$2" in
+            private|public)
+                NETWORK_TYPE="$2"
+                log_info "Network type set to: $NETWORK_TYPE"
+                shift 2
+                ;;
+            *)
+                log_error "Invalid network type: $2. Valid options: private, public"
+                exit 1
+                ;;
+            esac
             ;;
-        --k8s)
-            setup_environment
-            exit 0
-            ;;
-        --lvmlocalpv)
-            if [[ "$network_type_specified" == true ]]; then
-                log_warn "Warning: -n parameter has no effect with --lvmlocalpv option"
-            fi
-            install_lvm_localpv
-            exit 0
-            ;;
-        --cnpg)
-            if [[ "$network_type_specified" == true ]]; then
-                log_warn "Warning: -n parameter has no effect with --cnpg option"
-            fi
-            install_cnpg
-            exit 0
-            ;;
-        --upm-engine)
-            if [[ "$network_type_specified" == true ]]; then
-                log_warn "Warning: -n parameter has no effect with --upm-engine option"
-            fi
-            install_upm_engine
-            exit 0
-            ;;
-        --upm-platform)
-            if [[ "$network_type_specified" == true ]]; then
-                log_warn "Warning: -n parameter has no effect with --upm-platform option"
-            fi
-            install_upm_platform
-            exit 0
+        --*)
+            # Collect installation options
+            INSTALLATION_OPTIONS+=("$1")
+            shift
             ;;
         *)
-            log_error "Unknown option: $1"
+            log_error "Unknown argument: $1"
             show_help
             exit 1
             ;;
         esac
     done
+    
+    # Validate installation options
+    if [[ ${#INSTALLATION_OPTIONS[@]} -eq 0 ]]; then
+        log_error "At least one installation option is required"
+        show_help
+        exit 1
+    fi
 }
 
 #######################################
@@ -3316,18 +3333,49 @@ parse_arguments() {
 main() {
     # Variable validation
     validate_required_variables
-    # Parse command line arguments first
+    
+    # Parse command line arguments (sets global INSTALLATION_OPTIONS array)
     parse_arguments "$@"
-    # Run complete setup process
-    setup_environment
-    # install lvm localpv
-    install_lvm_localpv
-    # install cnpg
-    install_cnpg
-    # install upm engine
-    install_upm_engine
-    # install upm platform
-    install_upm_platform
+    
+    # Define installation option mappings
+    declare -A option_to_function=(
+        ["--k8s"]="setup_environment"
+        ["--lvmlocalpv"]="install_lvm_localpv"
+        ["--cnpg"]="install_cnpg"
+        ["--upm-engine"]="install_upm_engine"
+        ["--upm-platform"]="install_upm_platform"
+    )
+    
+    local install_functions=()
+    
+    # Handle --all option (mutually exclusive)
+    if [[ " ${INSTALLATION_OPTIONS[*]} " =~ " --all " ]]; then
+        if [[ ${#INSTALLATION_OPTIONS[@]} -gt 1 ]]; then
+            log_error "--all option cannot be used with other installation options"
+            show_help
+            exit 1
+        fi
+        install_functions=("setup_environment" "install_lvm_localpv" "install_cnpg" "install_upm_engine" "install_upm_platform")
+    else
+        # Process individual options
+        for option in "${INSTALLATION_OPTIONS[@]}"; do
+            if [[ -n "${option_to_function[$option]:-}" ]]; then
+                install_functions+=("${option_to_function[$option]}")
+            else
+                log_error "Unknown installation option: $option"
+                show_help
+                exit 1
+            fi
+        done
+    fi
+    
+    # Execute installation functions
+    for func in "${install_functions[@]}"; do
+        log_info "Executing: $func"
+        "$func"
+    done
+    
+    exit 0
 }
 
 #######################################
