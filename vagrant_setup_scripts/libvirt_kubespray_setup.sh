@@ -3155,7 +3155,7 @@ display_cluster_info() {
 show_help() {
     cat <<EOF
 Kubespray Setup Script v${SCRIPT_VERSION}
-Usage: $0 [OPTIONS] INSTALLATION_OPTIONS
+Usage: $0 [OPTIONS] INSTALLATION_OPTION
 
 OPTIONS:
   -h, --help                    Show this help message
@@ -3164,7 +3164,7 @@ OPTIONS:
                                 Only effective with --k8s or full setup mode
                                 When set to 'public', interactive configuration will be required
 
-INSTALLATION_OPTIONS (at least one required):
+INSTALLATION_OPTION (exactly one required):
   --k8s                         Run environment setup process only
   --lvmlocalpv                  Install OpenEBS LVM LocalPV only
   --cnpg                        Install CloudNative-PG only
@@ -3172,14 +3172,7 @@ INSTALLATION_OPTIONS (at least one required):
   --upm-platform                Install UPM Platform only
   --all                         Install all components (k8s + lvmlocalpv + cnpg + upm-engine + upm-platform)
 
-IMPORTANT: At least one installation option must be specified.
-
-COMBINATION USAGE:
-  Multiple installation options can be combined (except --all):
-  Examples:
-    $0 --k8s --lvmlocalpv         # Setup environment and install LVM LocalPV
-    $0 --cnpg --upm-engine        # Install CloudNative-PG and UPM Engine
-    $0 --all                      # Install all components (cannot combine with other options)
+IMPORTANT: Exactly one installation option must be specified.
 
 DESCRIPTION:
   This script sets up a complete Kubespray environment with libvirt virtualization
@@ -3216,6 +3209,8 @@ setup_environment() {
     
     # Network and proxy validation
     validate_network_and_proxy
+
+    [[ -n "NETWORK_TYPE" ]] || error_exit "NETWORK_TYPE is not set. Please use -n option to set it."
     
     # Configure public network if needed
     if [[ "$NETWORK_TYPE" == "public" ]]; then
@@ -3324,43 +3319,51 @@ main() {
     # Parse command line arguments (sets global INSTALLATION_OPTIONS array)
     parse_arguments "$@"
     
-    # Define installation option mappings
-    declare -A option_to_function=(
-        ["--k8s"]="setup_environment"
-        ["--lvmlocalpv"]="install_lvm_localpv"
-        ["--cnpg"]="install_cnpg"
-        ["--upm-engine"]="install_upm_engine"
-        ["--upm-platform"]="install_upm_platform"
-    )
-    
-    local install_functions=()
-    
-    # Handle --all option (mutually exclusive)
-    if [[ " ${INSTALLATION_OPTIONS[*]} " =~ " --all " ]]; then
-        if [[ ${#INSTALLATION_OPTIONS[@]} -gt 1 ]]; then
-            log_error "--all option cannot be used with other installation options"
-            show_help
-            exit 1
-        fi
-        install_functions=("setup_environment" "install_lvm_localpv" "install_cnpg" "install_upm_engine" "install_upm_platform")
-    else
-        # Process individual options
-        for option in "${INSTALLATION_OPTIONS[@]}"; do
-            if [[ -n "${option_to_function[$option]:-}" ]]; then
-                install_functions+=("${option_to_function[$option]}")
-            else
-                log_error "Unknown installation option: $option"
-                show_help
-                exit 1
-            fi
-        done
+    # Validate that only one installation option is provided
+    if [[ ${#INSTALLATION_OPTIONS[@]} -ne 1 ]]; then
+        log_error "Exactly one installation option must be specified"
+        show_help
+        exit 1
     fi
     
-    # Execute installation functions
-    for func in "${install_functions[@]}"; do
-        log_info "Executing: $func"
-        "$func"
-    done
+    local selected_option="${INSTALLATION_OPTIONS[0]}"
+    
+    # Execute the selected installation function
+    case "$selected_option" in
+        "--k8s")
+            log_info "Executing: setup_environment"
+            setup_environment
+            ;;
+        "--lvmlocalpv")
+            log_info "Executing: install_lvm_localpv"
+            install_lvm_localpv
+            ;;
+        "--cnpg")
+            log_info "Executing: install_cnpg"
+            install_cnpg
+            ;;
+        "--upm-engine")
+            log_info "Executing: install_upm_engine"
+            install_upm_engine
+            ;;
+        "--upm-platform")
+            log_info "Executing: install_upm_platform"
+            install_upm_platform
+            ;;
+        "--all")
+            log_info "Executing: complete installation sequence"
+            setup_environment
+            install_lvm_localpv
+            install_cnpg
+            install_upm_engine
+            install_upm_platform
+            ;;
+        *)
+            log_error "Unknown installation option: $selected_option"
+            show_help
+            exit 1
+            ;;
+    esac
     
     exit 0
 }
