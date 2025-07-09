@@ -2603,7 +2603,8 @@ EOF
     echo -e "${GREEN}✅ OpenEBS LVM LocalPV installed successfully${NC}\n"
 
     # Record installation end time
-    local end_time=$(date +%s)
+    local end_time
+    end_time=$(date +%s)
     local duration=$((end_time - start_time))
     # Display installation timing information
     if [[ -n "$start_time" && -n "$end_time" ]]; then
@@ -2658,7 +2659,7 @@ install_prometheus() {
     echo -e "${GREEN}✅ Proceeding with Prometheus installation...${NC}\n"
     # Record installation start time
     local start_time
-    local start_time=$(date +%s)
+    start_time=$(date +%s)
 
     # Add Prometheus Helm repository
     log_info "Adding Prometheus Helm repository..."
@@ -2826,14 +2827,15 @@ EOF
     echo
 
     # Record installation end time
-    local end_time=$(date +%s)
+    local end_time
+    end_time=$(date +%s)
     local duration=$((end_time - start_time))
     # Display installation timing information
     if [[ -n "$start_time" && -n "$end_time" ]]; then
         echo -e "\n${WHITE}⏱️  Installation Steps Timing:${NC}"
         echo -e "   ${GREEN}•${NC} Start Time: ${CYAN}$(date -d @"$start_time" '+%Y-%m-%d %H:%M:%S')${NC}"
         echo -e "   ${GREEN}•${NC} End Time: ${CYAN}$(date -d @"$end_time" '+%Y-%m-%d %H:%M:%S')${NC}"
-        echo -e "   ${GREEN}•${NC} Duration: ${YELLOW}$(printf '%02d:%02d:%02d' $((duration / 3600)) $((duration % 3600 / 60)) $((duration % 60)))${NC}"}
+        echo -e "   ${GREEN}•${NC} Duration: ${YELLOW}$(printf '%02d:%02d:%02d' $((duration / 3600)) $((duration % 3600 / 60)) $((duration % 60)))${NC}"
     fi
     log_info "Prometheus installation completed successfully!"
     return 0
@@ -3120,7 +3122,7 @@ install_upm_platform() {
     echo -e "${GREEN}✅ Proceeding with UPM Platform installation...${NC}\n"
     # Record installation start time
     local start_time
-    local start_time=$(date +%s)
+    start_time=$(date +%s)
 
     # Add UPM Platform Helm repository
     log_info "Adding UPM Platform Helm repository..."
@@ -3277,7 +3279,8 @@ EOF
     echo -e "   ${GREEN}•${NC} Default Password: ${CYAN}Upm@2024!${NC}\n"
 
     # Record installation end time
-    local end_time=$(date +%s)
+    local end_time
+    end_time=$(date +%s)
     local duration=$((end_time - start_time))
     # Display installation timing information
     if [[ -n "$start_time" && -n "$end_time" ]]; then
@@ -3404,7 +3407,7 @@ setup_environment() {
     # Network and proxy validation
     validate_network_and_proxy
 
-    [[ -n "NETWORK_TYPE" ]] || error_exit "NETWORK_TYPE is not set. Please use -n option to set it."
+    [[ -n "$NETWORK_TYPE" ]] || error_exit "NETWORK_TYPE is not set. Please use -n option to set it."
     
     # Configure public network if needed
     if [[ "$NETWORK_TYPE" == "public" ]]; then
@@ -3419,7 +3422,8 @@ setup_environment() {
     # Pre-installation confirmation
     show_setup_confirmation
     # Record installation start time
-    local start_time=$(date +%s)
+    local start_time
+    start_time=$(date +%s)
     # Installation steps
     configure_system_security
     install_libvirt
@@ -3433,7 +3437,8 @@ setup_environment() {
     vagrant_and_run_kubespray
 
     # Record installation end time
-    local end_time=$(date +%s)
+    local end_time
+    end_time=$(date +%s)
     local duration=$((end_time - start_time))
     # Display installation timing information
     if [[ -n "$start_time" && -n "$end_time" ]]; then
