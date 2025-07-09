@@ -102,11 +102,16 @@ export KUBECONFIG="${KUBE_DIR}/config"
 
 # Default values
 readonly KUBESPRAY_REPO_URL="https://github.com/upmio/kubespray-upm.git"
+readonly LVM_LOCALPV_NAMESPACE="openebs"
 readonly LVM_LOCALPV_CHART_VERSION="${LVM_LOCALPV_CHART_VERSION:-"1.6.2"}"
 readonly LVM_LOCALPV_STORAGECLASS_NAME="lvm-localpv"
+readonly CNPG_NAMESPACE="cnpg-system"
 readonly CNPG_CHART_VERSION="${CNPG_CHART_VERSION:-"0.24.0"}"
+readonly UPM_NAMESPACE="upm-system"
 readonly UPM_CHART_VERSION="1.2.4"
 readonly UPM_PWD="${UPM_PWD:-"Upm@2024!"}"
+readonly PROMETHEUS_CHART_VERSION="${PROMETHEUS_CHART_VERSION:-"70.8.0"}"
+readonly PROMETHEUS_NAMESPACE="prometheus"
 
 # Network configuration constants
 readonly BRIDGE_NAME="br0"
@@ -844,6 +849,17 @@ validate_required_variables() {
         if [[ ! -w "$KUBESPRAY_DIR" ]]; then
             error_exit "No write permission for kubespray directory parent: $KUBESPRAY_DIR"
         fi
+    fi
+
+    # Check if helm is installed
+    if ! command -v helm >/dev/null 2>&1; then
+        log_info "Installing Helm..."
+        curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+        chmod 700 get_helm.sh
+        ./get_helm.sh
+        rm -f get_helm.sh
+    else
+        log_info "Helm is already installed"
     fi
 
     log_info "Variable validation passed"
@@ -2426,11 +2442,10 @@ install_lvm_localpv() {
     log_info "Installing OpenEBS LVM LocalPV..."
 
     echo -e "${YELLOW}🔧 Installing OpenEBS LVM LocalPV...${NC}"
-    local openebs_namespace="openebs"
-    local openebs_chart_repo="https://openebs.github.io/lvm-localpv"
-    local openebs_repo_name="openebs-lvmlocalpv"
-    local openebs_release_name="lvm-localpv"
-    local openebs_chart_name="$openebs_repo_name/lvm-localpv"
+    local lvm_localpv_chart_repo="https://openebs.github.io/lvm-localpv"
+    local lvm_localpv_repo_name="openebs-lvmlocalpv"
+    local lvm_localpv_release_name="lvm-localpv"
+    local lvm_localpv_chart_name="$lvm_localpv_repo_name/lvm-localpv"
 
     # Get volume group name from Vagrant configuration
     local vg_name="local_vg_dev" # default fallback
@@ -2454,8 +2469,8 @@ install_lvm_localpv() {
     echo -e "   ${GREEN}•${NC} Helm repository configuration\n"
 
     echo -e "${WHITE}Installation details:${NC}"
-    echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$openebs_namespace${NC}"
-    echo -e "   ${GREEN}•${NC} Helm chart: ${CYAN}$openebs_chart_name${NC}"
+    echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$LVM_LOCALPV_NAMESPACE${NC}"
+    echo -e "   ${GREEN}•${NC} Helm chart: ${CYAN}$lvm_localpv_chart_name${NC}"
     echo -e "   ${GREEN}•${NC} Helm chart version: ${CYAN}$LVM_LOCALPV_CHART_VERSION${NC}"
     echo -e "   ${GREEN}•${NC} StorageClass: ${CYAN}$LVM_LOCALPV_STORAGECLASS_NAME${NC}"
     echo -e "   ${GREEN}•${NC} VolumeGroup: ${CYAN}$vg_name${NC}"
@@ -2475,17 +2490,6 @@ install_lvm_localpv() {
     # Record installation start time
     local start_time
     start_time=$(date +%s)
-
-    # Check if helm is installed
-    if ! command -v helm >/dev/null 2>&1; then
-        log_info "Installing Helm..."
-        curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
-        chmod 700 get_helm.sh
-        ./get_helm.sh
-        rm -f get_helm.sh
-    else
-        log_info "Helm is already installed"
-    fi
 
     # Label openebs control plane nodes (openebs.io/control-plane=enable)
     log_info "Labeling openebs control plane nodes..."
@@ -2531,16 +2535,16 @@ install_lvm_localpv() {
 
     # Add OpenEBS Helm repository
     log_info "Adding OpenEBS Helm repository..."
-    helm repo add "$openebs_repo_name" "$openebs_chart_repo" || {
-        error_exit "Failed to add OpenEBS Helm repository: $openebs_repo_name, $openebs_chart_repo"
+    helm repo add "$lvm_localpv_repo_name" "$lvm_localpv_chart_repo" || {
+        error_exit "Failed to add OpenEBS Helm repository: $lvm_localpv_repo_name, $lvm_localpv_chart_repo"
     }
-    helm repo update
+    helm repo update "$lvm_localpv_repo_name"
 
     # Install OpenEBS LVM LocalPV
     log_info "Installing OpenEBS LVM LocalPV with Helm..."
-    helm upgrade --install "$openebs_release_name" "$openebs_chart_name" \
+    helm upgrade --install "$lvm_localpv_release_name" "$lvm_localpv_chart_name" \
         --version "$LVM_LOCALPV_CHART_VERSION" \
-        --namespace "$openebs_namespace" \
+        --namespace "$LVM_LOCALPV_NAMESPACE" \
         --create-namespace \
         --set lvmPlugin.allowedTopologies='kubernetes\.io/hostname\,openebs\.io/node' \
         --set lvmController.nodeSelector."openebs\.io/control-plane"="enable" \
@@ -2552,7 +2556,7 @@ install_lvm_localpv() {
 
     # Wait for pods to be ready
     log_info "Waiting for OpenEBS pods to be ready..."
-    "$KUBECTL" wait --for=condition=ready pod -l release="$openebs_release_name" -n "$openebs_namespace" --timeout=900s || {
+    "$KUBECTL" wait --for=condition=ready pod -l release="$lvm_localpv_release_name" -n "$LVM_LOCALPV_NAMESPACE" --timeout=900s || {
         error_exit "OpenEBS pods failed to become ready"
     }
     log_info "OpenEBS LVM LocalPV installed successfully"
@@ -2586,12 +2590,12 @@ EOF
     # Display installation status
     echo -e "\n${GREEN}🎉 OpenEBS LVM LocalPV Installation Completed!${NC}\n"
     echo -e "${WHITE}📦 Components:${NC}"
-    echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$openebs_namespace${NC}"
+    echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$LVM_LOCALPV_NAMESPACE${NC}"
     echo -e "   ${GREEN}•${NC} StorageClass: ${CYAN}$LVM_LOCALPV_STORAGECLASS_NAME${NC}"
     echo -e "   ${GREEN}•${NC} Volume Group: ${CYAN}$vg_name${NC}\n"
 
     echo -e "${WHITE}🔍 Verification Commands:${NC}"
-    echo -e "   ${GREEN}•${NC} Check pods: ${CYAN}kubectl get pods -n $openebs_namespace${NC}"
+    echo -e "   ${GREEN}•${NC} Check pods: ${CYAN}kubectl get pods -n $LVM_LOCALPV_NAMESPACE${NC}"
     echo -e "   ${GREEN}•${NC} Check StorageClass: ${CYAN}kubectl get storageclass $LVM_LOCALPV_STORAGECLASS_NAME${NC}"
     echo -e "   ${GREEN}•${NC} Check node labels: ${CYAN}kubectl get nodes --show-labels${NC}"
     echo -e "${GREEN}✅ OpenEBS LVM LocalPV installed successfully${NC}\n"
@@ -2611,13 +2615,235 @@ EOF
 }
 
 #######################################
+# Install Prometheus Function
+#######################################
+install_prometheus() {
+    log_info "Starting Prometheus installation..."
+
+    # Prometheus configuration
+    local prometheus_repo_name="prometheus-community"
+    local prometheus_chart_repo="https://prometheus-community.github.io/helm-charts"
+    local prometheus_release_name="prometheus"
+    local prometheus_chart_name="$prometheus_repo_name/kube-prometheus-stack"
+
+    # Interactive confirmation for Prometheus installation
+    echo -e "\n${YELLOW}📊 Prometheus Installation${NC}\n"
+    echo -e "${WHITE}This will install Prometheus with the following components:${NC}"
+    echo -e "   ${GREEN}•${NC} Prometheus Operator"
+    echo -e "   ${GREEN}•${NC} Prometheus Server"
+    echo -e "   ${GREEN}•${NC} Alertmanager"
+    echo -e "   ${GREEN}•${NC} Grafana"
+    echo -e "   ${GREEN}•${NC} kube-state-metrics"
+    echo -e "   ${GREEN}•${NC} Node labels for Prometheus scheduling\n"
+
+    echo -e "${WHITE}Installation details:${NC}"
+    echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$PROMETHEUS_NAMESPACE${NC}"
+    echo -e "   ${GREEN}•${NC} Helm chart: ${CYAN}$prometheus_chart_name${NC}"
+    echo -e "   ${GREEN}•${NC} Helm chart version: ${CYAN}$PROMETHEUS_CHART_VERSION${NC}"
+    echo -e "   ${GREEN}•${NC} Installation timeout: ${CYAN}15 minutes${NC}\n"
+
+    echo -e "${YELLOW}⚠️  Note: This installation will:${NC}"
+    echo -e "   ${YELLOW}•${NC} Add node labels to worker nodes"
+    echo -e "   ${YELLOW}•${NC} Install Helm if not already present"
+    echo -e "   ${YELLOW}•${NC} Create persistent storage for Prometheus data\n"
+
+    if ! prompt_yes_no "Do you want to proceed with Prometheus installation?"; then
+        echo -e "${YELLOW}⏸️  Prometheus installation skipped.${NC}\n"
+        log_info "Prometheus installation skipped by user"
+        return 0
+    fi
+
+    echo -e "${GREEN}✅ Proceeding with Prometheus installation...${NC}\n"
+    # Record installation start time
+    local start_time
+    local start_time=$(date +%s)
+
+    # Add Prometheus Helm repository
+    log_info "Adding Prometheus Helm repository..."
+    helm repo add "$prometheus_repo_name" "$prometheus_chart_repo" || {
+        error_exit "Failed to add Prometheus Helm repository"
+    }
+    helm repo update "$prometheus_repo_name"
+
+    log_info "Labeling Prometheus worker nodes..."
+    # Use global variables extracted from config
+    extract_vagrant_config_variables
+
+    log_info "Labeling CloudNative-PG control plane nodes..."
+    # Use global variables extracted from config
+    extract_vagrant_config_variables
+
+    local ctl_start_index=$((G_KUBE_MASTER_INSTANCES + 1))
+    local ctl_end_index=$((G_KUBE_MASTER_INSTANCES + G_UPM_CTL_INSTANCES))
+
+    local nodes
+    nodes=$("$KUBECTL" get nodes --no-headers -o custom-columns=":metadata.name")
+
+    while IFS= read -r node; do
+        # Extract node number from node name (assuming format: prefix-number)
+        if [[ "$node" =~ ^${G_INSTANCE_NAME_PREFIX}-([0-9]+)$ ]]; then
+            local node_num="${BASH_REMATCH[1]}"
+            if [[ "$node_num" -ge "$ctl_start_index" ]] && [[ "$node_num" -le "$ctl_end_index" ]]; then
+                log_info "Labeling Prometheus control plane node: $node"
+                "$KUBECTL" label node "$node" "prometheus.node=true" --overwrite || {
+                    error_exit "Failed to label Prometheus control plane node: $node"
+                }
+            fi
+        fi
+    done <<<"$nodes"
+
+    # Create values file
+    local values_file="/tmp/prometheus_values.yaml"
+    cat >"$values_file" <<EOF
+prometheusOperator:
+  admissionWebhooks:
+    patch:
+      image:
+        registry: docker.io
+        repository: dyrnq/kube-webhook-certgen
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: prometheus.node
+                    operator: Exists
+    deployment:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: prometheus.node
+                    operator: Exists
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: prometheus.node
+                operator: Exists
+
+prometheus:
+  prometheusSpec:
+    podMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelectorNilUsesHelmValues: false
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: prometheus.node
+                  operator: Exists
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: "${LVM_LOCALPV_STORAGECLASS_NAME}"
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 30Gi
+
+alertmanager:
+  alertmanagerSpec:
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: prometheus.node
+                  operator: Exists
+
+grafana:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: prometheus.node
+                operator: Exists
+
+kube-state-metrics:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: prometheus.node
+                operator: Exists
+EOF
+
+    log_info "Installing Prometheus via Helm..."
+    helm upgrade --install "$prometheus_release_name" "$prometheus_chart_name" \
+        --namespace "$PROMETHEUS_NAMESPACE" \
+        --create-namespace \
+        --version "$PROMETHEUS_CHART_VERSION" \
+        --values "$values_file" \
+        --wait --timeout=15m || {
+        error_exit "Failed to install Prometheus"
+    }
+
+    # Wait for Prometheus to be ready
+    log_info "Waiting for Prometheus to be ready..."
+    "$KUBECTL" wait --for=condition=ready pod -l "app.kubernetes.io/name=prometheus" -n "$PROMETHEUS_NAMESPACE" --timeout=900s || {
+        error_exit "Prometheus failed to become ready"
+    }
+
+    # Display installation status
+    echo -e "\n${GREEN}🎉 Prometheus Installation Completed!${NC}\n"
+    echo -e "${WHITE}📊 Components:${NC}"
+    echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$PROMETHEUS_NAMESPACE${NC}"
+    echo -e "   ${GREEN}•${NC} Chart: ${CYAN}$prometheus_chart_name${NC}"
+    echo -e "   ${GREEN}•${NC} Chart Version: ${CYAN}$PROMETHEUS_CHART_VERSION${NC}\n"
+
+    echo -e "${WHITE}🔍 Verification Commands:${NC}"
+    echo -e "   ${GREEN}•${NC} Check pods: ${CYAN}kubectl get pods -n $PROMETHEUS_NAMESPACE${NC}"
+    echo -e "   ${GREEN}•${NC} Check Prometheus: ${CYAN}kubectl get prometheus -n $PROMETHEUS_NAMESPACE${NC}"
+    echo -e "   ${GREEN}•${NC} Check services: ${CYAN}kubectl get svc -n $PROMETHEUS_NAMESPACE${NC}"
+    echo -e "   ${GREEN}•${NC} Check Helm release: ${CYAN}helm list -n $PROMETHEUS_NAMESPACE${NC}"
+    echo -e "${GREEN}✅ Prometheus installed successfully${NC}\n"
+
+    # Get service information for access
+    local prometheus_svc
+    local grafana_svc
+    prometheus_svc=$("$KUBECTL" get svc -n "$PROMETHEUS_NAMESPACE" -l "app.kubernetes.io/name=prometheus" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+    grafana_svc=$("$KUBECTL" get svc -n "$PROMETHEUS_NAMESPACE" -l "app.kubernetes.io/name=grafana" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+    
+    # Display Prometheus access information
+    echo -e "${WHITE}🌐 Prometheus Access Information:${NC}"
+    if [[ -n "$prometheus_svc" ]]; then
+        echo -e "   ${GREEN}•${NC} Prometheus UI: ${CYAN}kubectl port-forward -n $PROMETHEUS_NAMESPACE svc/$prometheus_svc 9090:9090${NC}"
+        echo -e "   ${GREEN}•${NC} Then access: ${CYAN}http://localhost:9090${NC}"
+    fi
+    if [[ -n "$grafana_svc" ]]; then
+        echo -e "   ${GREEN}•${NC} Grafana UI: ${CYAN}kubectl port-forward -n $PROMETHEUS_NAMESPACE svc/$grafana_svc 3000:80${NC}"
+        echo -e "   ${GREEN}•${NC} Then access: ${CYAN}http://localhost:3000${NC}"
+        echo -e "   ${GREEN}•${NC} Grafana default credentials: ${CYAN}admin/prom-operator${NC}"
+    fi
+    echo
+
+    # Record installation end time
+    local end_time=$(date +%s)
+    local duration=$((end_time - start_time))
+    # Display installation timing information
+    if [[ -n "$start_time" && -n "$end_time" ]]; then
+        echo -e "\n${WHITE}⏱️  Installation Steps Timing:${NC}"
+        echo -e "   ${GREEN}•${NC} Start Time: ${CYAN}$(date -d @"$start_time" '+%Y-%m-%d %H:%M:%S')${NC}"
+        echo -e "   ${GREEN}•${NC} End Time: ${CYAN}$(date -d @"$end_time" '+%Y-%m-%d %H:%M:%S')${NC}"
+        echo -e "   ${GREEN}•${NC} Duration: ${YELLOW}$(printf '%02d:%02d:%02d' $((duration / 3600)) $((duration % 3600 / 60)) $((duration % 60)))${NC}"}
+    fi
+    log_info "Prometheus installation completed successfully!"
+    return 0
+}
+
+#######################################
 # Install CloudNative-PG
 #######################################
 install_cnpg() {
     log_info "Starting CloudNative-PG installation..."
 
     # Configuration variables
-    local cnpg_namespace="cnpg-system"
     local cnpg_chart_repo="https://cloudnative-pg.github.io/charts"
     local cnpg_repo_name="cnpg"
     local cnpg_release_name="cloudnative-pg"
@@ -2631,7 +2857,7 @@ install_cnpg() {
     echo -e "   ${GREEN}•${NC} Helm repository configuration\n"
 
     echo -e "${WHITE}Installation details:${NC}"
-    echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$cnpg_namespace${NC}"
+    echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$CNPG_NAMESPACE${NC}"
     echo -e "   ${GREEN}•${NC} Helm chart: ${CYAN}$cnpg_chart_name${NC}"
     echo -e "   ${GREEN}•${NC} Helm chart version: ${CYAN}$CNPG_CHART_VERSION${NC}"
     echo -e "   ${GREEN}•${NC} Installation timeout: ${CYAN}5 minutes${NC}\n"
@@ -2651,23 +2877,12 @@ install_cnpg() {
     local start_time
     start_time=$(date +%s)
 
-    # Check if helm is installed
-    if ! command -v helm >/dev/null 2>&1; then
-        log_info "Installing Helm..."
-        curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
-        chmod 700 get_helm.sh
-        ./get_helm.sh
-        rm -f get_helm.sh
-    else
-        log_info "Helm is already installed"
-    fi
-
     # Add CloudNative-PG Helm repository
     log_info "Adding CloudNative-PG Helm repository..."
     helm repo add "$cnpg_repo_name" "$cnpg_chart_repo" || {
         error_exit "Failed to add CloudNative-PG Helm repository"
     }
-    helm repo update
+    helm repo update "$cnpg_repo_name"
 
     log_info "Labeling CloudNative-PG control plane nodes..."
     # Use global variables extracted from config
@@ -2715,7 +2930,7 @@ EOF
 
     log_info "Installing CloudNative-PG operator via Helm..."
     helm upgrade --install "$cnpg_release_name" "$cnpg_chart_name" \
-        --namespace "$cnpg_namespace" \
+        --namespace "$CNPG_NAMESPACE" \
         --create-namespace \
         --version "$CNPG_CHART_VERSION" \
         --values "$values_file" \
@@ -2728,23 +2943,23 @@ EOF
 
     # Wait for operator to be ready
     log_info "Waiting for CloudNative-PG operator to be ready..."
-    "$KUBECTL" wait --for=condition=ready pod -l app.kubernetes.io/instance="$cnpg_release_name" -n "$cnpg_namespace" --timeout=300s || {
+    "$KUBECTL" wait --for=condition=ready pod -l app.kubernetes.io/instance="$cnpg_release_name" -n "$CNPG_NAMESPACE" --timeout=300s || {
         error_exit "CloudNative-PG operator failed to become ready"
     }
 
     # Display installation status
     echo -e "\n${GREEN}🎉 CloudNative-PG Installation Completed!${NC}\n"
     echo -e "${WHITE}📦 Components:${NC}"
-    echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$cnpg_namespace${NC}"
+    echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$CNPG_NAMESPACE${NC}"
     echo -e "   ${GREEN}•${NC} Chart: ${CYAN}$cnpg_chart_name${NC}"
     echo -e "   ${GREEN}•${NC} Chart Version: ${CYAN}$CNPG_CHART_VERSION${NC}\n"
 
     echo -e "${WHITE}🔍 Verification Commands:${NC}"
-    echo -e "   ${GREEN}•${NC} Check pods: ${CYAN}kubectl get pods -n $cnpg_namespace${NC}"
-    echo -e "   ${GREEN}•${NC} Check operator logs: ${CYAN}kubectl logs -n $cnpg_namespace deployment/cnpg-controller-manager${NC}"
+    echo -e "   ${GREEN}•${NC} Check pods: ${CYAN}kubectl get pods -n $CNPG_NAMESPACE${NC}"
+    echo -e "   ${GREEN}•${NC} Check operator logs: ${CYAN}kubectl logs -n $CNPG_NAMESPACE deployment/cnpg-controller-manager${NC}"
     echo -e "   ${GREEN}•${NC} Check CRDs: ${CYAN}kubectl get crd | grep cnpg${NC}"
-    echo -e "   ${GREEN}•${NC} Check Helm release: ${CYAN}helm list -n $cnpg_namespace${NC}"
-    echo -e "   ${GREEN}•${NC} Check deployment config: ${CYAN}kubectl get deployment cnpg-controller-manager -n $cnpg_namespace -o yaml${NC}"
+    echo -e "   ${GREEN}•${NC} Check Helm release: ${CYAN}helm list -n $CNPG_NAMESPACE${NC}"
+    echo -e "   ${GREEN}•${NC} Check deployment config: ${CYAN}kubectl get deployment cnpg-controller-manager -n $CNPG_NAMESPACE -o yaml${NC}"
     echo -e "${GREEN}✅ CloudNative-PG installed successfully${NC}\n"
 
     # Record installation end time
@@ -2769,7 +2984,6 @@ install_upm_engine() {
     log_info "Starting UPM Engine installation..."
 
     # Configuration variables
-    local upm_namespace="upm-system"
     local upm_chart_repo="https://upmio.github.io/helm-charts"
     local upm_repo_name="upm-charts"
     local upm_engine_release_name="upm-engine"
@@ -2783,7 +2997,7 @@ install_upm_engine() {
     echo -e "   ${GREEN}•${NC} Helm repository configuration\n"
 
     echo -e "${WHITE}Installation details:${NC}"
-    echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$upm_namespace${NC}"
+    echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$UPM_NAMESPACE${NC}"
     echo -e "   ${GREEN}•${NC} Helm chart: ${CYAN}$upm_engine_chart_name${NC}"
     echo -e "   ${GREEN}•${NC} Helm chart version: ${CYAN}$UPM_CHART_VERSION${NC}"
     echo -e "   ${GREEN}•${NC} Installation timeout: ${CYAN}5 minutes${NC}\n"
@@ -2803,23 +3017,12 @@ install_upm_engine() {
     local start_time
     start_time=$(date +%s)
 
-    # Check if helm is installed
-    if ! command -v helm >/dev/null 2>&1; then
-        log_info "Installing Helm..."
-        curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
-        chmod 700 get_helm.sh
-        ./get_helm.sh
-        rm -f get_helm.sh
-    else
-        log_info "Helm is already installed"
-    fi
-
     # Add UPM Engine Helm repository
     log_info "Adding UPM Engine Helm repository..."
     helm repo add "$upm_repo_name" "$upm_chart_repo" || {
         error_exit "Failed to add UPM Engine Helm repository"
     }
-    helm repo update
+    helm repo update "$upm_repo_name"
 
     log_info "Labeling UPM Engine control plane nodes..."
     # Use global variables extracted from config
@@ -2846,7 +3049,7 @@ install_upm_engine() {
 
     log_info "Installing UPM Engine via Helm..."
     helm upgrade --install "$upm_engine_release_name" "$upm_engine_chart_name" \
-        --namespace "$upm_namespace" \
+        --namespace "$UPM_NAMESPACE" \
         --create-namespace \
         --version "$UPM_CHART_VERSION" \
         --wait --timeout=5m || {
@@ -2855,23 +3058,23 @@ install_upm_engine() {
 
     # Wait for operator to be ready
     log_info "Waiting for UPM Engine to be ready..."
-    "$KUBECTL" wait --for=condition=ready pod -l "app.kubernetes.io/instance=$upm_engine_release_name" -n "$upm_namespace" --timeout=300s || {
+    "$KUBECTL" wait --for=condition=ready pod -l "app.kubernetes.io/instance=$upm_engine_release_name" -n "$UPM_NAMESPACE" --timeout=300s || {
         error_exit "UPM Engine failed to become ready"
     }
 
     # Display installation status
     echo -e "\n${GREEN}🎉 UPM Engine Installation Completed!${NC}\n"
     echo -e "${WHITE}📦 Components:${NC}"
-    echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$upm_namespace${NC}"
+    echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$UPM_NAMESPACE${NC}"
     echo -e "   ${GREEN}•${NC} Chart: ${CYAN}$upm_engine_chart_name${NC}"
     echo -e "   ${GREEN}•${NC} Chart Version: ${CYAN}$UPM_CHART_VERSION${NC}\n"
 
     echo -e "${WHITE}🔍 Verification Commands:${NC}"
-    echo -e "   ${GREEN}•${NC} Check pods: ${CYAN}kubectl get pods -n $upm_namespace${NC}"
-    echo -e "   ${GREEN}•${NC} Check operator logs: ${CYAN}kubectl logs -n $upm_namespace deployment/upm-engine-controller-manager${NC}"
+    echo -e "   ${GREEN}•${NC} Check pods: ${CYAN}kubectl get pods -n $UPM_NAMESPACE${NC}"
+    echo -e "   ${GREEN}•${NC} Check operator logs: ${CYAN}kubectl logs -n $UPM_NAMESPACE deployment/upm-engine-controller-manager${NC}"
     echo -e "   ${GREEN}•${NC} Check CRDs: ${CYAN}kubectl get crd | grep upm${NC}"
-    echo -e "   ${GREEN}•${NC} Check Helm release: ${CYAN}helm list -n $upm_namespace${NC}"
-    echo -e "   ${GREEN}•${NC} Check deployment config: ${CYAN}kubectl get deployment upm-engine-controller-manager -n $upm_namespace -o yaml${NC}"
+    echo -e "   ${GREEN}•${NC} Check Helm release: ${CYAN}helm list -n $UPM_NAMESPACE${NC}"
+    echo -e "   ${GREEN}•${NC} Check deployment config: ${CYAN}kubectl get deployment upm-engine-controller-manager -n $UPM_NAMESPACE -o yaml${NC}"
     echo -e "${GREEN}✅ UPM Engine installed successfully${NC}\n"
 
     return 0
@@ -2884,7 +3087,6 @@ install_upm_platform() {
     log_info "Starting UPM Platform installation..."
 
     # Configuration variables
-    local upm_namespace="upm-system"
     local upm_chart_repo="https://upmio.github.io/helm-charts"
     local upm_repo_name="upm-charts"
     local upm_platform_release_name="upm-platform"
@@ -2898,7 +3100,7 @@ install_upm_platform() {
     echo -e "   ${GREEN}•${NC} Helm repository configuration\n"
 
     echo -e "${WHITE}Installation details:${NC}"
-    echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$upm_namespace${NC}"
+    echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$UPM_NAMESPACE${NC}"
     echo -e "   ${GREEN}•${NC} Helm chart: ${CYAN}$upm_platform_chart_name${NC}"
     echo -e "   ${GREEN}•${NC} Helm chart version: ${CYAN}$UPM_CHART_VERSION${NC}"
     echo -e "   ${GREEN}•${NC} Installation timeout: ${CYAN}15 minutes${NC}\n"
@@ -2918,23 +3120,12 @@ install_upm_platform() {
     local start_time
     local start_time=$(date +%s)
 
-    # Check if helm is installed
-    if ! command -v helm >/dev/null 2>&1; then
-        log_info "Installing Helm..."
-        curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
-        chmod 700 get_helm.sh
-        ./get_helm.sh
-        rm -f get_helm.sh
-    else
-        log_info "Helm is already installed"
-    fi
-
     # Add UPM Platform Helm repository
     log_info "Adding UPM Platform Helm repository..."
     helm repo add "$upm_repo_name" "$upm_chart_repo" || {
         error_exit "Failed to add UPM Platform Helm repository"
     }
-    helm repo update
+    helm repo update "$upm_repo_name"
 
     log_info "Labeling UPM Platform worker nodes..."
     # Use global variables extracted from config
@@ -3034,7 +3225,7 @@ EOF
 
     log_info "Installing UPM Platform via Helm..."
     helm upgrade --install "$upm_platform_release_name" "$upm_platform_chart_name" \
-        --namespace "$upm_namespace" \
+        --namespace "$UPM_NAMESPACE" \
         --create-namespace \
         --version "$UPM_CHART_VERSION" \
         --values "$values_file" \
@@ -3044,23 +3235,23 @@ EOF
 
     # Wait for platform to be ready
     log_info "Waiting for UPM Platform to be ready..."
-    "$KUBECTL" wait --for=condition=ready pod -l "app.kubernetes.io/instance=$upm_platform_release_name" -n "$upm_namespace" --timeout=900s || {
+    "$KUBECTL" wait --for=condition=ready pod -l "app.kubernetes.io/instance=$upm_platform_release_name" -n "$UPM_NAMESPACE" --timeout=900s || {
         error_exit "UPM Platform failed to become ready"
     }
 
     # Display installation status
     echo -e "\n${GREEN}🎉 UPM Platform Installation Completed!${NC}\n"
     echo -e "${WHITE}📦 Components:${NC}"
-    echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$upm_namespace${NC}"
+    echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$UPM_NAMESPACE${NC}"
     echo -e "   ${GREEN}•${NC} Chart: ${CYAN}$upm_platform_chart_name${NC}"
     echo -e "   ${GREEN}•${NC} Chart Version: ${CYAN}$UPM_CHART_VERSION${NC}\n"
 
     echo -e "${WHITE}🔍 Verification Commands:${NC}"
-    echo -e "   ${GREEN}•${NC} Check pods: ${CYAN}kubectl get pods -n $upm_namespace${NC}"
-    echo -e "   ${GREEN}•${NC} Check platform logs: ${CYAN}kubectl logs -n $upm_namespace deployment/upm-platform-controller-manager${NC}"
+    echo -e "   ${GREEN}•${NC} Check pods: ${CYAN}kubectl get pods -n $UPM_NAMESPACE${NC}"
+    echo -e "   ${GREEN}•${NC} Check platform logs: ${CYAN}kubectl logs -n $UPM_NAMESPACE deployment/upm-platform-controller-manager${NC}"
     echo -e "   ${GREEN}•${NC} Check CRDs: ${CYAN}kubectl get crd | grep upm${NC}"
-    echo -e "   ${GREEN}•${NC} Check Helm release: ${CYAN}helm list -n $upm_namespace${NC}"
-    echo -e "   ${GREEN}•${NC} Check deployment config: ${CYAN}kubectl get deployment upm-platform-controller-manager -n $upm_namespace -o yaml${NC}"
+    echo -e "   ${GREEN}•${NC} Check Helm release: ${CYAN}helm list -n $UPM_NAMESPACE${NC}"
+    echo -e "   ${GREEN}•${NC} Check deployment config: ${CYAN}kubectl get deployment upm-platform-controller-manager -n $UPM_NAMESPACE -o yaml${NC}"
     echo -e "${GREEN}✅ UPM Platform installed successfully${NC}\n"
 
     # Get worker node IP for login URL (prioritize nodes with upm.platform.node label)
@@ -3170,6 +3361,7 @@ INSTALLATION_OPTION (exactly one required):
   --cnpg                        Install CloudNative-PG only
   --upm-engine                  Install UPM Engine only
   --upm-platform                Install UPM Platform only
+  --prometheus                  Install Prometheus monitoring stack only
   --all                         Install all components (k8s + lvmlocalpv + cnpg + upm-engine + upm-platform)
 
 IMPORTANT: Exactly one installation option must be specified.
@@ -3349,6 +3541,10 @@ main() {
         "--upm-platform")
             log_info "Executing: install_upm_platform"
             install_upm_platform
+            ;;
+        "--prometheus")
+            log_info "Executing: install_prometheus"
+            install_prometheus
             ;;
         "--all")
             log_info "Executing: complete installation sequence"
