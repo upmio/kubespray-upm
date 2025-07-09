@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Kubespray Libvirt Environment Setup Script v1.0
+# Kubespray Libvirt Environment Setup Script
 #
 # Description:
 #   Enterprise-grade automated setup script for Kubespray environment with libvirt
@@ -79,7 +79,6 @@
 #
 # License: Apache License 2.0
 # Author: Kubespray UPM Team
-# Version: 1.0
 # Repository: https://github.com/upmio/kubespray-upm
 #
 
@@ -91,6 +90,10 @@ set -eE
 
 # Script metadata
 readonly SCRIPT_VERSION="1.0"
+readonly SCRIPT_NAME="Kubespray Libvirt Environment Setup Script"
+readonly SCRIPT_AUTHOR="Kubespray UPM Team"
+readonly SCRIPT_LICENSE="Apache License 2.0"
+readonly SCRIPT_REPOSITORY="https://github.com/upmio/kubespray-upm"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 readonly SCRIPT_DIR
 readonly KUBESPRAY_DIR="${SCRIPT_DIR}/kubespray-upm"
@@ -3355,6 +3358,52 @@ display_cluster_info() {
 }
 
 #######################################
+# Version Functions
+#######################################
+
+# Display version information
+show_version() {
+    cat <<EOF
+${SCRIPT_NAME} v${SCRIPT_VERSION}
+
+Build Information:
+  Version:     ${SCRIPT_VERSION}
+  Author:      ${SCRIPT_AUTHOR}
+  License:     ${SCRIPT_LICENSE}
+  Repository:  ${SCRIPT_REPOSITORY}
+
+System Information:
+  Script Path: ${BASH_SOURCE[0]}
+  Working Dir: ${SCRIPT_DIR}
+  Shell:       ${BASH_VERSION}
+  Platform:    $(uname -s) $(uname -r) $(uname -m)
+  User:        $(whoami)
+  Date:        $(date '+%Y-%m-%d %H:%M:%S %Z')
+
+Component Versions:
+  Python:      ${PYTHON_VERSION}
+  LVM LocalPV: ${LVM_LOCALPV_CHART_VERSION}
+  CNPG:        ${CNPG_CHART_VERSION}
+  UPM:         ${UPM_CHART_VERSION}
+  Prometheus:  ${PROMETHEUS_CHART_VERSION}
+EOF
+}
+
+# Display version changelog (if available)
+show_version_changelog() {
+    local changelog_file="${SCRIPT_DIR}/CHANGELOG.md"
+    
+    if [[ -f "$changelog_file" ]]; then
+        echo -e "${CYAN}📋 Version Changelog:${NC}"
+        head -n 50 "$changelog_file" 2>/dev/null || echo "Unable to read changelog file"
+    else
+        echo -e "${YELLOW}⚠️  Changelog file not found: $changelog_file${NC}"
+        echo -e "${CYAN}📋 Current Version: v${SCRIPT_VERSION}${NC}"
+        echo -e "${CYAN}🔗 For latest changes, visit: ${SCRIPT_REPOSITORY}${NC}"
+    fi
+}
+
+#######################################
 # Help Function
 #######################################
 show_help() {
@@ -3364,6 +3413,8 @@ Usage: $0 [OPTIONS] INSTALLATION_OPTION
 
 OPTIONS:
   -h, --help                    Show this help message
+  -v, --version                 Show version information
+  --version-changelog           Show version changelog
   -y                            Auto-confirm all yes/no prompts (except network bridge configuration)
   -n <network_type>             Set network type (private|public, default: private)
                                 Only effective with --k8s or full setup mode
@@ -3474,6 +3525,14 @@ parse_arguments() {
             show_help
             exit 0
             ;;
+        -v|--version)
+            show_version
+            exit 0
+            ;;
+        --version-changelog)
+            show_version_changelog
+            exit 0
+            ;;
         -y)
             AUTO_CONFIRM=true
             shift
@@ -3521,6 +3580,10 @@ parse_arguments() {
 # Main Function
 #######################################
 main() {
+    # Display script version and basic info at startup
+    echo -e "${CYAN}🚀 ${SCRIPT_NAME} v${SCRIPT_VERSION}${NC}"
+    echo -e "${WHITE}🔗 Repository: ${SCRIPT_REPOSITORY}${NC}"
+    
     # Variable validation
     validate_required_variables
     
