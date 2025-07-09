@@ -261,9 +261,6 @@ prompt_yes_no() {
     local force_interactive="${3:-false}"
     local response
 
-    # Debug AUTO_CONFIRM value
-    echo "Debug AUTO_CONFIRM: $AUTO_CONFIRM"
-
     # Auto-confirm mode: automatically return 'yes' unless force_interactive is true
     if [[ "$AUTO_CONFIRM" == "true" && "$force_interactive" != "true" ]]; then
         echo -e "${CYAN}❓ $question${NC} ${GREEN}(auto-confirmed: yes)${NC}"
