@@ -19,11 +19,9 @@
 
 如果您想要最快速的体验，可以使用以下一键命令：
 
-```bash
-# 下载并安装完整 Kubernetes 环境（包含所有组件）
-curl -sSL https://raw.githubusercontent.com/upmio/kubespray-upm/refs/heads/master/vagrant_setup_scripts/libvirt_kubespray_setup.sh | bash -s -- --all -y
+下载并安装 Kubernetes 集群（NAT 模式）
 
-# 仅安装 Kubernetes 集群（NAT 模式）
+```bash
 curl -sSL https://raw.githubusercontent.com/upmio/kubespray-upm/refs/heads/master/vagrant_setup_scripts/libvirt_kubespray_setup.sh | bash -s -- --k8s -y
 ```
 
