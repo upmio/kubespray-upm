@@ -2096,7 +2096,7 @@ configure_containerd_registries() {
     log_info "Configuring containerd registries and authentication..."
     
     local containerd_config_file
-    containerd_config_file="${SCRIPT_DIR}/containerd-config.yml"
+    containerd_config_file="${SCRIPT_DIR}/containerd.yml"
     local target_containerd_file="${KUBESPRAY_DIR}/inventory/sample/group_vars/all/containerd.yml"
     
     # Check if local containerd config file exists
@@ -2114,36 +2114,25 @@ configure_containerd_registries() {
         return 1
     fi
     
-    # Check if configuration has already been appended
-    local config_marker
-    config_marker="# Containerd configuration from local file ($(basename "$containerd_config_file"))"
-    
-    if grep -Fq "$config_marker" "$target_containerd_file"; then
-        echo -e "${YELLOW}⚠️  Containerd configuration already exists in target file${NC}"
-        log_info "Containerd configuration already appended, skipping to avoid duplication"
-        return 0
-    fi
-    
     # Create backup of original containerd.yml
     local backup_file
-    backup_file="${SCRIPT_DIR}/containerd-config.yml.backup.$(date +%Y%m%d_%H%M%S)"
+    backup_file="${SCRIPT_DIR}/containerd.yml.backup.$(date +%Y%m%d_%H%M%S)"
     if cp "$target_containerd_file" "$backup_file"; then
         log_info "Created backup: $backup_file"
     else
         log_error "Failed to create backup of containerd.yml"
         return 1
     fi
+    echo -e "${YELLOW}📝 Overwriting containerd configuration...${NC}"
     
-    echo -e "${YELLOW}📝 Appending containerd configuration...${NC}"
-    
-    # Append local configuration to target file
-    {
-        echo -e "\n$config_marker"
-        cat "$containerd_config_file"
-    } >> "$target_containerd_file"
-    
-    echo -e "${GREEN}✅ Successfully appended containerd configuration${NC}"
-    log_info "Containerd configuration appended from $containerd_config_file to $target_containerd_file"
+    # Overwrite target file with local configuration
+    if cp "$containerd_config_file" "$target_containerd_file"; then
+        echo -e "${GREEN}✅ Successfully overwritten containerd configuration${NC}"
+        log_info "Containerd configuration overwritten from $containerd_config_file to $target_containerd_file"
+    else
+        log_error "Failed to overwrite containerd configuration"
+        return 1
+    fi
     
     return 0
 }
