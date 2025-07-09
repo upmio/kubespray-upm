@@ -156,16 +156,12 @@ declare G_OS=""
 declare G_NETWORK_PLUGIN=""
 declare G_INSTANCE_NAME_PREFIX=""
 declare G_WORKER_NODES=""
-declare G_VM_MEMORY_GB=""
-declare G_KUBE_MASTER_VM_MEMORY_GB=""
-declare G_UPM_CONTROL_PLANE_VM_MEMORY_GB=""
 declare G_VM_NETWORK=""
 declare G_SUBNET_SPLIT4=""
 declare G_SUBNET=""
 declare G_NETMASK=""
 declare G_GATEWAY=""
 declare G_DNS_SERVER=""
-declare G_BRIDGE_NIC=""
 
 declare SYS_MEMORY_MB=""
 declare SYS_CPU_CORES=""
@@ -1923,13 +1919,11 @@ extract_vagrant_config_variables() {
         G_NETMASK=$(grep "^\$netmask\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
         G_GATEWAY=$(grep "^\$gateway\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
         G_DNS_SERVER=$(grep "^\$dns_server\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
-        G_BRIDGE_NIC=$(grep "^\$bridge_nic\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
     else
         G_SUBNET="192.168.200"
         G_NETMASK="255.255.255.0"
         G_GATEWAY=""
         G_DNS_SERVER=""
-        G_BRIDGE_NIC=""
     fi
 
     # Ensure all numeric variables have valid default values to prevent arithmetic errors
@@ -1947,11 +1941,6 @@ extract_vagrant_config_variables() {
     if [[ $G_WORKER_NODES -lt 0 ]]; then
         G_WORKER_NODES=0
     fi
-
-    # Convert memory from MB to GB for display
-    G_VM_MEMORY_GB=$((G_VM_MEMORY / 1024))
-    G_KUBE_MASTER_VM_MEMORY_GB=$((G_KUBE_MASTER_VM_MEMORY / 1024))
-    G_UPM_CONTROL_PLANE_VM_MEMORY_GB=$((G_UPM_CONTROL_PLANE_VM_MEMORY / 1024))
 
     log_info "Vagrant configuration variables extracted successfully"
     return 0
@@ -1980,9 +1969,9 @@ parse_vagrant_config() {
     echo -e "   ${GREEN}•${NC} Prefix: ${CYAN}$G_INSTANCE_NAME_PREFIX${NC}\n"
 
     echo -e "${WHITE}🖥️  Nodes:${NC}"
-    echo -e "   ${GREEN}•${NC} Masters: ${WHITE}$G_KUBE_MASTER_INSTANCES${NC} × ${CYAN}${G_KUBE_MASTER_VM_CPUS}C/${G_KUBE_MASTER_VM_MEMORY_GB}GB${NC}"
-    echo -e "   ${GREEN}•${NC} Workers: ${WHITE}$G_WORKER_NODES${NC} × ${CYAN}${G_VM_CPUS}C/${G_VM_MEMORY_GB}GB${NC}"
-    echo -e "   ${GREEN}•${NC} UPM Control: ${WHITE}$G_UPM_CTL_INSTANCES${NC} × ${CYAN}${G_UPM_CONTROL_PLANE_VM_CPUS}C/${G_UPM_CONTROL_PLANE_VM_MEMORY_GB}GB${NC}\n"
+    echo -e "   ${GREEN}•${NC} Masters: ${WHITE}$G_KUBE_MASTER_INSTANCES${NC} × ${CYAN}${G_KUBE_MASTER_VM_CPUS}C/$((G_KUBE_MASTER_VM_MEMORY / 1024))GB${NC}"
+    echo -e "   ${GREEN}•${NC} Workers: ${WHITE}$G_WORKER_NODES${NC} × ${CYAN}${G_VM_CPUS}C/$((G_VM_MEMORY / 1024))GB${NC}"
+    echo -e "   ${GREEN}•${NC} UPM Control: ${WHITE}$G_UPM_CTL_INSTANCES${NC} × ${CYAN}${G_UPM_CONTROL_PLANE_VM_CPUS}C/$((G_UPM_CONTROL_PLANE_VM_MEMORY / 1024))GB${NC}\n"
 
     # Display network configuration
     echo -e "${WHITE}🌐 Network Configuration:${NC}"
@@ -1996,7 +1985,7 @@ parse_vagrant_config() {
         echo -e "${GREEN}   ├─ Netmask:${NC} ${WHITE}$G_NETMASK${NC}"
         echo -e "${GREEN}   ├─ Gateway:${NC} ${WHITE}$G_GATEWAY${NC}"
         echo -e "${GREEN}   ├─ DNS Server:${NC} ${WHITE}$G_DNS_SERVER${NC}"
-        echo -e "${GREEN}   └─ Bridge Interface:${NC} ${WHITE}$G_BRIDGE_NIC${NC}"
+        echo -e "${GREEN}   └─ Bridge Interface:${NC} ${WHITE}$BRIDGE_INTERFACE${NC}"
     else
         # PRIVATE_NETWORK: Display NAT network information
         echo -e "   ${GREEN}•${NC} Mode: ${CYAN}NAT Network${NC}"
@@ -2910,9 +2899,8 @@ install_upm_engine() {
     echo -e "${GREEN}✅ UPM Engine installed successfully${NC}\n"
 
     # Record installation end time
-    local INSTALLATION_END_TIME
     INSTALLATION_END_TIME=$(date +%s)
-    local INSTALLATION_DURATION=$((INSTALLATION_END_TIME - INSTALLATION_START_TIME))
+    INSTALLATION_DURATION=$((INSTALLATION_END_TIME - INSTALLATION_START_TIME))
     # Display installation timing information
     if [[ -n "$INSTALLATION_START_TIME" && -n "$INSTALLATION_END_TIME" ]]; then
         echo -e "\n${WHITE}⏱️  Installation Steps Timing:${NC}"
@@ -3132,9 +3120,8 @@ EOF
     echo -e "   ${GREEN}•${NC} Default Password: ${CYAN}Upm@2024!${NC}\n"
 
     # Record installation end time
-    local INSTALLATION_END_TIME
     INSTALLATION_END_TIME=$(date +%s)
-    local INSTALLATION_DURATION=$((INSTALLATION_END_TIME - INSTALLATION_START_TIME))
+    INSTALLATION_DURATION=$((INSTALLATION_END_TIME - INSTALLATION_START_TIME))
     # Display installation timing information
     if [[ -n "$INSTALLATION_START_TIME" && -n "$INSTALLATION_END_TIME" ]]; then
         echo -e "\n${WHITE}⏱️  Installation Steps Timing:${NC}"
