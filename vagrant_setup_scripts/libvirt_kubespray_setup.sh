@@ -2542,19 +2542,35 @@ install_lvm_localpv() {
     }
     helm repo update "$lvm_localpv_repo_name"
 
+    local values_file="/tmp/lvm_localpv_values.yaml"
+    cat <<EOF >"$values_file"
+lvmPlugin:
+  image:
+    repository: docker.io/openebs/lvm-driver
+  allowedTopologies: "kubernetes.io/hostname,openebs.io/node,"
+lvmController:
+  nodeSelector:
+    "openebs.io/control-plane": "enable"
+lvmNode:
+  nodeSelector:
+    "openebs.io/node": "enable"
+analytics:
+  enabled: false
+EOF
+
     # Install OpenEBS LVM LocalPV
     log_info "Installing OpenEBS LVM LocalPV with Helm..."
     helm upgrade --install "$lvm_localpv_release_name" "$lvm_localpv_chart_name" \
         --version "$LVM_LOCALPV_CHART_VERSION" \
         --namespace "$LVM_LOCALPV_NAMESPACE" \
         --create-namespace \
-        --set lvmPlugin.allowedTopologies='kubernetes\.io/hostname\,openebs\.io/node' \
-        --set lvmController.nodeSelector."openebs\.io/control-plane"="enable" \
-        --set lvmNode.nodeSelector."openebs\.io/node"="enable" \
-        --set analytics.enabled=false \
+        --values "$values_file" \
         --wait --timeout=15m || {
         error_exit "Failed to install OpenEBS LVM LocalPV"
     }
+
+    # Clean up values file
+    rm -f "$values_file"
 
     # Wait for pods to be ready
     log_info "Waiting for OpenEBS pods to be ready..."
@@ -2786,6 +2802,9 @@ EOF
         --wait --timeout=15m || {
         error_exit "Failed to install Prometheus"
     }
+
+    # Clean up values file
+    rm -f "$values_file"
 
     # Wait for Prometheus to be ready
     log_info "Waiting for Prometheus to be ready..."
@@ -3236,6 +3255,9 @@ EOF
         --wait --timeout=15m || {
         error_exit "Failed to upgrade UPM Platform"
     }
+
+    # Clean up values file
+    rm -f "$values_file"
 
     # Wait for platform to be ready
     log_info "Waiting for UPM Platform to be ready..."
