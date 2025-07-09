@@ -3,58 +3,82 @@
 # Kubespray Libvirt Environment Setup Script v1.0
 #
 # Description:
-#   Automated setup of Kubespray environment with libvirt virtualization
-#   for RHEL-based distributions. Supports complete environment setup
-#   and standalone component installation.
+#   Enterprise-grade automated setup script for Kubespray environment with libvirt
+#   virtualization on RHEL-based distributions. Provides comprehensive infrastructure
+#   deployment with modular component installation capabilities.
 #
-# Usage:
-#   Complete setup: ./libvirt_kubespray_setup.sh
-#   Environment setup: ./libvirt_kubespray_setup.sh --k8s
-#   Component installation: ./libvirt_kubespray_setup.sh [--lvmlocalpv|--cnpg|--upm-engine|--upm-platform]
+# Usage Examples:
+#   Full deployment:     ./libvirt_kubespray_setup.sh
+#   Environment only:    ./libvirt_kubespray_setup.sh --k8s
+#   Auto-confirm mode:   ./libvirt_kubespray_setup.sh -y
+#   Public network:      ./libvirt_kubespray_setup.sh --k8s -n public
+#   Component install:   ./libvirt_kubespray_setup.sh [--lvmlocalpv|--cnpg|--upm-engine|--upm-platform]
 #
 # System Requirements:
-#   - OS: RHEL/Rocky/AlmaLinux 8/9 (x86_64)
-#   - CPU: 12+ cores, Memory: 32GB+, Disk: 200GB+
-#   - Privileges: sudo access, Network: Internet connectivity
+#   - Operating System: RHEL/Rocky/AlmaLinux 8/9 (x86_64 architecture)
+#   - Hardware: CPU 12+ cores, Memory 32GB+, Storage 200GB+ available
+#   - Access: sudo privileges required, Internet connectivity essential
+#   - Network: Virtualization support (Intel VT-x/AMD-V) enabled in BIOS
 #
-# Key Features:
-#   ✓ Complete Kubespray environment automation
-#   ✓ libvirt/KVM virtualization environment setup
-#   ✓ Python environment and dependency management (pyenv)
-#   ✓ Kubernetes cluster deployment and validation
-#   ✓ Optional standalone component installation
-#   ✓ Interactive installation confirmation and detailed logging
-#   ✓ Automatic network configuration and connectivity testing
-#   ✓ containerd registry configuration support
+# Technical Features:
+#   ✓ Complete Kubespray environment automation with error handling
+#   ✓ libvirt/KVM virtualization stack installation and configuration
+#   ✓ Python environment management via pyenv with version control
+#   ✓ Kubernetes cluster deployment with validation and health checks
+#   ✓ Modular component installation (LVM LocalPV, CNPG, UPM Engine/Platform)
+#   ✓ Interactive and automated installation modes with confirmation prompts
+#   ✓ Advanced network configuration (private/public bridge networking)
+#   ✓ containerd registry configuration with custom registry support
+#   ✓ Comprehensive logging, monitoring, and troubleshooting capabilities
+#   ✓ Proxy configuration support for enterprise environments
 #
 # Environment Variables:
-#   HTTP_PROXY         - HTTP proxy URL
-#   HTTPS_PROXY        - HTTPS proxy URL
-#   NO_PROXY           - No proxy URLs
+#   HTTP_PROXY         - HTTP proxy server URL for package downloads
+#   HTTPS_PROXY        - HTTPS proxy server URL for secure connections
+#   NO_PROXY           - Comma-separated list of hosts to bypass proxy
+#   PYTHON_VERSION     - Python version for pyenv installation (default: 3.12.11)
+#   PIP_PROXY          - Proxy configuration for pip package manager
+#   GIT_PROXY          - Proxy configuration for git operations
 #
-# Fixed Paths:
-#   KUBESPRAY_DIR      - ./kubespray-upm
-#   KUBECONFIG         - $HOME/.kube/config
-#   KUBECTL            - $HOME/bin/kubectl
+# Fixed Directory Paths:
+#   KUBESPRAY_DIR      - ./kubespray-upm (relative to script location)
+#   KUBECONFIG         - $HOME/.kube/config (kubectl configuration)
+#   KUBECTL            - $HOME/bin/kubectl (kubectl binary location)
+#   LOG_FILE           - ./libvirt_kubespray_setup.log (installation log)
 #
 # Command Line Options:
-#   -h, --help               Display help information
-#   -y, --auto-confirm       Auto-confirm all prompts (default: false)
-#   -n <type>                Set network type: private|public (default: private)
-#                            Only effective with --k8s or full setup mode
-#   --k8s                    Run environment setup process only
-#   --lvmlocalpv             Install OpenEBS LVM LocalPV only
-#   --cnpg                   Install CloudNative-PG only
-#   --upm-engine             Install UPM Engine only
-#   --upm-platform           Install UPM Platform only
+#   -h, --help               Display comprehensive help information
+#   -y, --auto-confirm       Enable auto-confirmation mode (skip interactive prompts)
+#   -n <type>                Network type selection: private|public (default: private)
+#                            Note: Only effective with --k8s or full setup mode
+#   --k8s                    Execute environment setup process only (no components)
+#   --lvmlocalpv             Install OpenEBS LVM LocalPV storage solution only
+#   --cnpg                   Install CloudNative-PG PostgreSQL operator only
+#   --upm-engine             Install UPM Engine management component only
+#   --upm-platform           Install UPM Platform web interface only
 #
-# containerd Configuration:
-#   Optional config file: containerd-config.yml (same directory as script)
-#   If this file exists, registry configurations will be automatically
-#   merged into kubespray deployment
+# containerd Registry Configuration:
+#   Configuration file: containerd-config.yml (same directory as script)
+#   Purpose: Custom container registry configurations for air-gapped environments
+#   Behavior: If file exists, registry configurations are automatically merged
+#            into kubespray deployment for seamless container image pulling
 #
+# Network Configuration:
+#   Private Mode: Uses NAT networking with libvirt default network
+#   Public Mode:  Requires bridge interface configuration for direct network access
+#   Bridge Setup: Interactive configuration of bridge interface and network settings
+#
+# Security Features:
+#   ✓ SELinux compatibility and configuration management
+#   ✓ Firewall rules configuration for required services
+#   ✓ Secure sudo privilege validation and usage
+#   ✓ Input validation and sanitization for all user inputs
+#   ✓ Comprehensive error handling with detailed logging
+#
+# License: Apache License 2.0
 # Author: Kubespray UPM Team
 # Version: 1.0
+# Repository: https://github.com/upmio/kubespray-upm
 #
 
 set -eE
@@ -2468,7 +2492,7 @@ install_lvm_localpv() {
     echo -e "   ${GREEN}•${NC} Helm chart version: ${CYAN}$LVM_LOCALPV_CHART_VERSION${NC}"
     echo -e "   ${GREEN}•${NC} StorageClass: ${CYAN}$LVM_LOCALPV_STORAGECLASS_NAME${NC}"
     echo -e "   ${GREEN}•${NC} VolumeGroup: ${CYAN}$vg_name${NC}"
-    echo -e "   ${GREEN}•${NC} Installation timeout: ${CYAN}10 minutes${NC}\n"
+    echo -e "   ${GREEN}•${NC} Installation timeout: ${CYAN}15 minutes${NC}\n"
 
     echo -e "${YELLOW}⚠️  Note: This installation will:${NC}"
     echo -e "   ${YELLOW}•${NC} Add node labels to control plane and worker nodes"
@@ -2555,13 +2579,13 @@ install_lvm_localpv() {
         --set lvmController.nodeSelector."openebs\.io/control-plane"="enable" \
         --set lvmNode.nodeSelector."openebs\.io/node"="enable" \
         --set analytics.enabled=false \
-        --wait --timeout=5m || {
+        --wait --timeout=15m || {
         error_exit "Failed to install OpenEBS LVM LocalPV"
     }
 
     # Wait for pods to be ready
     log_info "Waiting for OpenEBS pods to be ready..."
-    "$KUBECTL" wait --for=condition=ready pod -l release="$openebs_release_name" -n "$openebs_namespace" --timeout=600s || {
+    "$KUBECTL" wait --for=condition=ready pod -l release="$openebs_release_name" -n "$openebs_namespace" --timeout=900s || {
         error_exit "OpenEBS pods failed to become ready"
     }
     log_info "OpenEBS LVM LocalPV installed successfully"
