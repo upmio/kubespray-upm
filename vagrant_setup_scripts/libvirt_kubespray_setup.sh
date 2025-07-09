@@ -12,7 +12,7 @@
 #   Environment only:    ./libvirt_kubespray_setup.sh --k8s
 #   Auto-confirm mode:   ./libvirt_kubespray_setup.sh -y
 #   Public network:      ./libvirt_kubespray_setup.sh --k8s -n public
-#   Component install:   ./libvirt_kubespray_setup.sh [--lvmlocalpv|--cnpg|--upm-engine|--upm-platform]
+#   Component install:   ./libvirt_kubespray_setup.sh [--lvmlocalpv|--prometheus|--cnpg|--upm-engine|--upm-platform|--all]
 #
 # System Requirements:
 #   - Operating System: RHEL/Rocky/AlmaLinux 8/9 (x86_64 architecture)
@@ -25,7 +25,7 @@
 #   ✓ libvirt/KVM virtualization stack installation and configuration
 #   ✓ Python environment management via pyenv with version control
 #   ✓ Kubernetes cluster deployment with validation and health checks
-#   ✓ Modular component installation (LVM LocalPV, CNPG, UPM Engine/Platform)
+#   ✓ Modular component installation (LVM LocalPV, CNPG, UPM Engine/Platform, Prometheus)
 #   ✓ Interactive and automated installation modes with confirmation prompts
 #   ✓ Advanced network configuration (private/public bridge networking)
 #   ✓ containerd registry configuration with custom registry support
@@ -56,6 +56,8 @@
 #   --cnpg                   Install CloudNative-PG PostgreSQL operator only
 #   --upm-engine             Install UPM Engine management component only
 #   --upm-platform           Install UPM Platform web interface only
+#   --prometheus             Install Prometheus monitoring stack only
+#   --all                    Install all components (k8s + lvmlocalpv + prometheus + cnpg + upm-engine + upm-platform)
 #
 # containerd Registry Configuration:
 #   Configuration file: containerd-config.yml (same directory as script)
@@ -3362,7 +3364,7 @@ INSTALLATION_OPTION (exactly one required):
   --upm-engine                  Install UPM Engine only
   --upm-platform                Install UPM Platform only
   --prometheus                  Install Prometheus monitoring stack only
-  --all                         Install all components (k8s + lvmlocalpv + cnpg + upm-engine + upm-platform)
+  --all                         Install all components (k8s + lvmlocalpv + prometheus + cnpg + upm-engine + upm-platform)
 
 IMPORTANT: Exactly one installation option must be specified.
 
@@ -3550,6 +3552,7 @@ main() {
             log_info "Executing: complete installation sequence"
             setup_environment
             install_lvm_localpv
+            install_prometheus
             install_cnpg
             install_upm_engine
             install_upm_platform
