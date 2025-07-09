@@ -1907,28 +1907,28 @@ extract_vagrant_config_variables() {
     log_info "Extracting Vagrant configuration variables from: $VAGRANT_CONF_FILE"
 
     # Extract configuration values from config.rb and set as global variables
-    G_NUM_INSTANCES=$(grep "^\$num_instances\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "5")
-    G_KUBE_MASTER_INSTANCES=$(grep "^\$kube_master_instances\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "1")
-    G_UPM_CTL_INSTANCES=$(grep "^\$upm_ctl_instances\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "1")
-    G_KUBE_MASTER_VM_CPUS=$(grep "^\$kube_master_vm_cpus\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "4")
-    G_KUBE_MASTER_VM_MEMORY=$(grep "^\$kube_master_vm_memory\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "4096")
-    G_UPM_CONTROL_PLANE_VM_CPUS=$(grep "^\$upm_control_plane_vm_cpus\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "12")
-    G_UPM_CONTROL_PLANE_VM_MEMORY=$(grep "^\$upm_control_plane_vm_memory\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "24576")
-    G_KUBE_VERSION=$(grep "^\$kube_version\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "1.33.2")
-    G_OS=$(grep "^\$os\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "rockylinux9")
-    G_NETWORK_PLUGIN=$(grep "^\$network_plugin\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "calico")
-    G_INSTANCE_NAME_PREFIX=$(grep "^\$instance_name_prefix\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "k8s")
-    G_SUBNET_SPLIT4=$(grep "^\$subnet_split4\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*\([0-9]\+\).*/\1/' || echo "100")
+    G_NUM_INSTANCES=$(grep "^\$num_instances\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/' || echo "5")
+    G_KUBE_MASTER_INSTANCES=$(grep "^\$kube_master_instances\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/' || echo "1")
+    G_UPM_CTL_INSTANCES=$(grep "^\$upm_ctl_instances\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/' || echo "1")
+    G_KUBE_MASTER_VM_CPUS=$(grep "^\$kube_master_vm_cpus\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/' || echo "4")
+    G_KUBE_MASTER_VM_MEMORY=$(grep "^\$kube_master_vm_memory\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/' || echo "4096")
+    G_UPM_CONTROL_PLANE_VM_CPUS=$(grep "^\$upm_control_plane_vm_cpus\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/' || echo "12")
+    G_UPM_CONTROL_PLANE_VM_MEMORY=$(grep "^\$upm_control_plane_vm_memory\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/' || echo "24576")
+    G_KUBE_VERSION=$(grep "^\$kube_version\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "1.33.2")
+    G_OS=$(grep "^\$os\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "rockylinux9")
+    G_NETWORK_PLUGIN=$(grep "^\$network_plugin\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "calico")
+    G_INSTANCE_NAME_PREFIX=$(grep "^\$instance_name_prefix\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "k8s")
+    G_SUBNET_SPLIT4=$(grep "^\$subnet_split4\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/' || echo "100")
 
     # Extract network configuration
-    G_VM_NETWORK=$(grep "^\$vm_network\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "private_network")
+    G_VM_NETWORK=$(grep "^\$vm_network\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "private_network")
 
     # Extract network-specific variables based on network type
     if [[ "$G_VM_NETWORK" == "public_network" ]]; then
-        G_SUBNET=$(grep "^\$subnet\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
-        G_NETMASK=$(grep "^\$netmask\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
-        G_GATEWAY=$(grep "^\$gateway\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
-        G_DNS_SERVER=$(grep "^\$dns_server\s*=" "$VAGRANT_CONF_FILE" | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
+        G_SUBNET=$(grep "^\$subnet\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "")
+        G_NETMASK=$(grep "^\$netmask\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "")
+        G_GATEWAY=$(grep "^\$gateway\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "")
+        G_DNS_SERVER=$(grep "^\$dns_server\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "")
     else
         G_SUBNET="192.168.200"
         G_NETMASK="255.255.255.0"
@@ -2453,7 +2453,7 @@ install_lvm_localpv() {
     local vg_name="local_vg_dev" # default fallback
     if [[ -f "$VAGRANT_CONF_FILE" ]]; then
         local extracted_vg
-        extracted_vg=$(grep "\$kube_node_instances_volume_group" "$VAGRANT_CONF_FILE" 2>/dev/null | sed 's/.*= *"\([^"]*\)".*/\1/' | head -n1)
+        extracted_vg=$(grep "\$kube_node_instances_volume_group" "$VAGRANT_CONF_FILE" 2>/dev/null | sed -E 's/.*= *"([^"]*)".*/\1/' | head -n1)
         if [[ -n "$extracted_vg" ]]; then
             vg_name="$extracted_vg"
             log_info "Found volume group name '$vg_name' in $VAGRANT_CONF_FILE"
