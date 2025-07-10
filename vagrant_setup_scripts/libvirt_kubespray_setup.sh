@@ -85,6 +85,76 @@
 set -eE
 
 #######################################
+# Global Variables for Cleanup
+#######################################
+declare -a TEMP_FILES=()
+declare -a TEMP_DIRS=()
+
+#######################################
+# Input Validation and Security Functions
+#######################################
+
+# Input sanitization function
+# Usage: sanitize_input "input_string"
+# Returns: sanitized string with dangerous characters removed
+sanitize_input() {
+    local input="$1"
+    # Remove potentially dangerous characters: backticks, semicolons, pipes, etc.
+    echo "$input" | sed 's/[`;&|$(){}\[\]<>]//g' | tr -d '\n\r'
+}
+
+# Path security validation function
+# Usage: validate_path_security "path"
+# Returns: 0 if safe, 1 if potentially dangerous
+validate_path_security() {
+    local path="$1"
+    
+    # Check for path traversal attempts
+    if [[ "$path" =~ \.\./|/\.\./ || "$path" =~ ^\.\./ || "$path" =~ /\.\.$  ]]; then
+        log_error "Path traversal detected in: $path"
+        return 1
+    fi
+    
+    # Check for absolute paths outside allowed directories
+    if [[ "$path" =~ ^/ && ! "$path" =~ ^/tmp/|^/var/tmp/|^"$HOME"|^"$KUBESPRAY_DIR" ]]; then
+        log_error "Potentially unsafe absolute path: $path"
+        return 1
+    fi
+    
+    return 0
+}
+
+#######################################
+# Cleanup and Signal Handling
+#######################################
+cleanup() {
+    local exit_code=$?
+    log_info "Cleaning up temporary resources..."
+    
+    # Clean up temporary files
+    if [[ ${#TEMP_FILES[@]} -gt 0 ]]; then
+        for temp_file in "${TEMP_FILES[@]}"; do
+            [[ -f "$temp_file" ]] && rm -f "$temp_file" 2>/dev/null && log_info "Removed temporary file: $temp_file"
+        done
+    fi
+    
+    # Clean up temporary directories
+    if [[ ${#TEMP_DIRS[@]} -gt 0 ]]; then
+        for temp_dir in "${TEMP_DIRS[@]}"; do
+            [[ -d "$temp_dir" ]] && rm -rf "$temp_dir" 2>/dev/null && log_info "Removed temporary directory: $temp_dir"
+        done
+    fi
+    
+    # Clean up any running background processes if needed
+    # This can be extended based on specific needs
+    
+    exit $exit_code
+}
+
+# Set up signal handlers
+trap cleanup EXIT INT TERM
+
+#######################################
 # Constants and Configuration
 #######################################
 
@@ -212,6 +282,69 @@ log_error() { log_with_level "ERROR" "$@"; }
 # Backward compatibility
 log() { log_info "$@"; }
 
+# Enhanced structured logging function
+# Usage: log_structured "LEVEL" "COMPONENT" "MESSAGE" ["DETAILS"]
+log_structured() {
+    local level="$1"
+    local component="$2"
+    local message="$3"
+    local details="${4:-}"
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    
+    local log_entry="[$timestamp] [$level] [$component] $message"
+    [[ -n "$details" ]] && log_entry="$log_entry - $details"
+    
+    case "$level" in
+    "INFO")
+        echo "$log_entry" | tee -a "$LOG_FILE"
+        ;;
+    "WARN"|"ERROR")
+        echo "$log_entry" | tee -a "$LOG_FILE" >&2
+        ;;
+    esac
+}
+
+# Function execution timing wrapper
+# Usage: time_function "function_name" [args...]
+# Examples:
+#   time_function setup_environment
+#   time_function install_libvirt
+#   time_function configure_system_security
+#   time_function "custom_function" "arg1" "arg2"
+time_function() {
+    local func_name="$1"
+    shift
+    local start_time end_time duration
+    
+    # Simple performance monitoring display with timestamps
+    local start_timestamp=$(date '+%H:%M:%S')
+    echo -e "${YELLOW}⏱️  Starting: ${BOLD}$func_name${NC} ${BLUE}[$start_timestamp]${NC}"
+    
+    log_structured "INFO" "PERF" "Starting function: $func_name"
+    start_time=$(date +%s.%N)
+    
+    # Execute the function
+    "$func_name" "$@"
+    local exit_code=$?
+    
+    end_time=$(date +%s.%N)
+    duration=$(echo "$end_time - $start_time" | bc -l 2>/dev/null || echo "N/A")
+    local end_timestamp=$(date '+%H:%M:%S')
+    
+    # Simple completion display with timestamps
+    if [[ $exit_code -eq 0 ]]; then
+        log_structured "INFO" "PERF" "Function $func_name completed successfully" "Duration: ${duration}s"
+        echo -e "${GREEN}✅ Completed: ${BOLD}$func_name${NC} ${BLUE}[$end_timestamp]${NC} ${MAGENTA}(${duration}s)${NC}"
+    else
+        log_structured "ERROR" "PERF" "Function $func_name failed" "Duration: ${duration}s, Exit code: $exit_code"
+        echo -e "${RED}❌ Failed: ${BOLD}$func_name${NC} ${BLUE}[$end_timestamp]${NC} ${MAGENTA}(${duration}s, exit: $exit_code)${NC}"
+    fi
+    echo
+    
+    return $exit_code
+}
+
 #######################################
 # Error Handling
 #######################################
@@ -248,6 +381,69 @@ safe_sudo() {
     else
         sudo "$@"
     fi
+}
+
+# Unified dependency checking function
+# Usage: check_dependencies "command1 command2 command3"
+# Returns: 0 if all dependencies exist, 1 if any are missing
+check_dependencies() {
+    local dependencies="$1"
+    local missing_deps=()
+    local dep
+    
+    log_structured "INFO" "DEPS" "Checking dependencies: $dependencies"
+    
+    for dep in $dependencies; do
+        if ! command_exists "$dep"; then
+            missing_deps+=("$dep")
+        fi
+    done
+    
+    if [[ ${#missing_deps[@]} -gt 0 ]]; then
+        log_structured "ERROR" "DEPS" "Missing dependencies" "${missing_deps[*]}"
+        return 1
+    fi
+    
+    log_structured "INFO" "DEPS" "All dependencies satisfied"
+    return 0
+}
+
+# Configuration validation function
+# Usage: validate_configuration
+# Returns: 0 if configuration is valid, 1 if invalid
+validate_configuration() {
+    local errors=()
+    
+    log_structured "INFO" "CONFIG" "Validating script configuration"
+    
+    # Check required directories
+    [[ -d "$SCRIPT_DIR" ]] || errors+=("Script directory not found: $SCRIPT_DIR")
+    
+    # Check required variables
+    [[ -n "$PYTHON_VERSION" ]] || errors+=("PYTHON_VERSION not set")
+    [[ -n "$KUBESPRAY_REPO_URL" ]] || errors+=("KUBESPRAY_REPO_URL not set")
+    [[ -n "$LOG_FILE" ]] || errors+=("LOG_FILE not set")
+    
+    # Validate network type
+    if [[ -n "$NETWORK_TYPE" && "$NETWORK_TYPE" != "private" && "$NETWORK_TYPE" != "public" ]]; then
+        errors+=("Invalid NETWORK_TYPE: $NETWORK_TYPE (must be 'private' or 'public')")
+    fi
+    
+    # Check log file writability
+    if ! touch "$LOG_FILE" 2>/dev/null; then
+        errors+=("Cannot write to log file: $LOG_FILE")
+    fi
+    
+    if [[ ${#errors[@]} -gt 0 ]]; then
+        log_structured "ERROR" "CONFIG" "Configuration validation failed"
+        for error in "${errors[@]}"; do
+            log_structured "ERROR" "CONFIG" "$error"
+        done
+        return 1
+    fi
+    
+    log_structured "INFO" "CONFIG" "Configuration validation passed"
+    return 0
 }
 
 #######################################
@@ -305,20 +501,22 @@ prompt_yes_no() {
 validate_ip_address() {
     local ip="$1"
     local ip_regex='^([0-9]{1,3}\.){3}[0-9]{1,3}$'
-
-    if [[ ! $ip =~ $ip_regex ]]; then
-        return 1
-    fi
-
-    # Check each octet
+    
+    [[ $ip =~ $ip_regex ]] || return 1
+    
+    # Check each octet with proper IFS handling
     local IFS='.'
-    IFS='.' read -ra octets <<<"$ip"
+    local -a octets
+    read -ra octets <<<"$ip"
+    
+    local octet
     for octet in "${octets[@]}"; do
-        if [[ $octet -lt 0 || $octet -gt 255 ]]; then
+        # Validate octet range (0-255) and ensure no leading zeros (except for "0")
+        if [[ $octet -lt 0 || $octet -gt 255 ]] || [[ $octet =~ ^0[0-9] ]]; then
             return 1
         fi
     done
-
+    
     return 0
 }
 
@@ -454,9 +652,11 @@ validate_vm_ip_range() {
         return 1
     fi
 
-    # Extract the fourth octet
+    # Extract the fourth octet with proper IFS handling
+    local IFS='.'
+    local -a octets
     local fourth_octet
-    IFS='.' read -ra octets <<<"$ip"
+    read -ra octets <<<"$ip"
     fourth_octet="${octets[3]}"
 
     # Check if the fourth octet is in valid range for VM allocation
@@ -1678,15 +1878,25 @@ configure_public_network_settings() {
     # Network information should be gathered beforehand via configure_public_network_interactive
     
     local temp_file
+    local lock_file
     temp_file="${VAGRANT_CONF_FILE}.tmp"
+    lock_file="${VAGRANT_CONF_FILE}.lock"
 
     log_info "Applying public network settings to configuration..."
+    
+    # Acquire file lock to prevent concurrent modifications
+    exec 200>"$lock_file"
+    if ! flock -n 200 2>/dev/null; then
+        log_error "Another process is modifying the network configuration. Please wait and try again."
+        return 1
+    fi
     
     # Validate that required global variables are set
     if [[ -z "${subnet:-}" || -z "${netmask:-}" || -z "${gateway:-}" || 
           -z "${dns_server:-}" || -z "${subnet_split4:-}" || -z "${BRIDGE_INTERFACE:-}" ]]; then
         log_error "Required network configuration variables are not set"
         log_error "Please run configure_public_network_interactive first"
+        flock -u 200 2>/dev/null
         return 1
     fi
 
@@ -1718,9 +1928,13 @@ configure_public_network_settings() {
     # Replace the original file
     if mv "$temp_file" "$VAGRANT_CONF_FILE"; then
         log_info "Public network configuration applied successfully to $VAGRANT_CONF_FILE"
+        flock -u 200 2>/dev/null
+        rm -f "$lock_file"
         return 0
     else
         log_error "Failed to apply configuration to $VAGRANT_CONF_FILE"
+        flock -u 200 2>/dev/null
+        rm -f "$lock_file"
         return 1
     fi
 }
@@ -2473,9 +2687,6 @@ install_lvm_localpv() {
     fi
 
     echo -e "${GREEN}✅ Proceeding with OpenEBS LVM LocalPV installation...${NC}\n"
-    # Record installation start time
-    local start_time
-    start_time=$(date +%s)
 
     # Label openebs control plane nodes (openebs.io/control-plane=enable)
     log_info "Labeling openebs control plane nodes..."
@@ -2602,17 +2813,7 @@ EOF
     echo -e "   ${GREEN}•${NC} Check node labels: ${CYAN}kubectl get nodes --show-labels${NC}"
     echo -e "${GREEN}✅ OpenEBS LVM LocalPV installed successfully${NC}\n"
 
-    # Record installation end time
-    local end_time
-    end_time=$(date +%s)
-    local duration=$((end_time - start_time))
-    # Display installation timing information
-    if [[ -n "$start_time" && -n "$end_time" ]]; then
-        echo -e "\n${WHITE}⏱️  Installation Steps Timing:${NC}"
-        echo -e "   ${GREEN}•${NC} Start Time: ${CYAN}$(date -d @"$start_time" '+%Y-%m-%d %H:%M:%S')${NC}"
-        echo -e "   ${GREEN}•${NC} End Time: ${CYAN}$(date -d @"$end_time" '+%Y-%m-%d %H:%M:%S')${NC}"
-        echo -e "   ${GREEN}•${NC} Duration: ${YELLOW}$(printf '%02d:%02d:%02d' $((duration / 3600)) $((duration % 3600 / 60)) $((duration % 60)))${NC}"
-    fi
+
 
     return 0
 }
@@ -2657,9 +2858,6 @@ install_prometheus() {
     fi
 
     echo -e "${GREEN}✅ Proceeding with Prometheus installation...${NC}\n"
-    # Record installation start time
-    local start_time
-    start_time=$(date +%s)
 
     # Add Prometheus Helm repository
     log_info "Adding Prometheus Helm repository..."
@@ -2829,17 +3027,7 @@ EOF
     fi
     echo
 
-    # Record installation end time
-    local end_time
-    end_time=$(date +%s)
-    local duration=$((end_time - start_time))
-    # Display installation timing information
-    if [[ -n "$start_time" && -n "$end_time" ]]; then
-        echo -e "\n${WHITE}⏱️  Installation Steps Timing:${NC}"
-        echo -e "   ${GREEN}•${NC} Start Time: ${CYAN}$(date -d @"$start_time" '+%Y-%m-%d %H:%M:%S')${NC}"
-        echo -e "   ${GREEN}•${NC} End Time: ${CYAN}$(date -d @"$end_time" '+%Y-%m-%d %H:%M:%S')${NC}"
-        echo -e "   ${GREEN}•${NC} Duration: ${YELLOW}$(printf '%02d:%02d:%02d' $((duration / 3600)) $((duration % 3600 / 60)) $((duration % 60)))${NC}"
-    fi
+
     log_info "Prometheus installation completed successfully!"
     return 0
 }
@@ -2880,9 +3068,6 @@ install_cnpg() {
     fi
 
     echo -e "${GREEN}✅ Proceeding with CloudNative-PG installation...${NC}\n"
-    # Record installation start time
-    local start_time
-    start_time=$(date +%s)
 
     # Add CloudNative-PG Helm repository
     log_info "Adding CloudNative-PG Helm repository..."
@@ -2969,17 +3154,7 @@ EOF
     echo -e "   ${GREEN}•${NC} Check deployment config: ${CYAN}kubectl get deployment cnpg-controller-manager -n $CNPG_NAMESPACE -o yaml${NC}"
     echo -e "${GREEN}✅ CloudNative-PG installed successfully${NC}\n"
 
-    # Record installation end time
-    local end_time
-    end_time=$(date +%s)
-    local duration=$((end_time - start_time))
-    # Display installation timing information
-    if [[ -n "$start_time" && -n "$end_time" ]]; then
-        echo -e "\n${WHITE}⏱️  Installation Steps Timing:${NC}"
-        echo -e "   ${GREEN}•${NC} Start Time: ${CYAN}$(date -d @"$start_time" '+%Y-%m-%d %H:%M:%S')${NC}"
-        echo -e "   ${GREEN}•${NC} End Time: ${CYAN}$(date -d @"$end_time" '+%Y-%m-%d %H:%M:%S')${NC}"
-        echo -e "   ${GREEN}•${NC} Duration: ${YELLOW}$(printf '%02d:%02d:%02d' $((duration / 3600)) $((duration % 3600 / 60)) $((duration % 60)))${NC}"
-    fi
+
 
     return 0
 }
@@ -3020,9 +3195,6 @@ install_upm_engine() {
     fi
 
     echo -e "${GREEN}✅ Proceeding with UPM Engine installation...${NC}\n"
-    # Record installation start time
-    local start_time
-    start_time=$(date +%s)
 
     # Add UPM Engine Helm repository
     log_info "Adding UPM Engine Helm repository..."
@@ -3123,9 +3295,6 @@ install_upm_platform() {
     fi
 
     echo -e "${GREEN}✅ Proceeding with UPM Platform installation...${NC}\n"
-    # Record installation start time
-    local start_time
-    start_time=$(date +%s)
 
     # Add UPM Platform Helm repository
     log_info "Adding UPM Platform Helm repository..."
@@ -3287,17 +3456,7 @@ EOF
     echo -e "   ${GREEN}•${NC} Username: ${CYAN}super_root${NC}"
     echo -e "   ${GREEN}•${NC} Default Password: ${CYAN}Upm@2024!${NC}\n"
 
-    # Record installation end time
-    local end_time
-    end_time=$(date +%s)
-    local duration=$((end_time - start_time))
-    # Display installation timing information
-    if [[ -n "$start_time" && -n "$end_time" ]]; then
-        echo -e "\n${WHITE}⏱️  Installation Steps Timing:${NC}"
-        echo -e "   ${GREEN}•${NC} Start Time: ${CYAN}$(date -d @"$start_time" '+%Y-%m-%d %H:%M:%S')${NC}"
-        echo -e "   ${GREEN}•${NC} End Time: ${CYAN}$(date -d @"$end_time" '+%Y-%m-%d %H:%M:%S')${NC}"
-        echo -e "   ${GREEN}•${NC} Duration: ${YELLOW}$(printf '%02d:%02d:%02d' $((duration / 3600)) $((duration % 3600 / 60)) $((duration % 60)))${NC}"
-    fi
+
 
     return 0
 }
@@ -3478,32 +3637,18 @@ setup_environment() {
     check_ntp_synchronization
     # Pre-installation confirmation
     show_setup_confirmation
-    # Record installation start time
-    local start_time
-    start_time=$(date +%s)
-    # Installation steps
-    configure_system_security
-    install_libvirt
-    setup_libvirt
-    install_vagrant
-    install_vagrant_libvirt_plugin
-    setup_python_environment
-    setup_kubespray_project
+    # Installation steps with performance monitoring
+    time_function configure_system_security
+    time_function install_libvirt
+    time_function setup_libvirt
+    time_function install_vagrant
+    time_function install_vagrant_libvirt_plugin
+    time_function setup_python_environment
+    time_function setup_kubespray_project
     echo -e "\n${GREEN}🎉 Environment Setup Completed Successfully!${NC}"
-    # Post-installation confirmation
-    vagrant_and_run_kubespray
+    # Post-installation confirmation with performance monitoring
+    time_function vagrant_and_run_kubespray
 
-    # Record installation end time
-    local end_time
-    end_time=$(date +%s)
-    local duration=$((end_time - start_time))
-    # Display installation timing information
-    if [[ -n "$start_time" && -n "$end_time" ]]; then
-        echo -e "\n${WHITE}⏱️  Installation Steps Timing:${NC}"
-        echo -e "   ${GREEN}•${NC} Start Time: ${CYAN}$(date -d @"$start_time" '+%Y-%m-%d %H:%M:%S')${NC}"
-        echo -e "   ${GREEN}•${NC} End Time: ${CYAN}$(date -d @"$end_time" '+%Y-%m-%d %H:%M:%S')${NC}"
-        echo -e "   ${GREEN}•${NC} Duration: ${YELLOW}$(printf '%02d:%02d:%02d' $((duration / 3600)) $((duration % 3600 / 60)) $((duration % 60)))${NC}"
-    fi
     log_info "Environment setup completed successfully!"
     return 0
 }
@@ -3565,11 +3710,11 @@ parse_arguments() {
         esac
     done
     
-    # Validate installation options
+    # Show help if no installation options provided
     if [[ ${#INSTALLATION_OPTIONS[@]} -eq 0 ]]; then
-        log_error "At least one installation option is required"
+        log_info "No installation options specified. Showing help..."
         show_help
-        exit 1
+        exit 0
     fi
 }
 
@@ -3596,40 +3741,40 @@ main() {
     
     local selected_option="${INSTALLATION_OPTIONS[0]}"
     
-    # Execute the selected installation function
+    # Execute the selected installation function with performance monitoring
     case "$selected_option" in
         "--k8s")
             log_info "Executing: setup_environment"
-            setup_environment
+            time_function setup_environment
             ;;
         "--lvmlocalpv")
             log_info "Executing: install_lvm_localpv"
-            install_lvm_localpv
+            time_function install_lvm_localpv
             ;;
         "--cnpg")
             log_info "Executing: install_cnpg"
-            install_cnpg
+            time_function install_cnpg
             ;;
         "--upm-engine")
             log_info "Executing: install_upm_engine"
-            install_upm_engine
+            time_function install_upm_engine
             ;;
         "--upm-platform")
             log_info "Executing: install_upm_platform"
-            install_upm_platform
+            time_function install_upm_platform
             ;;
         "--prometheus")
             log_info "Executing: install_prometheus"
-            install_prometheus
+            time_function install_prometheus
             ;;
         "--all")
             log_info "Executing: complete installation sequence"
-            setup_environment
-            install_lvm_localpv
-            install_prometheus
-            install_cnpg
-            install_upm_engine
-            install_upm_platform
+            time_function setup_environment
+            time_function install_lvm_localpv
+            time_function install_prometheus
+            time_function install_cnpg
+            time_function install_upm_engine
+            time_function install_upm_platform
             ;;
         *)
             log_error "Unknown installation option: $selected_option"
