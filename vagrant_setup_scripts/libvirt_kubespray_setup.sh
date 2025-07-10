@@ -586,6 +586,41 @@ configure_public_network_interactive() {
     fi
     BRIDGE_INTERFACE="$SELECTED_INTERFACE"
     
+    # Step 1.5: Bridge configuration confirmation
+    log_info "Validating bridge interface configuration..."
+    
+    # Get and validate current IP address of the interface for warning
+    local current_ip
+    current_ip=$(ip addr show "$BRIDGE_INTERFACE" 2>/dev/null | grep 'inet ' | grep -v '127.0.0.1' | awk '{print $2}' | cut -d'/' -f1 | head -1 | tr -d '[:space:]')
+    
+    # Debug: log the current IP for troubleshooting
+    log_info "Detected IP address for interface '$BRIDGE_INTERFACE': '${current_ip:-<empty>}'"
+
+    # Interactive confirmation for bridge setup
+    if [[ -n "$current_ip" ]]; then
+        echo -e "\n${RED}⚠️  Bridge Configuration Warning${NC}"
+        echo -e "${YELLOW}🔧 Interface:${NC} ${WHITE}$BRIDGE_INTERFACE${NC}"
+        echo -e "${YELLOW}🌐 Current IP:${NC} ${WHITE}$current_ip${NC}"
+        echo -e "${RED}⚠️  WARNING:${NC} Configuring bridge will remove this IP address and may disconnect existing connections!\n"
+
+        if ! prompt_yes_no "Continue with bridge configuration?" "" true; then
+            echo -e "\n${YELLOW}⏸️  Bridge configuration cancelled by user.${NC}\n"
+            exit 0
+        fi
+
+        # Second confirmation: require user to input the current IP address
+        echo -e "\n${RED}🔐 Second Confirmation Required${NC}"
+        echo -e "${YELLOW}🔒 Security Check:${NC} To proceed with bridge configuration"
+        echo -e "${WHITE}   Please enter the current IP address of '$BRIDGE_INTERFACE'${NC}"
+        echo -e "${RED}⚠️  This confirms you understand that IP '$current_ip' will be permanently removed${NC}\n"
+
+        if ! prompt_confirmation_with_retry "Enter current IP address to confirm deletion" "$current_ip" 3; then
+            echo -e "\n${RED}🚫 Bridge configuration cancelled for safety.${NC}\n"
+            exit 0
+        fi
+        echo -e "\n${GREEN}✅ IP address confirmed. Proceeding with bridge configuration...${NC}\n"
+    fi
+    
     # Step 2: Get starting IP with CIDR notation
     local starting_ip_cidr
     local starting_ip
@@ -1323,49 +1358,8 @@ setup_libvirt() {
     # Add current user to libvirt group
     add_user_to_group "$USER" "libvirt"
 
-    # Declare local variables
-
     if [[ -n "${BRIDGE_INTERFACE:-}" ]]; then
         log_info "Setting up Libvirt with bridge networking..."
-
-        # Get current IP address of the interface for warning
-        local current_ip
-        current_ip=$(ip addr show "$BRIDGE_INTERFACE" 2>/dev/null | grep -oP 'inet \K[^/]+' | head -1)
-
-        # Interactive confirmation for bridge setup
-        if [[ -n "$current_ip" ]]; then
-            echo -e "\n${RED}⚠️  Bridge Configuration Warning${NC}"
-            echo -e "${YELLOW}🔧 Interface:${NC} ${WHITE}$BRIDGE_INTERFACE${NC}"
-            echo -e "${YELLOW}🌐 Current IP:${NC} ${WHITE}$current_ip${NC}"
-            echo -e "${RED}⚠️  WARNING:${NC} Configuring bridge will remove this IP address and may disconnect existing connections!\n"
-
-            if ! prompt_yes_no "Continue with bridge configuration?" "" true; then
-                echo -e "\n${YELLOW}⏸️  Bridge configuration cancelled by user.${NC}\n"
-                exit 0
-            fi
-
-            # Second confirmation: require user to input the current IP address
-            echo -e "\n${RED}🔐 Second Confirmation Required${NC}"
-            echo -e "${YELLOW}🔒 Security Check:${NC} To proceed with bridge configuration"
-            echo -e "${WHITE}   Please enter the current IP address of '$BRIDGE_INTERFACE'${NC}"
-            echo -e "${RED}⚠️  This confirms you understand that IP '$current_ip' will be permanently removed${NC}\n"
-
-            if ! prompt_confirmation_with_retry "Enter current IP address to confirm deletion" "$current_ip" 3; then
-                echo -e "\n${RED}🚫 Bridge configuration cancelled for safety.${NC}\n"
-                exit 0
-            fi
-            echo -e "\n${GREEN}✅ IP address confirmed. Proceeding with bridge configuration...${NC}\n"
-        else
-            echo -e "\n${RED}⚠️  Bridge Configuration Warning${NC}"
-            echo -e "${YELLOW}🔧 Interface:${NC} ${WHITE}$BRIDGE_INTERFACE${NC}"
-            echo -e "${RED}⚠️  WARNING:${NC} Configuring bridge will modify interface configuration and may affect network connectivity!\n"
-
-            if ! prompt_yes_no "Continue with bridge configuration?" "" true; then
-                echo -e "\n${YELLOW}⏸️  Bridge configuration cancelled by user.${NC}\n"
-                exit 0
-            fi
-        fi
-
         echo -e "${GREEN}🚀 Starting bridge configuration...${NC}"
         local network_name="bridge-network"
         local xml_file="/tmp/$network_name.xml"
