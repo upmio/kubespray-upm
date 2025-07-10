@@ -3244,9 +3244,13 @@ EOF
 
     # Wait for platform to be ready
     log_info "Waiting for UPM Platform to be ready..."
-    "$KUBECTL" wait --for=condition=ready pod -l "app.kubernetes.io/instance=$upm_platform_release_name,\!job-name" -n "$UPM_NAMESPACE" --timeout=900s || {
+    if ! "$KUBECTL" wait --for=condition=ready pod -l "app.kubernetes.io/instance=$upm_platform_release_name,!job-name" -n "$UPM_NAMESPACE" --timeout=900s; then
+        log_error "UPM Platform pods failed to become ready. Checking pod status..."
+        "$KUBECTL" get pods -n "$UPM_NAMESPACE" -l "app.kubernetes.io/instance=$upm_platform_release_name,!job-name" || true
+        "$KUBECTL" describe pods -n "$UPM_NAMESPACE" -l "app.kubernetes.io/instance=$upm_platform_release_name,!job-name" || true
+        "$KUBECTL" get events -n "$UPM_NAMESPACE" --sort-by='.lastTimestamp' | tail -20 || true
         error_exit "UPM Platform failed to become ready"
-    }
+    fi
 
     # Display installation status
     echo -e "\n${GREEN}🎉 UPM Platform Installation Completed!${NC}\n"
