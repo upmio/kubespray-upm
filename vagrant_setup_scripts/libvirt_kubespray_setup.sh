@@ -3244,7 +3244,7 @@ EOF
 
     # Wait for platform to be ready
     log_info "Waiting for UPM Platform to be ready..."
-    "$KUBECTL" wait --for=condition=ready pod -l "app.kubernetes.io/instance=$upm_platform_release_name" -n "$UPM_NAMESPACE" --timeout=900s || {
+    "$KUBECTL" wait --for=condition=ready pod -l "app.kubernetes.io/instance=$upm_platform_release_name,\!job-name" -n "$UPM_NAMESPACE" --timeout=900s || {
         error_exit "UPM Platform failed to become ready"
     }
 
