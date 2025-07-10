@@ -3225,9 +3225,8 @@ apiserver:
       storageClass: "${LVM_LOCALPV_STORAGECLASS_NAME}"
     mysql:
       external:
-        mysqlMasterHost: "3306"
+        mysqlMasterHost: "${upm_platform_release_name}-mysql"
         mysqlMasterPassword: "${UPM_PWD}"
- 
 EOF
 
     log_info "Installing UPM Platform via Helm..."
