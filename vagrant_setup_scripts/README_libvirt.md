@@ -2,24 +2,25 @@
 
 ## 概述
 
-本文档描述如何使用 `libvirt_kubespray_setup.sh` 脚本在 libvirt 虚拟化环境中设置 Kubespray Kubernetes 集群。该脚本专为 Red Hat 系列 Linux 系统设计，提供完整的自动化环境配置和交互式部署体验。
+本文档详细介绍如何使用 `libvirt_kubespray_setup.sh` 脚本在 libvirt 虚拟化环境中快速部署 Kubespray Kubernetes 集群。该脚本专为 Red Hat 系列 Linux 系统（RHEL 9、Rocky Linux 9、CentOS 9、AlmaLinux 9）设计，提供完整的自动化环境配置、交互式部署体验以及企业级容器镜像仓库配置支持。
 
 ### 脚本特性
 
 - **版本**: v1.0
 - **模块化安装**: 支持选择性安装不同组件（K8s、LVM LocalPV、Prometheus、CloudNativePG、UPM Engine、UPM Platform）
-- **交互式安装**: 提供详细的安装预览和确认
-- **智能网络配置**: 自动检测和配置网络模式
-- **统一输入验证**: 改进的用户输入处理和验证
-- **完整日志记录**: 详细的操作日志和错误处理
+- **交互式安装**: 提供详细的安装预览和确认机制
+- **智能网络配置**: 自动检测和配置网络模式（NAT/桥接）
+- **统一输入验证**: 改进的用户输入处理和验证机制
+- **完整日志记录**: 详细的操作日志和错误处理机制
 - **一键部署**: 环境设置完成后可直接部署 Kubernetes 集群
 - **多组件支持**: 支持安装 Kubernetes 生态系统的多种组件
+- **企业级支持**: 支持容器镜像仓库转发和私有仓库认证配置
 
 ### ⚡ 一键命令
 
-如果您想要最快速的体验，可以使用以下一键命令：
+如果您希望快速体验，可以使用以下一键命令：
 
-下载并安装 Kubernetes 集群（NAT 模式）
+**下载脚本并安装 Kubernetes 集群（NAT 模式）**
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/upmio/kubespray-upm/refs/heads/master/vagrant_setup_scripts/libvirt_kubespray_setup.sh -o ./libvirt_kubespray_setup.sh && chmod +x ./libvirt_kubespray_setup.sh && bash ./libvirt_kubespray_setup.sh --k8s -y
@@ -160,13 +161,15 @@ bash ./libvirt_kubespray_setup.sh --k8s -y
 
 **安装过程说明**：
 
-- 脚本会自动检测系统环境并安装必要的依赖
+- 脚本会自动检测系统环境并安装必要的依赖组件
 - **网络模式选择**：脚本会智能检测并提示选择网络模式
   - 🌉 **桥接模式**：VM 直接连接物理网络，适合生产环境（需要配置网络接口）
   - 🔒 **NAT 模式**：VM 通过 NAT 访问网络，适合开发测试（自动配置）
 - 整个安装过程约 15-25 分钟，需要稳定的网络连接
+- 支持企业环境的代理配置和私有镜像仓库设置
 
 > 💡 **网络配置详情**：如需了解网络模式的详细配置，请参考 [网络配置选项](#网络配置选项) 章节
+> 🏢 **企业环境配置**：如需配置容器镜像仓库转发，请参考 [容器镜像仓库配置](#容器镜像仓库配置) 章节
 
 #### 第三步：访问集群
 
@@ -360,11 +363,13 @@ bash ./libvirt_kubespray_setup.sh --all -y
 脚本会自动安装和配置以下组件：
 
 #### 系统基础组件
+
 - **系统依赖**: Development Tools、Git、curl、wget、vim 等基础工具
 - **虚拟化组件**: libvirt、qemu-kvm、virt-manager、libguestfs-tools
 - **开发环境**: Vagrant、vagrant-libvirt、pyenv、Python 3.11.10
 
 #### Kubernetes 生态组件
+
 - **Kubernetes 集群** (`--k8s`): 基础 Kubernetes 集群部署
 - **LVM LocalPV** (`--lvmlocalpv`): 本地持久卷存储解决方案
 - **CloudNativePG** (`--cnpg`): 云原生 PostgreSQL 数据库
@@ -393,6 +398,166 @@ export NO_PROXY="localhost,127.0.0.1,10.0.0.0/8,192.168.0.0/16"
 - **网关 IP 地址**: 例如 `192.168.1.1`
 - **DNS 服务器 IP**: 例如 `8.8.8.8`
 
+## 容器镜像仓库配置
+
+### 概述
+
+在企业环境中，通常需要配置容器镜像仓库转发以提高镜像拉取速度或使用私有镜像仓库。本脚本支持通过 containerd 配置文件自定义镜像仓库设置。
+
+### 配置文件说明
+
+脚本提供了 `containerd-example.yml` 样例文件，展示了如何配置 containerd 镜像仓库转发。该文件位于：
+
+```
+vagrant_setup_scripts/containerd-example.yml
+```
+
+####### 配置步骤
+
+#### 1. 准备配置文件
+
+```bash
+# 基于样例文件创建配置文件（脚本会自动检测并使用）
+cp vagrant_setup_scripts/containerd-example.yml containerd.yml
+```
+
+> **注意**: 脚本会自动检测脚本目录下的 `containerd.yml` 文件，如果存在则自动应用配置。无需手动复制到 kubespray 目录。
+
+#### 2. 编辑配置文件
+
+根据您的环境需求编辑 `containerd.yml` 文件：
+
+```yaml
+# 启用镜像仓库转发配置
+containerd_registries_mirrors:
+  # 配置 Docker Hub 转发
+  - prefix: docker.io
+    mirrors:
+    - host: http://your-harbor.company.com  # 替换为您的私有仓库地址
+      capabilities: ["pull", "resolve"]
+      skip_verify: true  # true: 跳过TLS验证, false: 启用TLS验证
+      header:
+        # 如果需要认证，配置Authorization头
+        Authorization: "Basic <base64-encoded-credentials>"
+  
+  # 配置 Quay.io 转发
+  - prefix: quay.io
+    mirrors:
+    - host: http://your-harbor.company.com
+      capabilities: ["pull", "resolve"]
+      skip_verify: true
+      header:
+        Authorization: "Basic <base64-encoded-credentials>"
+  
+  # 配置 Kubernetes 镜像仓库转发
+  - prefix: registry.k8s.io
+    mirrors:
+    - host: http://your-harbor.company.com
+      capabilities: ["pull", "resolve"]
+      skip_verify: true
+```
+
+#### 3. 认证配置
+
+如果您的私有仓库需要认证，需要生成 Base64 编码的认证信息：
+
+```bash
+# 生成 Base64 编码的用户名:密码
+echo -n "username:password" | base64
+# 输出示例: dXNlcm5hbWU6cGFzc3dvcmQ=
+
+# 在配置文件中使用
+Authorization: "Basic dXNlcm5hbWU6cGFzc3dvcmQ="
+```
+
+#### 4. 常见配置示例
+
+**Harbor 私有仓库配置**：
+
+```yaml
+containerd_registries_mirrors:
+  - prefix: docker.io
+    mirrors:
+    - host: https://harbor.company.com
+      capabilities: ["pull", "resolve"]
+      skip_verify: false  # 如果使用有效SSL证书
+      header:
+        Authorization: "Basic YWRtaW46SGFyYm9yMTIzNDU="  # admin:Harbor12345
+```
+
+**阿里云镜像加速器配置**：
+
+```yaml
+containerd_registries_mirrors:
+  - prefix: docker.io
+    mirrors:
+    - host: https://your-id.mirror.aliyuncs.com
+      capabilities: ["pull", "resolve"]
+      skip_verify: false
+```
+
+**腾讯云镜像加速器配置**：
+
+```yaml
+containerd_registries_mirrors:
+  - prefix: docker.io
+    mirrors:
+    - host: https://mirror.ccs.tencentyun.com
+      capabilities: ["pull", "resolve"]
+      skip_verify: false
+```
+
+### 部署应用配置
+
+配置完成后，脚本会在部署过程中自动检测并应用 `containerd.yml` 配置：
+
+```bash
+# 运行部署脚本（脚本会自动应用 containerd 配置）
+bash ./libvirt_kubespray_setup.sh --k8s
+
+# 如果已经部署了集群，需要重新部署以应用新配置
+# 1. 销毁现有集群
+bash ./libvirt_kubespray_setup.sh --destroy
+
+# 2. 重新部署集群
+bash ./libvirt_kubespray_setup.sh --k8s
+```
+
+> **自动化说明**: 脚本在部署前会自动检测脚本目录下的 `containerd.yml` 文件，如果存在则自动备份原配置并应用新配置。
+
+### 验证配置
+
+部署完成后，可以验证镜像仓库配置是否生效：
+
+```bash
+# SSH 到集群节点（使用脚本提供的 SSH 命令）
+bash ./libvirt_kubespray_setup.sh --ssh k8s-1
+
+# 或者直接使用 vagrant ssh（需要在 kubespray-upm 目录下）
+cd kubespray-upm
+vagrant ssh k8s-1
+
+# 检查 containerd 配置
+sudo cat /etc/containerd/config.toml | grep -A 10 "mirrors"
+
+# 测试镜像拉取
+sudo crictl pull nginx:latest
+
+# 查看镜像拉取日志
+sudo journalctl -u containerd -f
+
+# 验证配置是否已应用
+sudo crictl info | grep -A 20 "registry"
+```
+
+### 重要注意事项
+
+1. **TLS 验证**: 生产环境建议启用 TLS 验证（`skip_verify: false`）
+2. **认证安全**: 避免在配置文件中明文存储密码，使用 Base64 编码
+3. **网络连通性**: 确保集群节点能够访问配置的镜像仓库地址
+4. **配置备份**: 建议备份自定义的 containerd 配置文件
+5. **版本兼容性**: 确保镜像仓库支持所需的 containerd API 版本
+
 ## 安全配置
 
 脚本会自动执行以下安全配置：
@@ -401,15 +566,43 @@ export NO_PROXY="localhost,127.0.0.1,10.0.0.0/8,192.168.0.0/16"
 - **SELinux**: 临时和永久禁用 SELinux（需要重启系统使永久配置生效）
 - **SSH 密钥**: 自动生成和管理 SSH 密钥（`~/.ssh/vagrant_rsa`）
 - **网络隔离**: 支持 NAT 和桥接两种网络模式
+- **镜像仓库安全**: 支持私有镜像仓库的 TLS 和认证配置
 
 ## 自动化部署
 
-脚本提供完全自动化的部署流程：
+脚本提供完全自动化的部署流程，特别适合 CI/CD 环境和批量部署场景：
+
+### 部署流程
 
 1. **环境准备**: 系统检查、依赖安装、虚拟化配置
 2. **集群部署**: Vagrant 初始化、虚拟机创建、Kubernetes 安装
 3. **组件安装**: 根据选项安装存储、数据库、监控、UPM 组件
 4. **配置完成**: kubectl 配置、状态验证、访问信息显示
+
+### 自动化选项
+
+```bash
+# 完全自动化部署（使用默认配置）
+bash ./libvirt_kubespray_setup.sh --k8s -y
+
+# 指定网络模式的自动化部署
+bash ./libvirt_kubespray_setup.sh --k8s -n private -y  # NAT 模式
+bash ./libvirt_kubespray_setup.sh --k8s -n public -y   # 桥接模式（需要交互配置）
+```
+
+### 环境变量配置
+
+脚本支持通过环境变量进行高级配置：
+
+```bash
+# 设置代理配置
+export HTTP_PROXY="http://proxy.company.com:8080"
+export HTTPS_PROXY="http://proxy.company.com:8080"
+export NO_PROXY="localhost,127.0.0.1,10.0.0.0/8,192.168.0.0/16"
+
+# 运行部署
+bash ./libvirt_kubespray_setup.sh --k8s -y
+```
 
 脚本会在关键步骤显示详细预览和确认信息，确保用户了解将要执行的操作。
 
@@ -417,7 +610,7 @@ export NO_PROXY="localhost,127.0.0.1,10.0.0.0/8,192.168.0.0/16"
 
 ### kubectl 本地访问
 
-脚本会自动配置 kubectl 本地访问：
+脚本会自动配置 kubectl 本地访问，无需手动设置：
 
 ```bash
 # kubectl 二进制文件位置
@@ -430,9 +623,35 @@ export NO_PROXY="localhost,127.0.0.1,10.0.0.0/8,192.168.0.0/16"
 kubectl get nodes
 kubectl get pods --all-namespaces
 kubectl get services --all-namespaces
+
+# 查看集群信息
+kubectl cluster-info
+kubectl get nodes -o wide
+kubectl top nodes  # 查看资源使用情况
 ```
 
-### 组件管理命令
+### 基础组件管理命令
+
+```bash
+# 查看所有组件状态
+kubectl get componentstatuses
+
+# 查看系统 Pod 状态
+kubectl get pods -n kube-system
+kubectl get pods -n kube-system -o wide
+
+# 查看服务状态
+kubectl get services --all-namespaces
+
+# 查看存储类和持久卷
+kubectl get storageclass
+kubectl get pv,pvc --all-namespaces
+
+# 查看网络策略
+kubectl get networkpolicies --all-namespaces
+```
+
+### 专用组件管理命令
 
 #### LVM LocalPV 存储管理
 
@@ -507,18 +726,41 @@ kubectl get configmaps -n upm-system
 
 ### SSH 访问集群节点
 
+#### 基本访问命令
+
 ```bash
 # 进入项目目录
-cd $(pwd)/kubespray
+cd $KUBESPRAY_DIR
 
 # 激活 Python 虚拟环境
 source venv/bin/activate
 
-# SSH 连接到主节点
+# SSH 连接到主节点（控制平面）
 vagrant ssh k8s-1
 
+# 访问工作节点
+vagrant ssh k8s-2
+vagrant ssh k8s-3
+
+# 查看所有节点状态
+vagrant status
+```
+
+#### 节点管理操作
+
+```bash
+# 在节点上查看容器运行时状态
+vagrant ssh k8s-1 -c "sudo crictl ps"
+vagrant ssh k8s-1 -c "sudo crictl images"
+
+# 查看节点系统资源
+vagrant ssh k8s-1 -c "free -h && df -h"
+
+# 查看节点网络配置
+vagrant ssh k8s-1 -c "ip addr show"
+
 # 在节点内查看集群状态
-sudo kubectl get nodes
+vagrant ssh k8s-1 -c "sudo kubectl get nodes"
 ```
 
 ### 集群管理命令
@@ -565,7 +807,7 @@ sudo kubectl get nodes
 | 查看状态 | `vagrant status` | 查看虚拟机状态 |
 | 重新部署 | `vagrant up --provider=libvirt --no-parallel` | 重新创建集群 |
 
-> **重要提示**：所有 Vagrant 命令都必须在包含 `Vagrantfile` 的目录中执行，通常是 `$KUBESPRAY_DIR` 目录（默认为 `$(pwd)/kubespray`）。
+> **重要提示**：所有 Vagrant 命令都必须在包含 `Vagrantfile` 的目录中执行，通常是 `$KUBESPRAY_DIR` 目录（默认为 `$(pwd)/kubespray-upm`）。
 
 ## 故障排除
 
@@ -573,54 +815,117 @@ sudo kubectl get nodes
 
 #### 1. 网络连接失败
 
+**症状**: 脚本无法下载软件包或访问远程仓库
+
+**诊断步骤**:
+
 ```bash
 # 检查网络连通性
 curl -I https://github.com
 
 # 检查代理设置
 echo $HTTP_PROXY
+echo $HTTPS_PROXY
 
 # 测试代理连接
 curl --proxy $HTTP_PROXY -I https://github.com
 ```
 
+**解决方案**:
+
+```bash
+# 配置代理（如果需要）
+export HTTP_PROXY="http://proxy.company.com:8080"
+export HTTPS_PROXY="http://proxy.company.com:8080"
+export NO_PROXY="localhost,127.0.0.1,10.0.0.0/8,192.168.0.0/16"
+
+# 测试网络连接
+ping -c 4 8.8.8.8
+nslookup github.com
+```
+
 #### 2. libvirt 服务问题
 
+**症状**: 无法创建或管理虚拟机，出现连接错误
+
+**诊断步骤**:
 ```bash
 # 检查服务状态
 sudo systemctl status libvirtd
+virsh list --all
+```
 
-# 重启服务
+**解决方案**:
+```bash
+# 启动并启用 libvirt 服务
+sudo systemctl start libvirtd
+sudo systemctl enable libvirtd
+
+# 重启相关服务
 sudo systemctl restart libvirtd
+sudo systemctl restart virtlogd
 
 # 检查网络
 sudo virsh net-list --all
+sudo virsh net-start default
 ```
 
 #### 3. Vagrant 插件安装失败
 
+**症状**: 插件安装过程中出现编译错误或依赖缺失
+
+**常见错误信息**:
+
+- `Failed to build gem native extension`
+- `libvirt development headers not found`
+- `ruby development headers missing`
+
+**解决方案**:
+
 ```bash
-# 检查 libvirt 开发包
-sudo dnf install libvirt-devel
-# 检查插件
-vagrant plugin list
-# 重新安装插件
+# 安装必要的开发工具和依赖
+sudo dnf groupinstall "Development Tools" -y
+sudo dnf install libvirt-devel ruby-devel libguestfs-tools-c -y
+
+# 清理并重新安装插件
 vagrant plugin uninstall vagrant-libvirt
 vagrant plugin install vagrant-libvirt
+
+# 如果仍然失败，尝试指定版本
+vagrant plugin install vagrant-libvirt --plugin-version 0.12.2
 ```
 
 #### 4. 桥接网络配置失败
 
+**症状**: 无法创建桥接网络或VM无法获取IP地址
+
+**诊断步骤**:
+
 ```bash
 # 检查网络接口
 ip link show
-# 检查桥接状态
-ip addr show br0
-# 检查 NetworkManager 连接
-nmcli con show
-# 重新配置桥接网络
-sudo nmcli con down "System $BRIDGE_INTERFACE"
-sudo nmcli con up "Bridge br0"
+nmcli device status
+
+# 检查桥接配置
+sudo brctl show
+virsh net-list --all
+```
+
+**解决方案**:
+
+```bash
+# 重新配置网络管理器
+sudo nmcli connection reload
+sudo systemctl restart NetworkManager
+
+# 检查防火墙设置
+sudo firewall-cmd --list-all
+sudo firewall-cmd --add-service=libvirt --permanent
+sudo firewall-cmd --reload
+
+# 重新创建桥接网络
+sudo virsh net-destroy default
+sudo virsh net-start default
 ```
 
 #### 5. RHEL 系统特定问题
@@ -686,6 +991,8 @@ subscription-manager refresh
 
 #### 6. 桥接网络交互输入问题
 
+**症状**: 脚本在桥接网络配置时卡住或输入验证失败
+
 **IP 地址验证失败**:
 
 ```bash
@@ -719,6 +1026,21 @@ ping -c 1 192.168.1.10
 # 检查DNS服务器可达性
 ping -c 1 8.8.8.8
 nslookup google.com 8.8.8.8
+```
+
+**自动化环境解决方案**:
+
+```bash
+# 方案1: 使用 NAT 模式避免交互
+bash ./libvirt_kubespray_setup.sh --k8s -n private -y
+
+# 方案2: 预先配置环境变量
+export BRIDGE_INTERFACE="enp0s3"  # 替换为实际网络接口
+export BRIDGE_IP="192.168.1.100"  # 设置桥接IP
+export BRIDGE_NETMASK="255.255.255.0"
+export BRIDGE_GATEWAY="192.168.1.1"
+export BRIDGE_DNS="8.8.8.8"
+bash ./libvirt_kubespray_setup.sh --k8s -n public -y
 ```
 
 #### 7. 组件安装问题
@@ -793,55 +1115,142 @@ kubectl logs -n upm-system -l app=upm-engine
 kubectl logs -n upm-system -l app=upm-platform
 ```
 
+### 调试和日志
+
 #### 调试模式
 
 ```bash
-# 启用详细输出
-bash -x libvirt_kubespray_setup.sh
+# 启用详细输出模式
+bash -x ./libvirt_kubespray_setup.sh --k8s
 
 # 检查脚本语法
-bash -n libvirt_kubespray_setup.sh
+bash -n ./libvirt_kubespray_setup.sh
+
+# 启用 Vagrant 调试输出
+VAGRANT_LOG=info vagrant up
+```
+
+#### 日志文件位置
+
+```bash
+# 脚本执行日志
+tail -f /tmp/libvirt_kubespray_setup.log
+
+# libvirt 日志
+sudo journalctl -u libvirtd -f
+
+# Vagrant 日志
+ls -la .vagrant/logs/
+
+# 系统日志
+sudo journalctl -xe
+```
+
+#### 常用调试命令
+
+```bash
+# 检查虚拟机状态
+cd $KUBESPRAY_DIR && vagrant status
+
+# 查看虚拟机详细信息
+virsh list --all
+virsh dominfo k8s-1
+
+# 检查网络配置
+virsh net-list --all
+virsh net-dumpxml default
+
+# 查看资源使用情况
+virsh domstats --cpu-total --balloon --block --vcpu k8s-1
 ```
 
 ## 注意事项
 
 ### 重要警告
 
-1. **桥接网络风险**: 配置桥接网络会移除现有 IP 地址，可能导致连接中断
-2. **系统重启**: 如果内核更新，需要重启系统后才能使用 libvirt
-3. **用户组**: 需要注销并重新登录以使组权限生效
-4. **资源要求**: 确保系统有足够的 CPU、内存和磁盘空间
-5. **网络验证**: 脚本会验证 VM IP 范围，确保不与现有网络冲突
-6. **RHEL 订阅要求**: RHEL 系统必须已注册并有有效订阅，否则脚本会失败
-7. **RHEL 仓库依赖**: 脚本需要启用特定的 RHEL 仓库，确保订阅包含所需的仓库访问权限
+#### 网络配置风险
+
+1. **桥接网络风险**: 配置桥接网络会移除现有 IP 地址，可能导致SSH连接中断
+   - 建议在本地控制台执行，避免远程连接中断
+   - 脚本会要求二次确认以确保用户理解风险
+
+2. **网络冲突**: 脚本会验证 VM IP 范围，但仍需手动确保不与现有设备冲突
+   - 使用 `nmap` 或 `ping` 预先检查IP范围可用性
+   - 避免使用DHCP分配范围内的静态IP
+
+#### 系统要求警告
+
+3. **系统重启需求**: 如果内核更新或SELinux配置变更，需要重启系统
+   - 脚本会提示何时需要重启
+   - 重启后需要重新验证虚拟化功能
+
+4. **用户权限**: 添加用户组后需要注销并重新登录以使权限生效
+   - 或使用 `newgrp libvirt` 临时获取权限
+   - 确保当前用户具有sudo权限
+
+5. **资源要求**: 确保系统有足够的硬件资源
+   - CPU: 最少12核心（推荐24+核心）
+   - 内存: 最少32GB（推荐64GB+）
+   - 磁盘: 最少200GB可用空间
+
+#### RHEL系统特殊要求
+
+6. **RHEL 订阅要求**: RHEL 系统必须已注册并有有效订阅
+   - 脚本会自动检查订阅状态
+   - 订阅过期或未注册会导致脚本失败
+
+7. **RHEL 仓库依赖**: 脚本需要启用特定的 RHEL 仓库
+   - 确保订阅包含所需仓库的访问权限
+   - 企业环境中可能需要配置内部仓库镜像
+
+#### 数据安全警告
+
+8. **配置备份**: 脚本会修改系统网络和虚拟化配置
+   - 建议在运行前备份重要配置文件
+   - 记录当前网络配置以便恢复
+
+9. **防火墙和SELinux**: 脚本会禁用防火墙和SELinux
+   - 这可能影响系统安全策略
+   - 生产环境中需要重新配置安全策略
 
 ### 最佳实践
 
-#### 基础环境
+#### 部署前准备
 
-1. **备份配置**: 在修改网络配置前备份当前设置
-2. **本地执行**: 桥接网络配置建议在本地控制台执行
-3. **资源监控**: 部署期间监控系统资源使用情况
-4. **网络规划**: 提前规划 IP 地址分配和网络拓扑
-5. **分阶段执行**: 先完成环境设置，再进行集群部署
-6. **日志检查**: 定期检查日志文件以发现潜在问题
-7. **配置验证**: 部署前验证 Vagrant 配置文件的正确性
-8. **桥接网络准备**: 运行脚本前准备好所有网络配置信息，避免中途查找
-9. **IP 范围规划**: 确保为 VM 分配的 IP 范围有足够的连续地址且不与现有设备冲突
-10. **网络测试**: 配置完成后测试 VM 与主机、外部网络的连通性
-11. **RHEL 订阅验证**: 运行脚本前确认 RHEL 系统已正确注册和订阅
-12. **仓库权限检查**: 确保 RHEL 订阅包含所需仓库的访问权限
-13. **代理配置**: 如果在企业环境中，确保为 subscription-manager 配置正确的代理设置
+1. **系统检查**: 运行预检查命令验证系统是否满足所有要求
+2. **备份配置**: 在修改网络配置前备份当前设置和重要数据
+3. **本地执行**: 桥接网络配置建议在本地控制台执行，避免SSH连接中断
+4. **网络规划**: 提前规划 IP 地址分配和网络拓扑，避免地址冲突
+5. **资源评估**: 确保系统有足够的 CPU、内存和磁盘空间
+6. **RHEL 订阅验证**: 运行脚本前确认 RHEL 系统已正确注册和订阅
+7. **代理配置**: 企业环境中提前配置代理设置和证书信任
 
-#### 组件安装
+#### 部署过程管理
+
+8. **分阶段执行**: 先完成环境设置，再进行集群部署，便于问题定位
+9. **资源监控**: 部署期间监控系统资源使用情况，及时发现瓶颈
+10. **日志检查**: 定期检查日志文件以发现潜在问题和警告信息
+11. **配置验证**: 部署前验证 Vagrant 配置文件的正确性
+12. **网络测试**: 配置完成后测试 VM 与主机、外部网络的连通性
+13. **进度跟踪**: 使用脚本提供的进度信息跟踪部署状态
+
+#### 组件安装策略
 
 14. **模块化安装**: 根据实际需求选择安装组件，避免不必要的资源消耗
 15. **依赖顺序**: 按照依赖关系安装组件（如先安装 K8s 再安装存储和监控）
 16. **资源规划**: 为每个组件预留足够的计算和存储资源
-17. **存储准备**: 安装 LVM LocalPV 前确保节点有足够的磁盘空间
+17. **存储准备**: 安装 LVM LocalPV 前确保节点有足够的磁盘空间和LVM配置
 18. **监控配置**: 安装 Prometheus 时合理配置存储类和节点亲和性
 19. **数据库规划**: 部署 CloudNativePG 前规划数据库集群的高可用配置
 20. **UPM 配置**: 安装 UPM 组件前确认网络和存储配置满足要求
+
+#### 安全和维护
+
+21. **密钥管理**: 妥善保管生成的SSH密钥和认证信息
+22. **定期备份**: 建立集群配置和数据的定期备份机制
+23. **更新策略**: 制定组件更新和安全补丁的应用策略
+24. **监控告警**: 配置适当的监控告警规则，及时发现问题
+25. **文档记录**: 记录自定义配置和部署参数，便于后续维护
 
 ## 支持的配置
 
@@ -870,7 +1279,7 @@ bash -n libvirt_kubespray_setup.sh
 
 #### 配置文件
 
-- **位置**: `$KUBESPRAY_DIR/config.rb`（默认为 `$(pwd)/kubespray/config.rb`）
+- **位置**: `$KUBESPRAY_DIR/config.rb`（默认为 `$(pwd)/kubespray-upm/config.rb`）
 - **模板**: 根据网络模式自动选择
 - **自定义**: 可手动修改配置后重新部署
 
