@@ -45,24 +45,27 @@
 
 # Registries defined within containerd.
 # containerd_registries_mirrors:
-#   - prefix: docker.io
-#     mirrors:
-#       - host: https://registry-mirror.example.com
-#         capabilities: ["pull", "resolve"]
-#         skip_verify: false
 #   - prefix: quay.io
 #     mirrors:
-#       - host: https://quay-mirror.example.com
-#         capabilities: ["pull", "resolve"]
-#         skip_verify: false
-# 
-# containerd_max_container_log_line_size: 16384
-# 
+#     - host: http://harbor.bsgchina.com
+#       capabilities: ["pull", "resolve"]
+#       skip_verify: true # true: skip TLS verification, false: enable TLS verification
+#       header:
+         # Example: Authorization: "Basic dXNlcm5hbWU6cGFzc3dvcmQ="
+         # Explanation: "Basic" is the authentication type, "dXNlcm5hbWU6cGFzc3dvcmQ=" is Base64 encoded "admin:Harbor12345"
+#         Authorization: "Basic dXNlcm5hbWU6cGFzc3dvcmQ=" 
+
+#   - prefix: docker.io
+#     mirrors:
+#     - host: http://harbor.bsgchina.com
+#       capabilities: ["pull", "resolve"]
+#       skip_verify: true
+
+# containerd_max_container_log_line_size: -1
+
+# The following fields have been deprecated. Use the header field in mirrors configuration as an alternative.
 # Registry authentication configuration
 # containerd_registry_auth:
 #   - registry: registry.example.com:5000
-#     username: username
-#     password: password
-#   - registry: private-registry.example.com
 #     username: username
 #     password: password
