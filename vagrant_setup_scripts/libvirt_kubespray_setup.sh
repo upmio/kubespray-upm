@@ -11,7 +11,7 @@
 #   Full deployment:     ./libvirt_kubespray_setup.sh
 #   Environment only:    ./libvirt_kubespray_setup.sh --k8s
 #   Auto-confirm mode:   ./libvirt_kubespray_setup.sh -y
-#   Public network:      ./libvirt_kubespray_setup.sh --k8s -n public
+#   Bridge network:      ./libvirt_kubespray_setup.sh --k8s -n bridge
 #   Component install:   ./libvirt_kubespray_setup.sh [--lvmlocalpv|--prometheus|--cnpg|--upm-engine|--upm-platform|--all]
 #
 # System Requirements:
@@ -27,7 +27,7 @@
 #   ✓ Kubernetes cluster deployment with validation and health checks
 #   ✓ Modular component installation (LVM LocalPV, CNPG, UPM Engine/Platform, Prometheus)
 #   ✓ Interactive and automated installation modes with confirmation prompts
-#   ✓ Advanced network configuration (private/public bridge networking)
+#   ✓ Advanced network configuration (nat/bridge networking)
 #   ✓ containerd registry configuration with custom registry support
 #   ✓ Comprehensive logging, monitoring, and troubleshooting capabilities
 #   ✓ Proxy configuration support for enterprise environments
@@ -49,7 +49,7 @@
 # Command Line Options:
 #   -h, --help               Display comprehensive help information
 #   -y, --auto-confirm       Enable auto-confirmation mode (skip interactive prompts)
-#   -n <type>                Network type selection: private|public (default: private)
+#   -n <type>                Network type selection: nat|bridge (default: nat)
 #                            Note: Only effective with --k8s or full setup mode
 #   --k8s                    Execute environment setup process only (no components)
 #   --lvmlocalpv             Install OpenEBS LVM LocalPV storage solution only
@@ -66,8 +66,8 @@
 #            into kubespray deployment for seamless container image pulling
 #
 # Network Configuration:
-#   Private Mode: Uses NAT networking with libvirt default network
-#   Public Mode:  Requires bridge interface configuration for direct network access
+#   NAT Mode:    Uses NAT networking with libvirt default network
+#   Bridge Mode: Requires bridge interface configuration for direct network access
 #   Bridge Setup: Interactive configuration of bridge interface and network settings
 #
 # Security Features:
@@ -203,7 +203,7 @@ declare NO_PROXY="${NO_PROXY:-${no_proxy:-"localhost,127.0.0.1,192.168.0.0/16,10
 declare PIP_PROXY="${PIP_PROXY:-${HTTP_PROXY:-""}}"
 declare GIT_PROXY="${GIT_PROXY:-${HTTP_PROXY:-""}}"
 declare BRIDGE_INTERFACE=""
-declare NETWORK_TYPE="private"
+declare NETWORK_TYPE="nat"
 
 # Global variable for prompt function results
 declare PROMPT_RESULT=""
@@ -439,8 +439,8 @@ validate_configuration() {
     [[ -n "$LOG_FILE" ]] || errors+=("LOG_FILE not set")
     
     # Validate network type
-    if [[ -n "$NETWORK_TYPE" && "$NETWORK_TYPE" != "private" && "$NETWORK_TYPE" != "public" ]]; then
-        errors+=("Invalid NETWORK_TYPE: $NETWORK_TYPE (must be 'private' or 'public')")
+    if [[ -n "$NETWORK_TYPE" && "$NETWORK_TYPE" != "nat" && "$NETWORK_TYPE" != "bridge" ]]; then
+    errors+=("Invalid NETWORK_TYPE: $NETWORK_TYPE (must be 'nat' or 'bridge')")
     fi
     
     # Check log file writability
@@ -784,14 +784,14 @@ select_network_interface() {
     done
 }
 
-# Function to interactively configure public network settings
-# Usage: configure_public_network_interactive
+# Function to interactively configure bridge network settings
+# Usage: configure_bridge_network_interactive
 # Sets global variables: BRIDGE_INTERFACE, subnet, netmask, gateway, dns_server, subnet_split4
-configure_public_network_interactive() {
-    log_info "Starting interactive public network configuration..."
+configure_bridge_network_interactive() {
+    log_info "Starting interactive bridge network configuration..."
     echo
-    echo -e "${YELLOW}🌐 Public Network Configuration${NC}"
-    echo -e "${WHITE}Please provide the network configuration for public network:${NC}"
+    echo -e "${YELLOW}🌐 Bridge Network Configuration${NC}"
+    echo -e "${WHITE}Please provide the network configuration for bridge network:${NC}"
     echo
 
     # Step 1: Select bridge interface
@@ -900,7 +900,7 @@ configure_public_network_interactive() {
     dns_server="$PROMPT_RESULT"
     
     # Display final configuration
-    echo -e "\n${GREEN}🎯 Final Public Network Configuration:${NC}"
+    echo -e "\n${GREEN}🎯 Final Bridge Network Configuration:${NC}"
     echo -e "   ${GREEN}•${NC} Bridge Interface: ${CYAN}$BRIDGE_INTERFACE${NC}"
     echo -e "   ${GREEN}•${NC} Subnet: ${CYAN}$subnet${NC}"
     echo -e "   ${GREEN}•${NC} Netmask: ${CYAN}$netmask${NC}"
@@ -908,7 +908,7 @@ configure_public_network_interactive() {
     echo -e "   ${GREEN}•${NC} DNS Server: ${CYAN}$dns_server${NC}"
     echo -e "   ${GREEN}•${NC} Starting IP: ${CYAN}$subnet.$subnet_split4${NC}\n"
     
-    log_info "Public network configuration completed successfully"
+    log_info "Bridge network configuration completed successfully"
     return 0
 }
 
@@ -1886,17 +1886,17 @@ setup_virtual_environment() {
     log_info "Virtual environment setup completed"
 }
 
-# Function to configure public network settings interactively
-configure_public_network_settings() {
+# Function to configure bridge network settings interactively
+configure_bridge_network_settings() {
     # This function now only handles the configuration application
-    # Network information should be gathered beforehand via configure_public_network_interactive
+    # Network information should be gathered beforehand via configure_bridge_network_interactive
     
     local temp_file
     local lock_file
     temp_file="${VAGRANT_CONF_FILE}.tmp"
     lock_file="${VAGRANT_CONF_FILE}.lock"
 
-    log_info "Applying public network settings to configuration..."
+    log_info "Applying bridge network settings to configuration..."
     
     # Acquire file lock to prevent concurrent modifications
     exec 200>"$lock_file"
@@ -1909,7 +1909,7 @@ configure_public_network_settings() {
     if [[ -z "${subnet:-}" || -z "${netmask:-}" || -z "${gateway:-}" || 
           -z "${dns_server:-}" || -z "${subnet_split4:-}" || -z "${BRIDGE_INTERFACE:-}" ]]; then
         log_error "Required network configuration variables are not set"
-        log_error "Please run configure_public_network_interactive first"
+        log_error "Please run configure_bridge_network_interactive first"
         flock -u 200 2>/dev/null
         return 1
     fi
@@ -1941,7 +1941,7 @@ configure_public_network_settings() {
 
     # Replace the original file
     if mv "$temp_file" "$VAGRANT_CONF_FILE"; then
-        log_info "Public network configuration applied successfully to $VAGRANT_CONF_FILE"
+        log_info "Bridge network configuration applied successfully to $VAGRANT_CONF_FILE"
         flock -u 200 2>/dev/null
         rm -f "$lock_file"
         return 0
@@ -1977,9 +1977,9 @@ configure_vagrant_config() {
         error_exit "Template file copy failed"
     }
 
-    # Configure public network settings if using public network
-    if [[ "$NETWORK_TYPE" == "public" ]]; then
-        configure_public_network_settings
+    # Configure bridge network settings if using bridge network
+    if [[ "$NETWORK_TYPE" == "bridge" ]]; then
+        configure_bridge_network_settings
     fi
 
     # Configure proxy settings if HTTP_PROXY is set
@@ -2211,7 +2211,7 @@ parse_vagrant_config() {
     echo -e "   ${GREEN}•${NC} Type: ${CYAN}$G_VM_NETWORK${NC}"
 
     if [[ "$G_VM_NETWORK" == "public_network" ]]; then
-        # PUBLIC_NETWORK: Display configured bridge network information
+        # BRIDGE_NETWORK information:
         echo -e "   ${GREEN}•${NC} Mode: ${CYAN}Bridge Network${NC}"
         echo -e "${GREEN}✅ Network configuration summary:${NC}"
         echo -e "${GREEN}   ├─ Starting IP:${NC} ${CYAN}$G_SUBNET.${G_SUBNET_SPLIT4}+${NC}"
@@ -2220,7 +2220,7 @@ parse_vagrant_config() {
         echo -e "${GREEN}   ├─ DNS Server:${NC} ${WHITE}$G_DNS_SERVER${NC}"
         echo -e "${GREEN}   └─ Bridge Interface:${NC} ${WHITE}$BRIDGE_INTERFACE${NC}"
     else
-        # PRIVATE_NETWORK: Display NAT network information
+        # NAT_NETWORK information:
         echo -e "   ${GREEN}•${NC} Mode: ${CYAN}NAT Network${NC}"
         echo -e "   ${GREEN}•${NC} Subnet: ${CYAN}192.168.200.0${NC}"
         echo -e "   ${GREEN}•${NC} Netmask: ${CYAN}255.255.255.0${NC}"
@@ -2399,10 +2399,10 @@ vagrant_and_run_kubespray() {
         # shellcheck disable=SC1091
         source venv/bin/activate || error_exit "Failed to activate virtual environment"
 
-        # Apply public network configuration if needed
-        if [[ "$NETWORK_TYPE" == "public" ]]; then
-            log_info "Applying public network configuration..."
-            configure_public_network_settings
+        # Apply bridge network configuration if needed
+        if [[ "$NETWORK_TYPE" == "bridge" ]]; then
+            log_info "Applying bridge network configuration..."
+            configure_bridge_network_settings
         fi
         
         # Configure containerd registries before deployment
@@ -3586,9 +3586,9 @@ OPTIONS:
   -v, --version                 Show version information
   --version-changelog           Show version changelog
   -y                            Auto-confirm all yes/no prompts (except network bridge configuration)
-  -n <network_type>             Set network type (private|public, default: private)
+  -n <network_type>             Set network type (nat|bridge, default: nat)
                                 Only effective with --k8s or full setup mode
-                                When set to 'public', interactive configuration will be required
+                                When set to 'bridge', interactive configuration will be required
 
 INSTALLATION_OPTION (exactly one required):
   --k8s                         Run environment setup process only
@@ -3639,10 +3639,10 @@ setup_environment() {
 
     [[ -n "$NETWORK_TYPE" ]] || error_exit "NETWORK_TYPE is not set. Please use -n option to set it."
     
-    # Configure public network if needed
-    if [[ "$NETWORK_TYPE" == "public" ]]; then
-        log_info "Configuring public network settings..."
-        configure_public_network_interactive
+    # Configure bridge network if needed
+    if [[ "$NETWORK_TYPE" == "bridge" ]]; then
+        log_info "Configuring bridge network settings..."
+        configure_bridge_network_interactive
     fi
     
     # System validation
@@ -3695,18 +3695,18 @@ parse_arguments() {
             ;;
         -n)
             [[ -z "$2" || "$2" == -* ]] && {
-                log_error "Option -n requires a network type argument (private|public)"
+                log_error "Option -n requires a network type argument (nat|bridge)"
                 show_help
                 exit 1
             }
             case "$2" in
-            private|public)
+            nat|bridge)
                 NETWORK_TYPE="$2"
                 log_info "Network type set to: $NETWORK_TYPE"
                 shift 2
                 ;;
             *)
-                log_error "Invalid network type: $2. Valid options: private, public"
+                log_error "Invalid network type: $2. Valid options: nat, bridge"
                 exit 1
                 ;;
             esac

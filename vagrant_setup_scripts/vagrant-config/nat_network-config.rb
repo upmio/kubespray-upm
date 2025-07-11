@@ -127,19 +127,21 @@ $os = "rockylinux9"
 # NETWORK CONFIGURATION
 # =============================================================================
 # Network type: "private_network" or "public_network"
-# 
+#
 # private_network: Auto-detect provider network and assign IPs (recommended)
-#   - Automatically detects provider's network settings (subnet, gateway, netmask)
-#   - Assigns IPs starting from $subnet_split4 (100) within detected subnet
-#   - VirtualBox: Uses VBoxManage to detect NAT network (default: 10.0.2.0/24)
-#   - libvirt: Uses default NAT network (192.168.121.0/24)
-#   - Parallels: Uses prlsrvctl to detect shared network (default: 10.211.55.0/24)
-#   - Falls back to provider default NAT if detection fails
+#   - Automatically detects libvirt default network (usually 192.168.121.0/24)
+#   - Uses NAT networking for VM internet access
+#   - VMs can communicate with each other and host
+#   - Simpler setup, no bridge configuration required
+#   - Recommended for development and testing
 #
 # public_network: Use bridge network with manual IP configuration
-#   - Requires manual IP, subnet, gateway, and DNS configuration
-#   - VMs will be accessible from external network
-$vm_network = "public_network"
+#   - Requires manual bridge interface setup on host
+#   - VMs get IPs from same subnet as host network
+#   - Direct network access, VMs appear as separate devices on network
+#   - More complex setup, requires bridge configuration
+#   - Recommended for production-like environments
+$vm_network = "private_network"
 
 # Starting IP for the 4th octet (VMs will get IPs starting from this number)
 # Used in both private_network (with auto-detected subnet) and public_network modes
@@ -149,17 +151,18 @@ $subnet_split4 = 100
 # For private_network, subnet/gateway/netmask are auto-detected from provider
 
 # Network subnet (first 3 octets) - public_network only
-$subnet = "192.168.29"
+# $subnet = "10.37.129"
 
 # Network configuration - public_network only
-$netmask = "255.255.240.0"      # Subnet mask
-$gateway = "192.168.21.1"        # Default gateway
-$dns_server = "192.168.21.1"         # DNS server
+# $netmask = "255.255.255.0"      # Subnet mask
+# $gateway = "10.37.129.1"        # Default gateway
+# $dns_server = "8.8.8.8"         # DNS server
 
 # Bridge network interface (required when using "public_network")
 # Example: On linux, libvirt bridge interface name: br0
-# Example: On linux, vitrulbox bridge interface name: eth1
-$bridge_nic = "br0"
+# $bridge_nic = "br0"
+# Example: On linux, vitrulbox bridge interface name: virbr0
+# $bridge_nic = "virbr0"
 
 # =============================================================================
 # KUBERNETES CONFIGURATION

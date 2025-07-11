@@ -190,7 +190,7 @@ kubectl get pods --all-namespaces
 | | `--version-short` | 显示简要版本信息 |
 | | `--version-changelog` | 显示版本更新日志 |
 | `-y` | | 自动确认所有是/否提示（网络桥接配置除外） |
-| `-n <network_type>` | | 设置网络类型（private\|public，默认：private）<br/>仅在使用 `--k8s` 或完整安装模式时有效<br/>设置为 'public' 时需要交互式配置 |
+| `-n <network_type>` | | 设置网络类型（nat\|bridge，默认：nat）<br/>仅在使用 `--k8s` 或完整安装模式时有效<br/>设置为 'bridge' 时需要交互式配置 |
 
 ### 安装选项（必须指定其中一个）
 
@@ -276,8 +276,8 @@ kubectl get pods --all-namespaces
 3. **网络配置输入**:
 
    ```bash
-   🌐 Public Network Configuration
-   Please provide the network configuration for public network:
+   🌐 Bridge Network Configuration
+Please provide the network configuration for bridge network:
    
    Enter starting IP with CIDR for VM allocation (e.g., 192.168.1.10/24): [用户输入带CIDR的起始IP]
    Enter gateway IP (e.g., 192.168.1.1): [用户输入网关IP]
@@ -344,8 +344,8 @@ bash ./libvirt_kubespray_setup.sh --k8s
 bash ./libvirt_kubespray_setup.sh --k8s -y
 
 # 设置网络类型
-bash ./libvirt_kubespray_setup.sh --k8s -n private         # NAT 模式（默认）
-bash ./libvirt_kubespray_setup.sh --k8s -n public          # 桥接模式
+bash ./libvirt_kubespray_setup.sh --k8s -n nat            # NAT 模式（默认）
+bash ./libvirt_kubespray_setup.sh --k8s -n bridge         # 桥接模式
 
 # 模块化安装
 bash ./libvirt_kubespray_setup.sh --lvmlocalpv             # 安装 LVM LocalPV 存储
@@ -586,8 +586,8 @@ sudo crictl info | grep -A 20 "registry"
 bash ./libvirt_kubespray_setup.sh --k8s -y
 
 # 指定网络模式的自动化部署
-bash ./libvirt_kubespray_setup.sh --k8s -n private -y  # NAT 模式
-bash ./libvirt_kubespray_setup.sh --k8s -n public -y   # 桥接模式（需要交互配置）
+bash ./libvirt_kubespray_setup.sh --k8s -n nat -y     # NAT 模式
+bash ./libvirt_kubespray_setup.sh --k8s -n bridge -y   # 桥接模式（需要交互配置）
 ```
 
 ### 环境变量配置
@@ -1032,7 +1032,7 @@ nslookup google.com 8.8.8.8
 
 ```bash
 # 方案1: 使用 NAT 模式避免交互
-bash ./libvirt_kubespray_setup.sh --k8s -n private -y
+bash ./libvirt_kubespray_setup.sh --k8s -n nat -y
 
 # 方案2: 预先配置环境变量
 export BRIDGE_INTERFACE="enp0s3"  # 替换为实际网络接口
@@ -1040,7 +1040,7 @@ export BRIDGE_IP="192.168.1.100"  # 设置桥接IP
 export BRIDGE_NETMASK="255.255.255.0"
 export BRIDGE_GATEWAY="192.168.1.1"
 export BRIDGE_DNS="8.8.8.8"
-bash ./libvirt_kubespray_setup.sh --k8s -n public -y
+bash ./libvirt_kubespray_setup.sh --k8s -n bridge -y
 ```
 
 #### 7. 组件安装问题
