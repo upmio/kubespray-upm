@@ -1493,8 +1493,9 @@ install_libvirt() {
         log_info "Development Tools are already installed"
     fi
     # Install basic packages
-    log_info "Installing system dependencies..."
+    log_info "Installing basic packages..."
     install_packages "$SYSTEM_PACKAGES"
+    install_helm
 
     # Install Libvirt packages
     log_info "Installing Libvirt packages..."
@@ -3689,7 +3690,6 @@ setup_environment() {
     # Installation steps with performance monitoring
     time_function configure_system_security
     time_function install_libvirt
-    time_function install_helm
     time_function setup_libvirt
     time_function install_vagrant
     time_function install_vagrant_libvirt_plugin
