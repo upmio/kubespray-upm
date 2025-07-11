@@ -9,12 +9,14 @@
 - **版本**: v1.0
 - **模块化安装**: 支持选择性安装不同组件（K8s、LVM LocalPV、Prometheus、CloudNativePG、UPM Engine、UPM Platform）
 - **交互式安装**: 提供详细的安装预览和确认机制
+- **智能虚拟机管理**: 自动检测现有虚拟机，提供灵活的处理选项（保留、更新、重建或取消）
 - **智能网络配置**: 自动检测和配置网络模式（NAT/桥接）
 - **统一输入验证**: 改进的用户输入处理和验证机制
 - **完整日志记录**: 详细的操作日志和错误处理机制
 - **一键部署**: 环境设置完成后可直接部署 Kubernetes 集群
 - **多组件支持**: 支持安装 Kubernetes 生态系统的多种组件
 - **企业级支持**: 支持容器镜像仓库转发和私有仓库认证配置
+- **虚拟机生命周期管理**: 提供完整的虚拟机创建、更新、销毁和状态管理功能
 
 ### ⚡ 一键命令
 
@@ -206,6 +208,18 @@ kubectl get pods --all-namespaces
 
 **重要提示：** 必须指定且仅能指定一个安装选项。
 
+### 虚拟机管理选项（可选）
+
+| 选项 | 描述 | 要求 |
+|------|------|------|
+| `--status` | 查看虚拟机状态和基本信息 | 已部署的虚拟机 |
+| `--ssh <node_name>` | SSH 连接到指定节点（如 k8s-1, k8s-2） | 已部署且运行的虚拟机 |
+| `--destroy` | 销毁所有 kubespray 虚拟机 | 已部署的虚拟机 |
+| `--halt` | 停止所有 kubespray 虚拟机 | 已部署且运行的虚拟机 |
+| `--up` | 启动所有 kubespray 虚拟机 | 已部署但停止的虚拟机 |
+
+**注意事项：** 虚拟机管理选项不能与安装选项同时使用。
+
 ### 安装选项详细要求
 
 #### Kubernetes 集群 (`--k8s`)
@@ -356,6 +370,13 @@ bash ./libvirt_kubespray_setup.sh --upm-platform          # 安装 UPM Platform
 
 # 完整安装（所有组件）
 bash ./libvirt_kubespray_setup.sh --all -y
+
+# 虚拟机管理命令
+bash ./libvirt_kubespray_setup.sh --status                # 查看虚拟机状态
+bash ./libvirt_kubespray_setup.sh --ssh k8s-1            # SSH 连接到指定节点
+bash ./libvirt_kubespray_setup.sh --destroy              # 销毁所有虚拟机
+bash ./libvirt_kubespray_setup.sh --halt                 # 停止所有虚拟机
+bash ./libvirt_kubespray_setup.sh --up                   # 启动所有虚拟机
 ```
 
 ### 安装组件说明
@@ -367,6 +388,7 @@ bash ./libvirt_kubespray_setup.sh --all -y
 - **系统依赖**: Development Tools、Git、curl、wget、vim 等基础工具
 - **虚拟化组件**: libvirt、qemu-kvm、virt-manager、libguestfs-tools
 - **开发环境**: Vagrant、vagrant-libvirt、pyenv、Python 3.11.10
+- **虚拟机管理**: 智能虚拟机检测、生命周期管理、状态监控和交互式处理
 
 #### Kubernetes 生态组件
 
@@ -557,6 +579,105 @@ sudo crictl info | grep -A 20 "registry"
 3. **网络连通性**: 确保集群节点能够访问配置的镜像仓库地址
 4. **配置备份**: 建议备份自定义的 containerd 配置文件
 5. **版本兼容性**: 确保镜像仓库支持所需的 containerd API 版本
+
+## 虚拟机管理
+
+### 智能虚拟机检测与处理
+
+脚本提供了智能的虚拟机管理功能，能够自动检测现有的 kubespray 虚拟机并提供灵活的处理选项。
+
+#### 虚拟机检测机制
+
+脚本会在部署前自动检测以下虚拟机：
+- 名称匹配 `k8s-*` 模式的虚拟机
+- 由 kubespray 创建的相关虚拟机
+- 当前配置目录下的 Vagrant 管理的虚拟机
+
+#### 处理策略
+
+根据检测到的虚拟机数量与目标配置的匹配情况，脚本提供不同的处理选项：
+
+##### 1. 虚拟机数量匹配（现有VM数量 = 目标配置数量）
+
+当检测到的虚拟机数量与当前配置的节点数量一致时，脚本提供以下选项：
+
+```bash
+# 交互式选择
+[1] 保留现有虚拟机，仅运行 vagrant provision（推荐）
+[2] 保留现有虚拟机，重新运行完整的 kubespray 部署
+[3] 删除所有现有虚拟机，重新创建并部署
+[4] 取消部署，退出程序
+```
+
+**选项说明**：
+- **选项1（推荐）**: 保留现有虚拟机，仅更新配置和服务，速度最快
+- **选项2**: 保留虚拟机但重新运行完整部署流程
+- **选项3**: 完全重新创建，适用于需要全新环境的场景
+- **选项4**: 安全退出，不做任何更改
+
+##### 2. 虚拟机数量不匹配（现有VM数量 ≠ 目标配置数量）
+
+当检测到的虚拟机数量与配置不一致时，为确保部署的一致性，脚本提供以下选项：
+
+```bash
+# 交互式选择
+[1] 删除所有现有虚拟机，重新创建并部署（推荐）
+[2] 取消部署，退出程序
+```
+
+**选项说明**：
+- **选项1（推荐）**: 删除现有虚拟机并按新配置重新创建
+- **选项2**: 安全退出，允许用户手动处理虚拟机
+
+#### 自动化模式
+
+使用 `-y` 参数时，脚本会采用以下自动化策略：
+
+```bash
+# 自动化部署
+bash ./libvirt_kubespray_setup.sh --k8s -y
+```
+
+**自动化行为**：
+- **数量匹配**: 自动选择"保留现有虚拟机，仅运行 vagrant provision"
+- **数量不匹配**: 自动选择"删除所有现有虚拟机，重新创建并部署"
+
+#### 虚拟机管理命令
+
+脚本还提供了便捷的虚拟机管理命令：
+
+```bash
+# 查看虚拟机状态
+bash ./libvirt_kubespray_setup.sh --status
+
+# SSH 连接到指定节点
+bash ./libvirt_kubespray_setup.sh --ssh k8s-1
+bash ./libvirt_kubespray_setup.sh --ssh k8s-2
+
+# 销毁所有虚拟机
+bash ./libvirt_kubespray_setup.sh --destroy
+
+# 停止所有虚拟机
+bash ./libvirt_kubespray_setup.sh --halt
+
+# 启动所有虚拟机
+bash ./libvirt_kubespray_setup.sh --up
+```
+
+#### 安全特性
+
+- **交互式确认**: 默认情况下，所有删除操作都需要用户确认
+- **智能检测**: 只处理 kubespray 相关的虚拟机，不影响其他虚拟机
+- **状态验证**: 在执行操作前验证虚拟机状态
+- **错误处理**: 提供详细的错误信息和恢复建议
+
+#### 最佳实践
+
+1. **首次部署**: 直接运行部署命令，脚本会自动创建虚拟机
+2. **配置更新**: 使用"保留现有虚拟机，仅运行 vagrant provision"选项
+3. **节点数量变更**: 选择删除并重新创建虚拟机
+4. **故障恢复**: 使用 `--destroy` 清理后重新部署
+5. **开发测试**: 使用 `-y` 参数进行快速自动化部署
 
 ## 安全配置
 

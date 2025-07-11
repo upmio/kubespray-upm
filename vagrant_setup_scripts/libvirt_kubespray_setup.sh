@@ -14,6 +14,12 @@
 #   Bridge network:      ./libvirt_kubespray_setup.sh --k8s -n bridge
 #   Component install:   ./libvirt_kubespray_setup.sh [--lvmlocalpv|--prometheus|--cnpg|--upm-engine|--upm-platform|--all]
 #
+# VM Management Scenarios:
+#   When existing VMs are detected, the script provides intelligent options:
+#   - If VM count matches configuration: Keep & update, Keep & re-provision, Delete & recreate, or Cancel
+#   - If VM count mismatches: Delete & recreate, or Cancel for manual intervention
+#   - Auto-confirm mode (-y) automatically selects 'Keep & update' for matching VM counts
+#
 # System Requirements:
 #   - Operating System: RHEL/Rocky/AlmaLinux 8/9 (x86_64 architecture)
 #   - Hardware: CPU 12+ cores, Memory 32GB+, Storage 200GB+ available
@@ -31,6 +37,8 @@
 #   ✓ containerd registry configuration with custom registry support
 #   ✓ Comprehensive logging, monitoring, and troubleshooting capabilities
 #   ✓ Proxy configuration support for enterprise environments
+#   ✓ Intelligent VM management with count validation and flexible handling options
+#   ✓ Smart VM deployment strategies (keep existing, re-provision, or recreate)
 #
 # Environment Variables:
 #   HTTP_PROXY         - HTTP proxy server URL for package downloads
@@ -69,6 +77,18 @@
 #   NAT Mode:    Uses NAT networking with libvirt default network
 #   Bridge Mode: Requires bridge interface configuration for direct network access
 #   Bridge Setup: Interactive configuration of bridge interface and network settings
+#
+# VM Management Features:
+#   ✓ Automatic detection and analysis of existing virtual machines
+#   ✓ VM count validation against expected configuration
+#   ✓ Flexible handling options for existing VMs:
+#     - Keep existing VMs and run 'vagrant up' (recommended for updates)
+#     - Keep existing VMs and run 'vagrant provision' (re-provision only)
+#     - Delete all VMs and create fresh ones
+#     - Cancel deployment for manual intervention
+#   ✓ Intelligent decision making based on VM count matching
+#   ✓ Safe VM cleanup with proper resource management
+#   ✓ Interactive prompts with clear option descriptions
 #
 # Security Features:
 #   ✓ SELinux compatibility and configuration management
@@ -2481,7 +2501,7 @@ vagrant_and_run_kubespray() {
             echo -e "${GREEN}✅ Box found.${NC}"
         fi
 
-        # Check for existing VMs and offer cleanup option
+        # Check for existing VMs and handle them intelligently
         echo -e "${YELLOW}🔍 Checking for existing virtual machines...${NC}"
         local vm_status
         # Check for VMs matching kubespray+k8s+<number> pattern using virsh
@@ -2490,55 +2510,159 @@ vagrant_and_run_kubespray() {
         if [[ -n "$vm_status" ]]; then
             echo -e "${YELLOW}⚠️  Found existing kubespray virtual machines:${NC}"
             echo "$vm_status"
-            echo -e "\n${YELLOW}These VMs may interfere with the new deployment.${NC}"
-            echo -e "${WHITE}Do you want to clean up existing VMs and continue?${NC}"
-            echo -e "   ${GREEN}•${NC} Yes: Clean up automatically with ${CYAN}virsh destroy/undefine${NC}"
-            echo -e "   ${RED}•${NC} No: Cancel deployment\n"
             
-            if prompt_yes_no "Clean up existing VMs and continue?"; then
-                echo -e "${YELLOW}🧹 Cleaning up existing VMs...${NC}"
+            # Count existing VMs
+            local existing_vm_count
+            existing_vm_count=$(echo "$vm_status" | wc -l)
+            
+            # Calculate expected total VM count
+            echo -e "\n${WHITE}VM Count Analysis:${NC}"
+            echo -e "   ${GREEN}•${NC} Found VMs: ${CYAN}$existing_vm_count${NC}"
+            echo -e "   ${GREEN}•${NC} Expected VMs: ${CYAN}$G_NUM_INSTANCES${NC}"
+            
+            if [[ $existing_vm_count -eq $G_NUM_INSTANCES ]]; then
+                echo -e "\n${GREEN}✅ VM count matches expected configuration!${NC}"
+                echo -e "${WHITE}You have the following options:${NC}"
+                echo -e "   ${GREEN}1.${NC} Keep existing VMs and run ${CYAN}vagrant up${NC} (recommended for updates)"
+                echo -e "   ${GREEN}2.${NC} Keep existing VMs and run ${CYAN}vagrant provision${NC} (re-provision only)"
+                echo -e "   ${RED}3.${NC} Delete all VMs and create fresh ones"
+                echo -e "   ${YELLOW}4.${NC} Cancel deployment\n"
                 
-                # Extract VM names from vm_status and delete them using virsh
-                local vm_names
-                vm_names=$(echo "$vm_status" | awk '{print $2}' | grep -E "kubespray${G_INSTANCE_NAME_PREFIX}.*[0-9]+")
-                
-                local cleanup_success=true
-                while IFS= read -r vm_name; do
-                    if [[ -n "$vm_name" ]]; then
-                        echo -e "${YELLOW}  Destroying VM: $vm_name${NC}"
-                        
-                        # First try to destroy (shutdown) the VM if it's running
-                        if sudo virsh destroy "$vm_name" 2>/dev/null; then
-                            echo -e "${GREEN}    ✓ VM $vm_name destroyed${NC}"
-                        else
-                            echo -e "${YELLOW}    ⚠ VM $vm_name was not running${NC}"
-                        fi
-                        
-                        # Then undefine (remove) the VM completely
-                        if sudo virsh undefine "$vm_name" --remove-all-storage 2>/dev/null; then
-                            echo -e "${GREEN}    ✓ VM $vm_name undefined and storage removed${NC}"
-                        else
-                            echo -e "${RED}    ✗ Failed to undefine VM $vm_name${NC}"
-                            cleanup_success=false
-                        fi
-                    fi
-                done <<< "$vm_names"
-                
-                if $cleanup_success; then
-                    echo -e "${GREEN}✅ VMs cleaned up successfully${NC}"
-                else
-                    echo -e "${RED}❌ Failed to clean up some VMs automatically${NC}"
-                    echo -e "${YELLOW}Please clean up manually and run the script again${NC}"
-                    return 1
-                fi
+                local choice
+                while true; do
+                    read -p "Please select an option (1-4): " choice
+                    case $choice in
+                        1)
+                            echo -e "${GREEN}✅ Proceeding with existing VMs using vagrant up...${NC}"
+                            break
+                            ;;
+                        2)
+                            echo -e "${GREEN}✅ Proceeding with existing VMs using vagrant provision...${NC}"
+                            if vagrant provision --provision-with ansible; then
+                                echo -e "\n${GREEN}🎉 Provisioning Completed Successfully!${NC}\n"
+                                # Configure kubectl for local access
+                                echo -e "${YELLOW}🔧 Configuring kubectl for local access...${NC}"
+                                if configure_kubectl_access; then
+                                    echo -e "${GREEN}✅ kubectl configured successfully${NC}\n"
+                                    display_cluster_info
+                                else
+                                    echo -e "${YELLOW}⚠️  kubectl configuration failed or artifacts not found${NC}\n"
+                                    error_exit "kubectl configuration failed or artifacts not found"
+                                fi
+                                return 0
+                            else
+                                echo -e "\n${RED}❌ Provisioning failed! Check logs above.${NC}\n"
+                                return 1
+                            fi
+                            ;;
+                        3)
+                            echo -e "${RED}🗑️  Deleting existing VMs...${NC}"
+                            # Extract VM names and delete them
+                            local vm_names
+                            vm_names=$(echo "$vm_status" | awk '{print $2}' | grep -E "kubespray${G_INSTANCE_NAME_PREFIX}.*[0-9]+")
+                            
+                            local cleanup_success=true
+                            while IFS= read -r vm_name; do
+                                if [[ -n "$vm_name" ]]; then
+                                    echo -e "${YELLOW}  Destroying VM: $vm_name${NC}"
+                                    
+                                    # First try to destroy (shutdown) the VM if it's running
+                                    if sudo virsh destroy "$vm_name" 2>/dev/null; then
+                                        echo -e "${GREEN}    ✓ VM $vm_name destroyed${NC}"
+                                    else
+                                        echo -e "${YELLOW}    ⚠ VM $vm_name was not running${NC}"
+                                    fi
+                                    
+                                    # Then undefine (remove) the VM completely
+                                    if sudo virsh undefine "$vm_name" --remove-all-storage 2>/dev/null; then
+                                        echo -e "${GREEN}    ✓ VM $vm_name undefined and storage removed${NC}"
+                                    else
+                                        echo -e "${RED}    ✗ Failed to undefine VM $vm_name${NC}"
+                                        cleanup_success=false
+                                    fi
+                                fi
+                            done <<< "$vm_names"
+                            
+                            if $cleanup_success; then
+                                echo -e "${GREEN}✅ VMs cleaned up successfully${NC}"
+                                break
+                            else
+                                echo -e "${RED}❌ Failed to clean up some VMs automatically${NC}"
+                                echo -e "${YELLOW}Please clean up manually and run the script again${NC}"
+                                return 1
+                            fi
+                            ;;
+                        4)
+                            echo -e "${YELLOW}⏸️  Deployment cancelled by user${NC}"
+                            return 0
+                            ;;
+                        *)
+                            echo -e "${RED}❌ Invalid option. Please select 1, 2, 3, or 4.${NC}"
+                            ;;
+                    esac
+                done
             else
-                echo -e "${YELLOW}⏸️  Deployment cancelled by user${NC}"
-                echo -e "${WHITE}Manual cleanup commands:${NC}"
-                echo -e "   ${CYAN}sudo virsh destroy <vm_name>${NC}     # Shutdown VM"
-                echo -e "   ${CYAN}sudo virsh undefine <vm_name> --remove-all-storage${NC}  # Remove VM"
-                echo -e "   ${CYAN}sudo virsh list --all${NC}            # Check VM status"
-                echo -e "\n${WHITE}After cleanup, run this script again.${NC}"
-                return 0
+                echo -e "\n${RED}❌ VM count mismatch detected!${NC}"
+                echo -e "${YELLOW}The existing VMs don't match the expected configuration.${NC}"
+                echo -e "${WHITE}You have the following options:${NC}"
+                echo -e "   ${RED}1.${NC} Delete all existing VMs and create fresh ones"
+                echo -e "   ${YELLOW}2.${NC} Cancel deployment and check configuration\n"
+                
+                local choice
+                while true; do
+                    read -p "Please select an option (1-2): " choice
+                    case $choice in
+                        1)
+                            echo -e "${RED}🗑️  Deleting existing VMs...${NC}"
+                            # Extract VM names and delete them
+                            local vm_names
+                            vm_names=$(echo "$vm_status" | awk '{print $2}' | grep -E "kubespray${G_INSTANCE_NAME_PREFIX}.*[0-9]+")
+                            
+                            local cleanup_success=true
+                            while IFS= read -r vm_name; do
+                                if [[ -n "$vm_name" ]]; then
+                                    echo -e "${YELLOW}  Destroying VM: $vm_name${NC}"
+                                    
+                                    # First try to destroy (shutdown) the VM if it's running
+                                    if sudo virsh destroy "$vm_name" 2>/dev/null; then
+                                        echo -e "${GREEN}    ✓ VM $vm_name destroyed${NC}"
+                                    else
+                                        echo -e "${YELLOW}    ⚠ VM $vm_name was not running${NC}"
+                                    fi
+                                    
+                                    # Then undefine (remove) the VM completely
+                                    if sudo virsh undefine "$vm_name" --remove-all-storage 2>/dev/null; then
+                                        echo -e "${GREEN}    ✓ VM $vm_name undefined and storage removed${NC}"
+                                    else
+                                        echo -e "${RED}    ✗ Failed to undefine VM $vm_name${NC}"
+                                        cleanup_success=false
+                                    fi
+                                fi
+                            done <<< "$vm_names"
+                            
+                            if $cleanup_success; then
+                                echo -e "${GREEN}✅ VMs cleaned up successfully${NC}"
+                                break
+                            else
+                                echo -e "${RED}❌ Failed to clean up some VMs automatically${NC}"
+                                echo -e "${YELLOW}Please clean up manually and run the script again${NC}"
+                                return 1
+                            fi
+                            ;;
+                        2)
+                            echo -e "${YELLOW}⏸️  Deployment cancelled by user${NC}"
+                            echo -e "${WHITE}Manual cleanup commands:${NC}"
+                            echo -e "   ${CYAN}sudo virsh destroy <vm_name>${NC}     # Shutdown VM"
+                            echo -e "   ${CYAN}sudo virsh undefine <vm_name> --remove-all-storage${NC}  # Remove VM"
+                            echo -e "   ${CYAN}sudo virsh list --all${NC}            # Check VM status"
+                            echo -e "\n${WHITE}After cleanup, run this script again.${NC}"
+                            return 0
+                            ;;
+                        *)
+                            echo -e "${RED}❌ Invalid option. Please select 1 or 2.${NC}"
+                            ;;
+                    esac
+                done
             fi
         else
             echo -e "${GREEN}✅ No existing kubespray VMs found${NC}"
@@ -3695,7 +3819,6 @@ setup_environment() {
     time_function install_vagrant_libvirt_plugin
     time_function setup_python_environment
     time_function setup_kubespray_project
-    echo -e "\n${GREEN}🎉 Environment Setup Completed Successfully!${NC}"
     # Post-installation confirmation with performance monitoring
     time_function vagrant_and_run_kubespray
 
