@@ -2144,10 +2144,10 @@ extract_vagrant_config_variables() {
     G_SUBNET_SPLIT4=$(grep "^\$subnet_split4\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/' || echo "100")
 
     # Extract network configuration
-    G_VM_NETWORK=$(grep "^\$vm_network\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "private_network")
+    G_VM_NETWORK=$(grep "^\$vm_network\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "nat")
 
     # Extract network-specific variables based on network type
-    if [[ "$G_VM_NETWORK" == "public_network" ]]; then
+    if [[ "$G_VM_NETWORK" == "bridge" ]]; then
         G_SUBNET=$(grep "^\$subnet\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "")
         G_NETMASK=$(grep "^\$netmask\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "")
         G_GATEWAY=$(grep "^\$gateway\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "")
@@ -2210,7 +2210,7 @@ parse_vagrant_config() {
     echo -e "${WHITE}🌐 Network Configuration:${NC}"
     echo -e "   ${GREEN}•${NC} Type: ${CYAN}$G_VM_NETWORK${NC}"
 
-    if [[ "$G_VM_NETWORK" == "public_network" ]]; then
+    if [[ "$G_VM_NETWORK" == "bridge" ]]; then
         # BRIDGE_NETWORK information:
         echo -e "   ${GREEN}•${NC} Mode: ${CYAN}Bridge Network${NC}"
         echo -e "${GREEN}✅ Network configuration summary:${NC}"

@@ -658,11 +658,11 @@ Vagrant.configure("2") do |config|
       end
 
       # Generate IP based on network mode
-      if $vm_network == "public_network"
-        # For public network, use manually configured subnet
+      if $vm_network == "bridge"
+        # For bridge network, use manually configured subnet
         ip = "#{$subnet}.#{i+$subnet_split4}"
       else
-        # For private network, use auto-detected subnet
+        # For NAT network, use auto-detected subnet
         detected_network = get_provider_network_info($provider)
         subnet_base = detected_network[:subnet].split('.')[0..2].join('.')
         ip = "#{subnet_base}.#{$subnet_split4 + i}"
