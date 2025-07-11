@@ -1103,6 +1103,13 @@ validate_required_variables() {
         fi
     fi
 
+    log_info "Variable validation passed"
+}
+
+#######################################
+# Install Helm Function
+#######################################
+install_helm() {
     # Check if helm is installed
     if ! command -v helm >/dev/null 2>&1; then
         log_info "Installing Helm..."
@@ -1113,8 +1120,6 @@ validate_required_variables() {
     else
         log_info "Helm is already installed"
     fi
-
-    log_info "Variable validation passed"
 }
 
 #######################################
@@ -2655,6 +2660,12 @@ configure_kubectl_access() {
 install_lvm_localpv() {
     log_info "Installing OpenEBS LVM LocalPV..."
 
+    # Ensure Helm is installed
+    if ! command -v helm >/dev/null 2>&1; then
+        log_info "Helm not found, installing..."
+        install_helm
+    fi
+
     echo -e "${YELLOW}🔧 Installing OpenEBS LVM LocalPV...${NC}"
     local lvm_localpv_chart_repo="https://openebs.github.io/lvm-localpv"
     local lvm_localpv_repo_name="openebs-lvmlocalpv"
@@ -2837,6 +2848,12 @@ EOF
 #######################################
 install_prometheus() {
     log_info "Starting Prometheus installation..."
+
+    # Ensure Helm is installed
+    if ! command -v helm >/dev/null 2>&1; then
+        log_info "Helm not found, installing..."
+        install_helm
+    fi
 
     # Prometheus configuration
     local prometheus_repo_name="prometheus-community"
@@ -3052,6 +3069,12 @@ EOF
 install_cnpg() {
     log_info "Starting CloudNative-PG installation..."
 
+    # Ensure Helm is installed
+    if ! command -v helm >/dev/null 2>&1; then
+        log_info "Helm not found, installing..."
+        install_helm
+    fi
+
     # Configuration variables
     local cnpg_chart_repo="https://cloudnative-pg.github.io/charts"
     local cnpg_repo_name="cnpg"
@@ -3179,6 +3202,12 @@ EOF
 install_upm_engine() {
     log_info "Starting UPM Engine installation..."
 
+    # Ensure Helm is installed
+    if ! command -v helm >/dev/null 2>&1; then
+        log_info "Helm not found, installing..."
+        install_helm
+    fi
+
     # Configuration variables
     local upm_chart_repo="https://upmio.github.io/helm-charts"
     local upm_repo_name="upm-charts"
@@ -3278,6 +3307,12 @@ install_upm_engine() {
 #######################################
 install_upm_platform() {
     log_info "Starting UPM Platform installation..."
+
+    # Ensure Helm is installed
+    if ! command -v helm >/dev/null 2>&1; then
+        log_info "Helm not found, installing..."
+        install_helm
+    fi
 
     # Configuration variables
     local upm_chart_repo="https://upmio.github.io/helm-charts"
@@ -3654,6 +3689,7 @@ setup_environment() {
     # Installation steps with performance monitoring
     time_function configure_system_security
     time_function install_libvirt
+    time_function install_helm
     time_function setup_libvirt
     time_function install_vagrant
     time_function install_vagrant_libvirt_plugin
