@@ -126,39 +126,39 @@ $os = "rockylinux9"
 # =============================================================================
 # NETWORK CONFIGURATION
 # =============================================================================
-# Network type: "private_network" or "public_network"
+# Network type: "nat" or "bridge"
 #
-# private_network: Auto-detect provider network and assign IPs (recommended)
-#   - Automatically detects libvirt default network (usually 192.168.121.0/24)
+# nat: Auto-detect provider network and assign IPs (recommended)
+#   - Automatically detects provider default network (usually 192.168.x.0/24)
 #   - Uses NAT networking for VM internet access
 #   - VMs can communicate with each other and host
 #   - Simpler setup, no bridge configuration required
 #   - Recommended for development and testing
 #
-# public_network: Use bridge network with manual IP configuration
+# bridge: Use bridge network with manual IP configuration
 #   - Requires manual bridge interface setup on host
 #   - VMs get IPs from same subnet as host network
 #   - Direct network access, VMs appear as separate devices on network
 #   - More complex setup, requires bridge configuration
 #   - Recommended for production-like environments
-$vm_network = "private_network"
+$vm_network = "nat"
 
 # Starting IP for the 4th octet (VMs will get IPs starting from this number)
-# Used in both private_network (with auto-detected subnet) and public_network modes
+# Used in both nat (with auto-detected subnet) and bridge modes
 $subnet_split4 = 100
 
-# The following network settings are only used when $vm_network = "public_network"
-# For private_network, subnet/gateway/netmask are auto-detected from provider
+# The following network settings are only used when $vm_network = "bridge"
+# For nat, subnet/gateway/netmask are auto-detected from provider
 
-# Network subnet (first 3 octets) - public_network only
+# Network subnet (first 3 octets) - bridge only
 # $subnet = "10.37.129"
 
-# Network configuration - public_network only
+# Network configuration - bridge only
 # $netmask = "255.255.255.0"      # Subnet mask
 # $gateway = "10.37.129.1"        # Default gateway
 # $dns_server = "8.8.8.8"         # DNS server
 
-# Bridge network interface (required when using "public_network")
+# Bridge network interface (required when using "bridge")
 # Example: On linux, libvirt bridge interface name: br0
 # $bridge_nic = "br0"
 # Example: On linux, vitrulbox bridge interface name: virbr0

@@ -1,5 +1,4 @@
 # -*- mode: ruby -*-
-# -*- mode: ruby -*-
 # vi: set ft=ruby :
 
 # Kubespray Vagrant Configuration
@@ -58,9 +57,9 @@ $upm_control_plane_vm_memory ||= 32768         # Memory for UPM control plane (M
 $upm_control_plane_vm_cpus ||= 8               # CPU cores for UPM control plane
 
 # Network Configuration
-$vm_network ||= "private_network"              # Network type: private_network or public_network
-# When $vm_network is "public_network", use bridge interface br0
-# $bridge_nic ||= "br0"                          # Bridge network interface for public_network
+$vm_network ||= "nat"                          # Network type: nat or bridge
+# When $vm_network is "bridge", use bridge interface br0
+# $bridge_nic ||= "br0"                          # Bridge network interface for bridge mode
 
 $subnet_split4 ||= 100                         # Starting IP offset (e.g., 172.18.8.101)
 
@@ -68,7 +67,7 @@ $subnet_split4 ||= 100                         # Starting IP offset (e.g., 172.1
 $time_zone ||= "Asia/Shanghai"                 # System timezone
 $os ||= "rockylinux9"                          # Default operating system
 
-# Ntp Sever Configuration
+# NTP Server Configuration
 $ntp_enabled ||= "True"
 $ntp_manage_config ||= "True"
 
@@ -111,7 +110,7 @@ def convert_disk_size_for_provider(size_str, provider)
     number = size_str.to_i
     unit = 'G'  # Default to GB if no unit specified
   end
-  
+
   # Convert to MB for VirtualBox and Parallels, keep original format for Libvirt
   case provider
   when :virtualbox, :parallels
@@ -152,20 +151,20 @@ def detect_provider_from_argv
   if provider_index && provider_index + 1 < ARGV.length
     return ARGV[provider_index + 1]
   end
-  
+
   # Check for --provider=value format
   provider_arg = ARGV.find { |arg| arg.start_with?('--provider=') }
   if provider_arg
     return provider_arg.split('=', 2)[1]
   end
-  
+
   return nil
 end
 
 # Function to detect available providers on the system
 def detect_available_providers
   available_providers = []
-  
+
   # Check for VirtualBox
   begin
     `VBoxManage --version 2>/dev/null`
@@ -173,7 +172,7 @@ def detect_available_providers
   rescue
     # VBoxManage not found
   end
-  
+
   # Check for libvirt (virsh command)
   begin
     `virsh --version 2>/dev/null`
@@ -181,7 +180,7 @@ def detect_available_providers
   rescue
     # virsh not found
   end
-  
+
   # Check for Parallels
   begin
     `prlctl --version 2>/dev/null`
@@ -189,7 +188,7 @@ def detect_available_providers
   rescue
     # prlctl not found
   end
-  
+
   return available_providers
 end
 
@@ -198,27 +197,27 @@ def get_default_provider
   # 1. Command line --provider argument (highest priority)
   provider_from_argv = detect_provider_from_argv
   return provider_from_argv if provider_from_argv
-  
+
   # 2. VAGRANT_DEFAULT_PROVIDER environment variable
   env_provider = ENV['VAGRANT_DEFAULT_PROVIDER']
   return env_provider if env_provider && !env_provider.empty?
-  
+
   # 3. Auto-detect from available providers (following Vagrant's priority)
   available_providers = detect_available_providers
-  
+
   # Vagrant's default priority order: parallels > vmware > virtualbox > libvirt
   # But we only support virtualbox, libvirt, parallels
   priority_order = ["parallels", "virtualbox", "libvirt"]
-  
+
   priority_order.each do |provider|
     return provider if available_providers.include?(provider)
   end
-  
+
   # 4. If no providers are available, return nil
   return nil
 end
 
-# Function to get provider network information for private_network mode
+# Function to get provider network information for nat mode
 def get_provider_network_info(provider)
   case provider
   when "virtualbox"
@@ -247,18 +246,18 @@ if $provider && !$provider.empty?
 else
   # No provider detected, provide helpful error message
   available_providers = detect_available_providers
-  
+
   if available_providers.empty?
     raise <<~ERROR
       No usable provider could be found for your system.
-      
+
       Kubespray supports the following providers: #{$supported_providers.join(', ')}
-      
+
       Please install one of the following:
       - VirtualBox: https://www.virtualbox.org/wiki/Downloads
       - libvirt: Install libvirt and virsh command
       - Parallels Desktop: https://www.parallels.com/
-      
+
       After installation, try running 'vagrant up' again.
     ERROR
   else
@@ -267,9 +266,9 @@ else
     if unsupported_available.any?
       raise <<~ERROR
         Found available providers (#{available_providers.join(', ')}) but none are supported by this Vagrantfile.
-        
+
         Supported providers: #{$supported_providers.join(', ')}
-        
+
         Please install one of the supported providers or specify explicitly:
         vagrant up --provider=<provider>
       ERROR
@@ -320,8 +319,8 @@ def validate_configuration
   end
 
   # Validate network configuration
-  unless ["private_network", "public_network"].include?($vm_network)
-    puts "ERROR: Invalid network type: #{$vm_network}. Must be 'private_network' or 'public_network'"
+  unless ["nat", "bridge"].include?($vm_network)
+    puts "ERROR: Invalid network type: #{$vm_network}. Must be 'nat' or 'bridge'"
     exit 1
   end
 end
@@ -353,14 +352,14 @@ if Vagrant.has_plugin?("vagrant-proxyconf")
   # Add VM IPs to no_proxy list
   (1..$num_instances).each do |i|
     # Add VM IP to no_proxy list based on network mode
-        if $vm_network == "public_network"
-          $no_proxy += ",#{$subnet}.#{i+$subnet_split4}"
-        else
-          # For private network, use auto-detected subnet
-          detected_network = get_provider_network_info($provider)
-          subnet_base = detected_network[:subnet].split('.')[0..2].join('.')
-          $no_proxy += ",#{subnet_base}.#{$subnet_split4 + i}"
-        end
+    if $vm_network == "bridge"
+      $no_proxy += ",#{$subnet}.#{i+$subnet_split4}"
+    else
+      # For NAT network, use auto-detected subnet
+      detected_network = get_provider_network_info($provider)
+      subnet_base = detected_network[:subnet].split('.')[0..2].join('.')
+      $no_proxy += ",#{subnet_base}.#{$subnet_split4 + i}"
+    end
   end
 end
 
@@ -370,15 +369,15 @@ end
 
 # Configure VM network based on network type
 def configure_vm_network(node, ip, instance_num)
-  if $vm_network == "public_network"
-    # Public network mode - use manually configured settings
+  if $vm_network == "bridge"
+    # Bridge network mode - use manually configured settings
     network_options = {
       ip: ip,
       netmask: $netmask,
     }
-    
+
     if $provider == "libvirt"
-      # Public network (bridge mode) configuration
+      # Bridge network configuration
       network_options[:dev] = $bridge_nic
       network_options[:type] = "bridge"
       network_options[:mode] = "bridge"
@@ -391,9 +390,9 @@ def configure_vm_network(node, ip, instance_num)
       network_options[:virtualbox__nic_type] = "virtio"
       node.vm.network :public_network, **network_options
     end
-    return ip  # Return the original IP for public network
-  elsif $vm_network == "private_network"
-    # Private network mode - auto-detect provider network info
+    return ip  # Return the original IP for bridge network
+  elsif $vm_network == "nat"
+    # NAT network mode - auto-detect provider network info
     detected_network = get_provider_network_info($provider)
     # Calculate IP based on detected subnet and $subnet_split4
     subnet_base = detected_network[:subnet].split('.')[0..2].join('.')
@@ -411,19 +410,19 @@ def configure_vm_network(node, ip, instance_num)
     elsif $provider == "parallels"
       node.vm.network :private_network, **network_options
     end
-    
-    return auto_ip  # Return the auto-detected IP for private network
+
+    return auto_ip  # Return the auto-detected IP for NAT network
   end
 end
 
 # Configure Rocky Linux specific network settings
 def configure_rocky_network(node)
-  network_script = if $vm_network == "public_network"
+  network_script = if $vm_network == "bridge"
     <<-SHELL
-      # Configure public network for Rocky Linux
+      # Configure bridge network for Rocky Linux
       sudo nmcli connection modify "eth0" ipv4.gateway ""
       sudo nmcli connection modify "eth0" ipv4.never-default yes
-      
+
       # Configure bridge network interface (eth1)
       sudo nmcli connection modify "System eth1" +ipv4.routes "0.0.0.0/0 #{$gateway}"
       sudo nmcli connection modify "System eth1" ipv4.gateway "#{$gateway}"
@@ -436,7 +435,7 @@ def configure_rocky_network(node)
   end
 
   # Common DNS configuration for Rocky Linux
-  dns_server = $vm_network == "public_network" ? $dns_server : "8.8.8.8"
+  dns_server = $vm_network == "bridge" ? $dns_server : "8.8.8.8"
   network_script += <<-SHELL
     sudo echo -e "[main]\ndns=default\n\n[global-dns-domain-*]\nservers=#{dns_server}" | sudo tee /etc/NetworkManager/conf.d/dns.conf
     sudo systemctl restart NetworkManager
@@ -451,29 +450,29 @@ def configure_ansible_provisioner(node, host_vars)
     ansible.playbook = $playbook
     ansible.compatibility_mode = "2.0"
     ansible.verbose = $ansible_verbosity
-    
+
     # Set inventory path if hosts.ini exists
     ansible_inventory_path = File.join($inventory, "hosts.ini")
     ansible.inventory_path = ansible_inventory_path if File.exist?(ansible_inventory_path)
-    
+
     # Ansible configuration
     ansible.become = true
     ansible.limit = "all,localhost"
     ansible.host_key_checking = false
-    
+
     # Optimize Ansible performance
     max_forks = [$num_instances, 10].min
     ansible.raw_arguments = ["--forks=#{max_forks}", "--flush-cache", "-e ansible_become_pass=vagrant"]
-    
+
     # Set host variables and extra variables
     ansible.host_vars = host_vars
     ansible.extra_vars = ($extra_vars || {}).merge({
       'ansible_python_interpreter' => '/usr/bin/python3'
     })
-    
+
     # Apply Ansible tags if specified
     ansible.tags = [$ansible_tags] unless $ansible_tags.empty?
-    
+
     # Define Ansible groups for Kubernetes cluster
     ansible.groups = {
       "etcd" => ["#{$instance_name_prefix}-[1:#{$etcd_instances}]"],
@@ -569,23 +568,23 @@ Vagrant.configure("2") do |config|
             rpm -q util-linux lvm2 >/dev/null 2>&1 || sudo dnf install -y util-linux lvm2
             # Wait for disks to be available
             sleep 5
-            
+
             # Find additional disk devices (excluding system disk)
             DISK_DEVICES=$(lsblk -dpno NAME,TYPE | grep disk | grep -v $(lsblk -no PKNAME $(findmnt -n -o SOURCE /) | head -1) | awk '{print $1}' | sort)
-            
+
             if [ -z "$DISK_DEVICES" ]; then
               echo "WARNING: No additional disk devices found for VolumeGroup creation"
               exit 0
             fi
-            
+
             echo "INFO: Found additional disk devices: $DISK_DEVICES"
-            
+
             # Create physical volumes
             for disk in $DISK_DEVICES; do
               echo "INFO: Creating physical volume on $disk"
               sudo pvcreate $disk 2>/dev/null || echo "WARNING: Failed to create PV on $disk (may already exist)"
             done
-            
+
             # Create volume group if it doesn't exist
             if ! sudo vgdisplay #{$kube_node_instances_volume_group} >/dev/null 2>&1; then
               echo "INFO: Creating VolumeGroup #{$kube_node_instances_volume_group}"
@@ -601,7 +600,7 @@ Vagrant.configure("2") do |config|
                 fi
               done
             fi
-            
+
             # Display VolumeGroup information
             echo "INFO: VolumeGroup #{$kube_node_instances_volume_group} status:"
             sudo vgdisplay #{$kube_node_instances_volume_group}
@@ -668,7 +667,7 @@ Vagrant.configure("2") do |config|
         subnet_base = detected_network[:subnet].split('.')[0..2].join('.')
         ip = "#{subnet_base}.#{$subnet_split4 + i}"
       end
-      
+
       # Configure network based on selected network type and get the actual IP used
       actual_ip = configure_vm_network(node, ip, i)
 
