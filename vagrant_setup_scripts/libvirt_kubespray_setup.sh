@@ -322,23 +322,37 @@ time_function() {
     echo -e "${YELLOW}⏱️  Starting: ${BOLD}$func_name${NC} ${BLUE}[$start_timestamp]${NC}"
     
     log_structured "INFO" "PERF" "Starting function: $func_name"
-    start_time=$(date +%s.%N)
+    local start_time=$(date +%s)
+    local start_timestamp=$(date -d @"$start_time" '+%H:%M:%S')
     
     # Execute the function
     "$func_name" "$@"
     local exit_code=$?
     
-    end_time=$(date +%s.%N)
-    duration=$(echo "$end_time - $start_time" | bc -l 2>/dev/null || echo "N/A")
-    local end_timestamp=$(date '+%H:%M:%S')
+    local end_time=$(date +%s)
+    local duration=$((end_time - start_time))
+    local end_timestamp=$(date -d @"$end_time" '+%H:%M:%S')
+    
+    # Format duration for human readability using date command
+    local formatted_duration
+    if (( duration >= 3600 )); then
+        # Hours and minutes for durations >= 1 hour
+        formatted_duration=$(date -u -d @"$duration" +"%-Hh %-Mm" 2>/dev/null || echo "${duration}s")
+    elif (( duration >= 60 )); then
+        # Minutes and seconds for durations >= 1 minute
+        formatted_duration=$(date -u -d @"$duration" +"%-Mm %-Ss" 2>/dev/null || echo "${duration}s")
+    else
+        # Seconds only for durations < 1 minute
+        formatted_duration="${duration}s"
+    fi
     
     # Simple completion display with timestamps
     if [[ $exit_code -eq 0 ]]; then
         log_structured "INFO" "PERF" "Function $func_name completed successfully" "Duration: ${duration}s"
-        echo -e "${GREEN}✅ Completed: ${BOLD}$func_name${NC} ${BLUE}[$end_timestamp]${NC} ${MAGENTA}(${duration}s)${NC}"
+        echo -e "${GREEN}✅ Completed: ${BOLD}$func_name${NC} ${BLUE}[$end_timestamp]${NC} ${MAGENTA}(${formatted_duration})${NC}"
     else
         log_structured "ERROR" "PERF" "Function $func_name failed" "Duration: ${duration}s, Exit code: $exit_code"
-        echo -e "${RED}❌ Failed: ${BOLD}$func_name${NC} ${BLUE}[$end_timestamp]${NC} ${MAGENTA}(${duration}s, exit: $exit_code)${NC}"
+        echo -e "${RED}❌ Failed: ${BOLD}$func_name${NC} ${BLUE}[$end_timestamp]${NC} ${MAGENTA}(${formatted_duration}, exit: $exit_code)${NC}"
     fi
     echo
     
