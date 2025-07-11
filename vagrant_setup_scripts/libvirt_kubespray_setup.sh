@@ -338,20 +338,25 @@ time_function() {
     local start_time end_time duration
     
     # Simple performance monitoring display with timestamps
-    local start_timestamp=$(date '+%H:%M:%S')
+    local start_timestamp
+    start_timestamp=$(date '+%H:%M:%S')
     echo -e "${YELLOW}⏱️  Starting: ${BOLD}$func_name${NC} ${BLUE}[$start_timestamp]${NC}"
     
     log_structured "INFO" "PERF" "Starting function: $func_name"
-    local start_time=$(date +%s)
-    local start_timestamp=$(date -d @"$start_time" '+%H:%M:%S')
+    local start_time
+    start_time=$(date +%s)
+    local start_timestamp
+    start_timestamp=$(date -d @"$start_time" '+%H:%M:%S')
     
     # Execute the function
     "$func_name" "$@"
     local exit_code=$?
     
-    local end_time=$(date +%s)
+    local end_time
+    end_time=$(date +%s)
     local duration=$((end_time - start_time))
-    local end_timestamp=$(date -d @"$end_time" '+%H:%M:%S')
+    local end_timestamp
+    end_timestamp=$(date -d @"$end_time" '+%H:%M:%S')
     
     # Format duration for human readability using date command
     local formatted_duration
@@ -2530,7 +2535,7 @@ vagrant_and_run_kubespray() {
                 
                 local choice
                 while true; do
-                    read -p "Please select an option (1-4): " choice
+                    read -r -p "Please select an option (1-4): " choice
                     case $choice in
                         1)
                             echo -e "${GREEN}✅ Proceeding with existing VMs using vagrant up...${NC}"
@@ -2610,7 +2615,7 @@ vagrant_and_run_kubespray() {
                 
                 local choice
                 while true; do
-                    read -p "Please select an option (1-2): " choice
+                    read -r -p "Please select an option (1-2): " choice
                     case $choice in
                         1)
                             echo -e "${RED}🗑️  Deleting existing VMs...${NC}"
@@ -3630,7 +3635,25 @@ EOF
     echo -e "   ${GREEN}•${NC} Username: ${CYAN}super_root${NC}"
     echo -e "   ${GREEN}•${NC} Default Password: ${CYAN}Upm@2024!${NC}\n"
 
+    # Create ClusterRoleBinding for upm-system default service account
+    log_info "Creating ClusterRoleBinding for upm-system default service account..."
+    "$KUBECTL" apply -f - <<EOF || error_exit "Failed to create ClusterRoleBinding for upm-system default service account"
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: upm-system-admin-default-account
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: default
+  namespace: upm-system
+EOF
 
+    echo -e "${GREEN}✅ ClusterRoleBinding created successfully for upm-system default service account${NC}\n"
+    log_info "ClusterRoleBinding 'upm-system-admin-default-account' created successfully"
 
     return 0
 }
