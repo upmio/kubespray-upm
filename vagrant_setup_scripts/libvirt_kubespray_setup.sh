@@ -3444,6 +3444,34 @@ install_upm_platform() {
         install_helm
     fi
 
+    # Check LVM LocalPV prerequisites
+    log_info "Checking LVM LocalPV prerequisites..."
+    
+    # Check if LVM LocalPV Helm release exists
+    if ! helm list -n openebs | grep -q "lvm-localpv"; then
+        log_error "LVM LocalPV Helm release not found. LVM LocalPV is required for UPM Platform."
+        echo -e "${RED}❌ LVM LocalPV is not installed.${NC}"
+        echo -e "${WHITE}To install LVM LocalPV, run:${NC}"
+        echo -e "   ${CYAN}./libvirt_kubespray_setup.sh --install-lvm-localpv${NC}"
+        echo -e "${WHITE}Or use the interactive menu option.${NC}\n"
+        error_exit "UPM Platform installation cancelled due to missing LVM LocalPV"
+    fi
+    log_info "✅ LVM LocalPV Helm release found"
+    
+    # Check if the required StorageClass exists
+    if ! "$KUBECTL" get storageclass "$LVM_LOCALPV_STORAGECLASS_NAME" >/dev/null 2>&1; then
+        log_error "Required StorageClass '$LVM_LOCALPV_STORAGECLASS_NAME' not found."
+        echo -e "${RED}❌ LVM LocalPV StorageClass is missing.${NC}"
+        echo -e "${WHITE}Available StorageClasses:${NC}"
+        "$KUBECTL" get storageclass || true
+        echo -e "${WHITE}\nTo fix this issue:${NC}"
+        echo -e "   ${CYAN}1. Check LVM LocalPV Helm release: helm list -n openebs${NC}"
+        echo -e "   ${CYAN}2. Verify StorageClass configuration${NC}"
+        echo -e "   ${CYAN}3. Re-run LVM LocalPV installation if needed${NC}\n"
+        error_exit "UPM Platform installation cancelled due to missing StorageClass"
+    fi
+    log_info "✅ Required StorageClass '$LVM_LOCALPV_STORAGECLASS_NAME' found"
+    
     # Configuration variables
     local upm_chart_repo="https://upmio.github.io/helm-charts"
     local upm_repo_name="upm-charts"
