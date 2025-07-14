@@ -3687,6 +3687,285 @@ EOF
 }
 
 #######################################
+# Configure Nginx for UPM Platform
+#######################################
+configure_nginx_for_upm() {
+    log_info "Starting Nginx configuration for UPM Platform..."
+    
+    # Check if kubectl is available
+    if ! command_exists "$KUBECTL"; then
+        error_exit "kubectl not found. Please ensure Kubernetes cluster is set up."
+    fi
+    
+    # Check if UPM namespace exists
+    if ! "$KUBECTL" get namespace "$UPM_NAMESPACE" >/dev/null 2>&1; then
+        error_exit "UPM namespace '$UPM_NAMESPACE' not found. Please install UPM Platform first."
+    fi
+    
+    echo -e "\n${YELLOW}🌐 Nginx Configuration for UPM Platform${NC}\n"
+    echo -e "${WHITE}This will configure:${NC}"
+    echo -e "   ${GREEN}•${NC} Change upm-platform-gateway service to NodePort (port 31404)"
+    echo -e "   ${GREEN}•${NC} Change upm-platform-ui service to NodePort (port 31405)"
+    echo -e "   ${GREEN}•${NC} Install and configure Nginx with proxy forwarding"
+    echo -e "   ${GREEN}•${NC} Set up access via port 80\n"
+    
+    if ! prompt_yes_no "Do you want to proceed with Nginx configuration?"; then
+        echo -e "${YELLOW}⏸️  Nginx configuration skipped.${NC}\n"
+        log_info "Nginx configuration skipped by user"
+        return 0
+    fi
+    
+    echo -e "${GREEN}✅ Proceeding with Nginx configuration...${NC}\n"
+    
+    # Step 1: Configure upm-platform-gateway service to NodePort
+    log_info "Configuring upm-platform-gateway service to NodePort..."
+    if "$KUBECTL" get service upm-platform-gateway -n "$UPM_NAMESPACE" >/dev/null 2>&1; then
+        # Check if service is already NodePort with correct port
+        local current_type
+        current_type=$("$KUBECTL" get service upm-platform-gateway -n "$UPM_NAMESPACE" -o jsonpath='{.spec.type}')
+        local current_nodeport
+        current_nodeport=$("$KUBECTL" get service upm-platform-gateway -n "$UPM_NAMESPACE" -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || echo "")
+        
+        if [[ "$current_type" == "NodePort" && "$current_nodeport" == "31404" ]]; then
+            log_info "✅ upm-platform-gateway service already configured as NodePort with port 31404"
+        else
+            log_info "Patching upm-platform-gateway service to NodePort with port 31404..."
+            "$KUBECTL" patch service upm-platform-gateway -n "$UPM_NAMESPACE" -p '{
+                "spec": {
+                    "type": "NodePort",
+                    "ports": [{
+                        "name": "http",
+                        "port": 8080,
+                        "targetPort": 8080,
+                        "nodePort": 31404,
+                        "protocol": "TCP"
+                    }]
+                }
+            }' || error_exit "Failed to patch upm-platform-gateway service"
+            log_info "✅ upm-platform-gateway service configured successfully"
+        fi
+    else
+        log_warn "upm-platform-gateway service not found in namespace $UPM_NAMESPACE"
+    fi
+    
+    # Step 2: Configure upm-platform-ui service to NodePort
+    log_info "Configuring upm-platform-ui service to NodePort..."
+    if "$KUBECTL" get service upm-platform-ui -n "$UPM_NAMESPACE" >/dev/null 2>&1; then
+        # Check if service is already NodePort with correct port
+        local current_type
+        current_type=$("$KUBECTL" get service upm-platform-ui -n "$UPM_NAMESPACE" -o jsonpath='{.spec.type}')
+        local current_nodeport
+        current_nodeport=$("$KUBECTL" get service upm-platform-ui -n "$UPM_NAMESPACE" -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || echo "")
+        
+        if [[ "$current_type" == "NodePort" && "$current_nodeport" == "31405" ]]; then
+            log_info "✅ upm-platform-ui service already configured as NodePort with port 31405"
+        else
+            log_info "Patching upm-platform-ui service to NodePort with port 31405..."
+            "$KUBECTL" patch service upm-platform-ui -n "$UPM_NAMESPACE" -p '{
+                "spec": {
+                    "type": "NodePort",
+                    "ports": [{
+                        "name": "http",
+                        "port": 80,
+                        "targetPort": 80,
+                        "nodePort": 31405,
+                        "protocol": "TCP"
+                    }]
+                }
+            }' || error_exit "Failed to patch upm-platform-ui service"
+            log_info "✅ upm-platform-ui service configured successfully"
+        fi
+    else
+        log_warn "upm-platform-ui service not found in namespace $UPM_NAMESPACE"
+    fi
+    
+    # Step 3: Install Nginx if not already installed
+    log_info "Checking Nginx installation..."
+    if ! command_exists nginx; then
+        log_info "Installing Nginx..."
+        safe_sudo dnf install -y nginx || error_exit "Failed to install Nginx"
+        log_info "✅ Nginx installed successfully"
+    else
+        log_info "✅ Nginx is already installed"
+    fi
+    
+    # Step 4: Get worker node IP for Nginx configuration
+    log_info "Getting worker node IP for Nginx configuration..."
+    local worker_node_ip
+    worker_node_ip=$("$KUBECTL" get nodes -l upm.platform.node=enable -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null)
+    if [[ -z "$worker_node_ip" ]]; then
+        # Fallback to any worker node
+        worker_node_ip=$("$KUBECTL" get nodes --no-headers -o custom-columns=":metadata.name" | head -1 | xargs "$KUBECTL" get node -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}')
+    fi
+    
+    if [[ -z "$worker_node_ip" ]]; then
+        error_exit "Failed to get worker node IP for Nginx configuration"
+    fi
+    
+    log_info "Using worker node IP: $worker_node_ip"
+    
+    # Step 5: Create Nginx configuration
+    log_info "Creating Nginx configuration..."
+    local nginx_conf="/etc/nginx/nginx.conf"
+    local nginx_conf_backup="/etc/nginx/nginx.conf.backup.$(date +%Y%m%d_%H%M%S)"
+    
+    # Backup existing configuration
+    if [[ -f "$nginx_conf" ]]; then
+        safe_sudo cp "$nginx_conf" "$nginx_conf_backup"
+        log_info "✅ Nginx configuration backed up to $nginx_conf_backup"
+    fi
+    
+    # Create new Nginx configuration
+    safe_sudo tee "$nginx_conf" > /dev/null <<EOF
+# For more information on configuration, see:
+#   * Official English Documentation: http://nginx.org/en/docs/
+#   * Official Russian Documentation: http://nginx.org/ru/docs/
+
+user nginx;
+worker_processes 2;
+error_log /var/log/nginx/error.log;
+pid /run/nginx.pid;
+
+# Load dynamic modules. See /usr/share/doc/nginx/README.dynamic.
+include /usr/share/nginx/modules/*.conf;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    log_format  main  '\$remote_addr - \$remote_user [\$time_local] "\$request" '
+                      '\$status \$body_bytes_sent "\$http_referer" '
+                      '"\$http_user_agent" "\$http_x_forwarded_for"';
+    include             /etc/nginx/mime.types;
+    default_type        application/octet-stream;
+
+    proxy_buffer_size 512k;
+    proxy_buffers 8 1024k;
+    proxy_busy_buffers_size 1024k;
+    keepalive_timeout 65;
+
+    upstream api {
+        server $worker_node_ip:31404;
+    }
+
+    upstream ui {
+        server $worker_node_ip:31405;
+    }
+
+    upstream license {
+        server localhost:8080;
+    }
+
+    server {
+        keepalive_requests 120;
+        listen       80;
+        listen       [::]:80;
+
+        location  /upm-ui/ {
+            proxy_pass  http://ui/upm-ui/;
+        }
+
+        location  /api/ {
+            proxy_pass  http://api/;
+        }
+
+        location  /license/ {
+            proxy_pass  http://license/upm/license/;
+        }
+
+        location  /license-ui/ {
+            root /tmp/license-ui;
+            index index.html;
+            try_files \$uri \$uri/ /index.html;
+        }
+    }
+}
+EOF
+    
+    log_info "✅ Nginx configuration created successfully"
+    
+    # Step 6: Test Nginx configuration
+    log_info "Testing Nginx configuration..."
+    if safe_sudo nginx -t; then
+        log_info "✅ Nginx configuration test passed"
+    else
+        error_exit "Nginx configuration test failed"
+    fi
+    
+    # Step 7: Enable and start Nginx service
+    log_info "Enabling and starting Nginx service..."
+    
+    # Check if Nginx is already running
+    if systemctl is-active --quiet nginx; then
+        log_info "Nginx is already running, reloading configuration..."
+        safe_sudo systemctl reload nginx || error_exit "Failed to reload Nginx"
+        log_info "✅ Nginx configuration reloaded successfully"
+    else
+        # Enable Nginx service
+        safe_sudo systemctl enable nginx || error_exit "Failed to enable Nginx service"
+        log_info "✅ Nginx service enabled"
+        
+        # Start Nginx service
+        safe_sudo systemctl start nginx || error_exit "Failed to start Nginx service"
+        log_info "✅ Nginx service started successfully"
+    fi
+    
+    # Step 8: Configure firewall if firewalld is running
+    if systemctl is-active --quiet firewalld; then
+        log_info "Configuring firewall for HTTP traffic..."
+        if safe_sudo firewall-cmd --list-services | grep -q http; then
+            log_info "✅ HTTP service already allowed in firewall"
+        else
+            safe_sudo firewall-cmd --permanent --add-service=http || log_warn "Failed to add HTTP service to firewall"
+            safe_sudo firewall-cmd --reload || log_warn "Failed to reload firewall"
+            log_info "✅ Firewall configured for HTTP traffic"
+        fi
+    else
+        log_info "Firewalld is not running, skipping firewall configuration"
+    fi
+    
+    # Step 9: Verify Nginx status
+    log_info "Verifying Nginx status..."
+    if systemctl is-active --quiet nginx; then
+        log_info "✅ Nginx is running successfully"
+    else
+        error_exit "Nginx is not running"
+    fi
+    
+    # Step 10: Display access information
+    echo -e "\n${GREEN}🎉 Nginx Configuration Completed!${NC}\n"
+    echo -e "${WHITE}📦 Configuration Summary:${NC}"
+    echo -e "   ${GREEN}•${NC} upm-platform-gateway: ${CYAN}NodePort 31404${NC}"
+    echo -e "   ${GREEN}•${NC} upm-platform-ui: ${CYAN}NodePort 31405${NC}"
+    echo -e "   ${GREEN}•${NC} Nginx proxy: ${CYAN}Port 80${NC}"
+    echo -e "   ${GREEN}•${NC} Worker node IP: ${CYAN}$worker_node_ip${NC}\n"
+    
+    echo -e "${WHITE}🌐 Access Information:${NC}"
+    local host_ip
+    host_ip=$(hostname -I | awk '{print $1}')
+    if [[ -n "$host_ip" ]]; then
+        echo -e "   ${GREEN}•${NC} UPM Platform URL: ${CYAN}http://$host_ip/upm-ui/${NC}"
+        echo -e "   ${GREEN}•${NC} API Endpoint: ${CYAN}http://$host_ip/api/${NC}"
+    else
+        echo -e "   ${GREEN}•${NC} UPM Platform URL: ${CYAN}http://<host-ip>/upm-ui/${NC}"
+        echo -e "   ${GREEN}•${NC} API Endpoint: ${CYAN}http://<host-ip>/api/${NC}"
+        echo -e "   ${GREEN}•${NC} Note: Replace <host-ip> with this server's IP address${NC}"
+    fi
+    echo -e "   ${GREEN}•${NC} Username: ${CYAN}super_root${NC}"
+    echo -e "   ${GREEN}•${NC} Default Password: ${CYAN}Upm@2024!${NC}\n"
+    
+    echo -e "${WHITE}🔍 Verification Commands:${NC}"
+    echo -e "   ${GREEN}•${NC} Check Nginx status: ${CYAN}systemctl status nginx${NC}"
+    echo -e "   ${GREEN}•${NC} Check Nginx config: ${CYAN}nginx -t${NC}"
+    echo -e "   ${GREEN}•${NC} Check services: ${CYAN}kubectl get svc -n $UPM_NAMESPACE${NC}"
+    echo -e "   ${GREEN}•${NC} Test connectivity: ${CYAN}curl -I http://localhost/upm-ui/${NC}"
+    echo -e "${GREEN}✅ Nginx configuration completed successfully${NC}\n"
+    
+    return 0
+}
+
+#######################################
 # Display cluster information
 #######################################
 display_cluster_info() {
@@ -3807,6 +4086,7 @@ INSTALLATION_OPTION (exactly one required):
   --cnpg                        Install CloudNative-PG only
   --upm-engine                  Install UPM Engine only
   --upm-platform                Install UPM Platform only
+  --nginx-config                Configure Nginx for UPM Platform (requires UPM Platform to be installed)
   --prometheus                  Install Prometheus monitoring stack only
   --all                         Install all components (k8s + lvmlocalpv + prometheus + cnpg + upm-engine + upm-platform)
 
@@ -3975,6 +4255,10 @@ main() {
             log_info "Executing: install_lvm_localpv"
             time_function install_lvm_localpv
             ;;
+        "--prometheus")
+            log_info "Executing: install_prometheus"
+            time_function install_prometheus
+            ;;
         "--cnpg")
             log_info "Executing: install_cnpg"
             time_function install_cnpg
@@ -3986,10 +4270,7 @@ main() {
         "--upm-platform")
             log_info "Executing: install_upm_platform"
             time_function install_upm_platform
-            ;;
-        "--prometheus")
-            log_info "Executing: install_prometheus"
-            time_function install_prometheus
+            time_function configure_nginx_for_upm
             ;;
         "--all")
             log_info "Executing: complete installation sequence"
@@ -3999,6 +4280,7 @@ main() {
             time_function install_cnpg
             time_function install_upm_engine
             time_function install_upm_platform
+            time_function configure_nginx_for_upm
             ;;
         *)
             log_error "Unknown installation option: $selected_option"
