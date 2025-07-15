@@ -165,6 +165,13 @@ cleanup() {
         done
     fi
     
+    # Clean up sudo keepalive process if running
+    if [[ -n "$SUDO_KEEPALIVE_PID" && "$SUDO_SESSION_ACTIVE" == "true" ]]; then
+        kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+        log_info "Stopped sudo keepalive process (PID: $SUDO_KEEPALIVE_PID)"
+        SUDO_SESSION_ACTIVE=false
+    fi
+    
     # Clean up any running background processes if needed
     # This can be extended based on specific needs
     
@@ -233,6 +240,10 @@ declare AUTO_CONFIRM=false
 
 # Global array for installation options
 declare -a INSTALLATION_OPTIONS=()
+
+# Global variables for sudo session management
+declare SUDO_KEEPALIVE_PID=""
+declare SUDO_SESSION_ACTIVE=false
 
 # Global variables for Vagrant configuration (extracted from config.rb)
 declare G_NUM_INSTANCES="5"
@@ -1488,6 +1499,126 @@ check_sudo_privileges() {
         fi
     fi
     log_info "Sudo privileges confirmed"
+}
+
+#######################################
+# Sudo Session Management Functions
+#######################################
+
+# Check and display sudo configuration for troubleshooting
+check_sudo_configuration() {
+    log_info "Checking sudo configuration..."
+    
+    # Check if user is in sudo/wheel group
+    local user_groups
+    user_groups=$(groups "$USER" 2>/dev/null || echo "")
+    if [[ $user_groups =~ (sudo|wheel) ]]; then
+        log_info "User $USER is in sudo/wheel group: OK"
+    else
+        log_warn "User $USER may not be in sudo/wheel group. Groups: $user_groups"
+    fi
+    
+    # Check sudo timeout setting
+    local timeout_setting
+    timeout_setting=$(sudo -l 2>/dev/null | grep -i timestamp_timeout || echo "Not configured")
+    log_info "Sudo timestamp timeout setting: $timeout_setting"
+    
+    # Check if passwordless sudo is configured
+    if sudo -n true 2>/dev/null; then
+        log_info "Passwordless sudo is configured for this user"
+    else
+        log_info "Password-based sudo authentication required"
+    fi
+}
+
+# Initialize sudo session with extended timeout and background keepalive
+# This function should be called at the beginning of the script
+init_sudo_session() {
+    log_info "Initializing sudo session management..."
+    
+    # Check if we're already root
+    if [[ $EUID -eq 0 ]]; then
+        log_info "Running as root, sudo session management not needed"
+        return 0
+    fi
+    
+    # Check sudo configuration for troubleshooting
+    check_sudo_configuration
+    
+    # First ensure we have sudo privileges with improved timeout handling
+    log_info "Establishing sudo privileges..."
+    if ! sudo -n true 2>/dev/null; then
+        echo -e "${YELLOW}⚠️  Sudo authentication required for this script${NC}"
+        echo -e "${CYAN}💡 You will be prompted for your password (60-second timeout)${NC}"
+        echo -e "${CYAN}💡 The session will be maintained automatically during script execution${NC}"
+        echo
+        
+        # Use a more robust approach with timeout and better error messages
+        if ! timeout 60 sudo -v; then
+            echo
+            log_error "Sudo authentication failed or timed out"
+            echo -e "${RED}❌ Troubleshooting steps:${NC}"
+            echo -e "${WHITE}   1. Verify you have sudo privileges: ${CYAN}sudo -l${NC}"
+            echo -e "${WHITE}   2. Check if you're in the correct group: ${CYAN}groups \$USER${NC}"
+            echo -e "${WHITE}   3. Test sudo access: ${CYAN}sudo -v${NC}"
+            echo -e "${WHITE}   4. Contact your system administrator if needed${NC}"
+            error_exit "Unable to establish sudo session"
+        fi
+        
+        echo -e "${GREEN}✅ Sudo authentication successful${NC}"
+    else
+        log_info "Passwordless sudo detected - no authentication required"
+    fi
+    
+    # Start background process to keep sudo session alive
+    start_sudo_keepalive
+    
+    SUDO_SESSION_ACTIVE=true
+    log_info "Sudo session management initialized successfully"
+    log_info "Sudo session will be maintained with automatic refresh every 4 minutes"
+}
+
+# Start background process to refresh sudo timestamp every 4 minutes
+start_sudo_keepalive() {
+    log_info "Starting sudo keepalive background process..."
+    
+    # Kill any existing keepalive process
+    if [[ -n "$SUDO_KEEPALIVE_PID" ]]; then
+        kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+    fi
+    
+    # Start new keepalive process in background
+    (
+        while true; do
+            sleep 240  # Sleep for 4 minutes (240 seconds)
+            if ! sudo -n true 2>/dev/null; then
+                # If sudo fails, try to refresh it with timeout
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] Sudo session expired, attempting refresh..." >> "$LOG_FILE"
+                if timeout 30 sudo -v 2>/dev/null; then
+                    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] Sudo session refreshed successfully" >> "$LOG_FILE"
+                else
+                    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [ERROR] Failed to refresh sudo session - manual intervention required" >> "$LOG_FILE"
+                    break
+                fi
+            else
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] [DEBUG] Sudo session still active" >> "$LOG_FILE"
+            fi
+        done
+    ) &
+    
+    SUDO_KEEPALIVE_PID=$!
+    log_info "Sudo keepalive process started (PID: $SUDO_KEEPALIVE_PID) - refreshing every 4 minutes"
+}
+
+# Stop sudo keepalive process
+stop_sudo_keepalive() {
+    if [[ -n "$SUDO_KEEPALIVE_PID" && "$SUDO_SESSION_ACTIVE" == "true" ]]; then
+        log_info "Stopping sudo keepalive process..."
+        kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+        SUDO_KEEPALIVE_PID=""
+        SUDO_SESSION_ACTIVE=false
+        log_info "Sudo keepalive process stopped"
+    fi
 }
 
 #######################################
@@ -4097,6 +4228,19 @@ DESCRIPTION:
   for RHEL-based distributions. It can also be used to install OpenEBS LVM LocalPV
   or CloudNative-PG independently on an existing Kubernetes cluster.
 
+  SUDO SESSION MANAGEMENT:
+  The script automatically manages sudo sessions for long-running operations.
+  You will be prompted for your sudo password once at the beginning, and the
+  session will be maintained throughout the entire execution with automatic
+  background refresh every 4 minutes. If you encounter sudo timeout errors:
+  
+  1. Ensure you have sudo privileges: sudo -v
+  2. Check sudo timeout settings: sudo -l | grep timestamp_timeout
+  3. For very long operations, consider running: sudo visudo
+     and adding: Defaults timestamp_timeout=60
+  
+  The script uses a 60-second timeout for password input to prevent hanging.
+
 REQUIREMENTS for OpenEBS LVM LocalPV installation:
   - Existing Kubernetes cluster with kubectl access
   - Helm 3.x (will be installed if not present)
@@ -4137,7 +4281,6 @@ setup_environment() {
     fi
     
     # System validation
-    check_sudo_privileges
     check_system_requirements
     check_ntp_synchronization
     # Pre-installation confirmation
@@ -4244,6 +4387,9 @@ main() {
     fi
     
     local selected_option="${INSTALLATION_OPTIONS[0]}"
+    
+    # Initialize sudo session management for long-running operations
+    init_sudo_session
     
     # Execute the selected installation function with performance monitoring
     case "$selected_option" in
