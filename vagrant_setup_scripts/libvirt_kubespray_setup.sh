@@ -357,7 +357,7 @@ time_function() {
     local start_time
     start_time=$(date +%s)
     local start_timestamp
-    start_timestamp=$(date -d @"$start_time" '+%H:%M:%S')
+    start_timestamp=$(format_timestamp_from_epoch "$start_time" '+%H:%M:%S')
     
     # Execute the function
     "$func_name" "$@"
@@ -367,20 +367,11 @@ time_function() {
     end_time=$(date +%s)
     local duration=$((end_time - start_time))
     local end_timestamp
-    end_timestamp=$(date -d @"$end_time" '+%H:%M:%S')
+    end_timestamp=$(format_timestamp_from_epoch "$end_time" '+%H:%M:%S')
     
-    # Format duration for human readability using date command
+    # Format duration for human readability using cross-platform function
     local formatted_duration
-    if (( duration >= 3600 )); then
-        # Hours and minutes for durations >= 1 hour
-        formatted_duration=$(date -u -d @"$duration" +"%-Hh %-Mm" 2>/dev/null || echo "${duration}s")
-    elif (( duration >= 60 )); then
-        # Minutes and seconds for durations >= 1 minute
-        formatted_duration=$(date -u -d @"$duration" +"%-Mm %-Ss" 2>/dev/null || echo "${duration}s")
-    else
-        # Seconds only for durations < 1 minute
-        formatted_duration="${duration}s"
-    fi
+    formatted_duration=$(format_duration_human "$duration")
     
     # Simple completion display with timestamps
     if [[ $exit_code -eq 0 ]]; then
@@ -414,6 +405,92 @@ error_exit() {
 }
 
 trap "handle_error \$LINENO \"Unexpected error occurred\"" ERR
+
+#######################################
+# Cross-platform Compatibility Functions
+#######################################
+
+# Detect operating system
+# Usage: detect_os
+# Returns: "macos" or "linux"
+detect_os() {
+    case "$(uname -s)" in
+        Darwin*) echo "macos" ;;
+        Linux*)  echo "linux" ;;
+        *)       echo "unknown" ;;
+    esac
+}
+
+# Cross-platform timestamp formatting from epoch
+# Usage: format_timestamp_from_epoch "epoch_seconds" "format"
+# Returns: formatted timestamp string
+format_timestamp_from_epoch() {
+    local epoch="$1"
+    local format="$2"
+    local os_type
+    os_type=$(detect_os)
+    
+    case "$os_type" in
+        "macos")
+            # macOS date command uses -r for epoch time
+            date -r "$epoch" "$format" 2>/dev/null || echo "N/A"
+            ;;
+        "linux")
+            # Linux date command uses -d @epoch
+            date -d @"$epoch" "$format" 2>/dev/null || echo "N/A"
+            ;;
+        *)
+            # Fallback for unknown systems
+            echo "N/A"
+            ;;
+    esac
+}
+
+# Cross-platform duration formatting
+# Usage: format_duration_human "duration_seconds"
+# Returns: human-readable duration string
+format_duration_human() {
+    local duration="$1"
+    local os_type
+    os_type=$(detect_os)
+    
+    if (( duration >= 3600 )); then
+        # Hours and minutes for durations >= 1 hour
+        case "$os_type" in
+            "macos")
+                # macOS doesn't support %-H format, use alternative calculation
+                local hours=$((duration / 3600))
+                local minutes=$(((duration % 3600) / 60))
+                echo "${hours}h ${minutes}m"
+                ;;
+            "linux")
+                date -u -d @"$duration" +"%-Hh %-Mm" 2>/dev/null || echo "${duration}s"
+                ;;
+            *)
+                echo "${duration}s"
+                ;;
+        esac
+    elif (( duration >= 60 )); then
+        # Minutes and seconds for durations >= 1 minute
+        case "$os_type" in
+            "macos")
+                # macOS doesn't support %-M format, use alternative calculation
+                local minutes=$((duration / 60))
+                local seconds=$((duration % 60))
+                echo "${minutes}m ${seconds}s"
+                ;;
+            "linux")
+                date -u -d @"$duration" +"%-Mm %-Ss" 2>/dev/null || echo "${duration}s"
+                ;;
+            *)
+                echo "${duration}s"
+                ;;
+        esac
+    else
+        # Seconds only for durations < 1 minute
+        echo "${duration}s"
+    fi
+}
 
 #######################################
 # Utility Functions
@@ -1146,6 +1223,22 @@ validate_required_variables() {
 # Install Helm Function
 #######################################
 install_helm() {
+    # Check if running on macOS
+    if [[ "$(detect_os)" == "macos" ]]; then
+        log_error "Helm installation on macOS detected"
+        echo -e "${RED}❌ This script is designed for Linux environments only.${NC}"
+        echo -e "${WHITE}To install Helm on macOS, please use one of the following methods:${NC}\n"
+        echo -e "${YELLOW}Method 1 - Using Homebrew (Recommended):${NC}"
+        echo -e "   ${CYAN}brew install helm${NC}\n"
+        echo -e "${YELLOW}Method 2 - Using the official installer:${NC}"
+        echo -e "   ${CYAN}curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash${NC}\n"
+        echo -e "${YELLOW}Method 3 - Download binary directly:${NC}"
+        echo -e "   ${CYAN}# Visit https://github.com/helm/helm/releases${NC}"
+        echo -e "   ${CYAN}# Download the macOS binary and add to PATH${NC}\n"
+        echo -e "${WHITE}After installing Helm, you can use it independently for Kubernetes operations.${NC}"
+        error_exit "macOS is not supported by this automated setup script"
+    fi
+
     # Check if helm is installed
     if ! command -v helm >/dev/null 2>&1; then
         log_info "Installing Helm..."
