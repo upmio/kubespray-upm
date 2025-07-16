@@ -7,19 +7,6 @@
 #   virtualization on RHEL-based distributions. Provides comprehensive infrastructure
 #   deployment with modular component installation capabilities.
 #
-# Usage Examples:
-#   Full deployment:     ./libvirt_kubespray_setup.sh
-#   Environment only:    ./libvirt_kubespray_setup.sh --k8s
-#   Auto-confirm mode:   ./libvirt_kubespray_setup.sh -y
-#   Bridge network:      ./libvirt_kubespray_setup.sh --k8s -n bridge
-#   Component install:   ./libvirt_kubespray_setup.sh [--lvmlocalpv|--prometheus|--cnpg|--upm-engine|--upm-platform|--all]
-#
-# VM Management Scenarios:
-#   When existing VMs are detected, the script provides intelligent options:
-#   - If VM count matches configuration: Keep & update, Keep & re-provision, Delete & recreate, or Cancel
-#   - If VM count mismatches: Delete & recreate, or Cancel for manual intervention
-#   - Auto-confirm mode (-y) automatically selects 'Keep & update' for matching VM counts
-#
 # System Requirements:
 #   - Operating System: RHEL/Rocky/AlmaLinux 8/9 (x86_64 architecture)
 #   - Hardware: CPU 12+ cores, Memory 32GB+, Storage 200GB+ available
@@ -54,41 +41,10 @@
 #   KUBECTL            - $HOME/bin/kubectl (kubectl binary location)
 #   LOG_FILE           - ./libvirt_kubespray_setup.log (installation log)
 #
-# Command Line Options:
-#   -h, --help               Display comprehensive help information
-#   -y, --auto-confirm       Enable auto-confirmation mode (skip interactive prompts)
-#   -n <type>                Network type selection: nat|bridge (default: nat)
-#                            Note: Only effective with --k8s or full setup mode
-#   --k8s                    Execute environment setup process only (no components)
-#   --lvmlocalpv             Install OpenEBS LVM LocalPV storage solution only
-#   --cnpg                   Install CloudNative-PG PostgreSQL operator only
-#   --upm-engine             Install UPM Engine management component only
-#   --upm-platform           Install UPM Platform web interface only
-#   --prometheus             Install Prometheus monitoring stack only
-#   --all                    Install all components (k8s + lvmlocalpv + prometheus + cnpg + upm-engine + upm-platform)
-#
-# containerd Registry Configuration:
-#   Configuration file: containerd-config.yml (same directory as script)
-#   Purpose: Custom container registry configurations for air-gapped environments
-#   Behavior: If file exists, registry configurations are automatically merged
-#            into kubespray deployment for seamless container image pulling
-#
 # Network Configuration:
 #   NAT Mode:    Uses NAT networking with libvirt default network
 #   Bridge Mode: Requires bridge interface configuration for direct network access
 #   Bridge Setup: Interactive configuration of bridge interface and network settings
-#
-# VM Management Features:
-#   ✓ Automatic detection and analysis of existing virtual machines
-#   ✓ VM count validation against expected configuration
-#   ✓ Flexible handling options for existing VMs:
-#     - Keep existing VMs and run 'vagrant up' (recommended for updates)
-#     - Keep existing VMs and run 'vagrant provision' (re-provision only)
-#     - Delete all VMs and create fresh ones
-#     - Cancel deployment for manual intervention
-#   ✓ Intelligent decision making based on VM count matching
-#   ✓ Safe VM cleanup with proper resource management
-#   ✓ Interactive prompts with clear option descriptions
 #
 # Security Features:
 #   ✓ SELinux compatibility and configuration management
@@ -419,6 +375,23 @@ detect_os() {
         Linux*)  echo "linux" ;;
         *)       echo "unknown" ;;
     esac
+}
+
+# Check if current system is Linux
+# Usage: check_linux_system
+# Returns: 0 if Linux, exits with error if not Linux
+check_linux_system() {
+    local os_type
+    os_type=$(detect_os)
+    
+    if [[ "$os_type" != "linux" ]]; then
+        log_error "This operation is only supported on Linux systems"
+        log_error "Current operating system: $(uname -s)"
+        log_error "Supported systems: Linux (RHEL, CentOS, Rocky, AlmaLinux)"
+        error_exit "Unsupported operating system for this operation"
+    fi
+    
+    log_info "Operating system check passed: Linux system detected"
 }
 
 # Cross-platform timestamp formatting from epoch
@@ -4186,6 +4159,8 @@ EOF
     echo -e "   ${GREEN}•${NC} Test connectivity: ${CYAN}curl -I http://localhost/upm-ui/${NC}"
     echo -e "${GREEN}✅ Nginx configuration completed successfully${NC}\n"
     
+    # Step 11: Config
+
     return 0
 }
 
@@ -4310,9 +4285,11 @@ INSTALLATION_OPTION (exactly one required):
   --cnpg                        Install CloudNative-PG only
   --upm-engine                  Install UPM Engine only
   --upm-platform                Install UPM Platform only
-  --nginx-config                Configure Nginx for UPM Platform (requires UPM Platform to be installed)
+  --config_nginx                Configure Nginx for UPM Platform (requires UPM Platform to be installed)
+                                ⚠️  Linux systems only
   --prometheus                  Install Prometheus monitoring stack only
   --all                         Install all components (k8s + lvmlocalpv + prometheus + cnpg + upm-engine + upm-platform)
+                                ⚠️  Linux systems only
 
 IMPORTANT: Exactly one installation option must be specified.
 
@@ -4510,9 +4487,16 @@ main() {
         "--upm-platform")
             log_info "Executing: install_upm_platform"
             time_function install_upm_platform
+            ;;
+        "--config_nginx")
+            log_info "Checking system compatibility for Nginx configuration..."
+            check_linux_system
+            log_info "Executing: configure_nginx_for_upm"
             time_function configure_nginx_for_upm
             ;;
         "--all")
+            log_info "Checking system compatibility for complete installation..."
+            check_linux_system
             log_info "Executing: complete installation sequence"
             time_function setup_environment
             time_function install_lvm_localpv
