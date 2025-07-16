@@ -4361,6 +4361,9 @@ EOF
 #######################################
 setup_environment() {
     log_info "Starting environment setup process..."
+
+    # Initialize sudo session management for long-running operations
+    init_sudo_session
     
     # Network and proxy validation
     validate_network_and_proxy
@@ -4481,8 +4484,6 @@ main() {
     
     local selected_option="${INSTALLATION_OPTIONS[0]}"
     
-    # Initialize sudo session management for long-running operations
-    init_sudo_session
     
     # Execute the selected installation function with performance monitoring
     case "$selected_option" in
