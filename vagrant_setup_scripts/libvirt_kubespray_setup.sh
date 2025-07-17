@@ -3852,9 +3852,9 @@ EOF
     # Display UPM Platform login information
     echo -e "${WHITE}🌐 UPM Platform Access Information:${NC}"
     if [[ -n "$worker_node_ip" ]]; then
-        echo -e "   ${GREEN}•${NC} Login URL: ${CYAN}http://$worker_node_ip:32010${NC}"
+        echo -e "   ${GREEN}•${NC} Login URL: ${CYAN}http://$worker_node_ip:32010/upm-ui/#/login${NC}"
     else
-        echo -e "   ${GREEN}•${NC} Login URL: ${CYAN}http://<node-ip>:32010${NC}"
+        echo -e "   ${GREEN}•${NC} Login URL: ${CYAN}http://<node-ip>:32010/upm-ui/#/login${NC}"
         echo -e "   ${GREEN}•${NC} Note: Replace <node-ip> with any worker node's IP address${NC}"
     fi
     echo -e "   ${GREEN}•${NC} Username: ${CYAN}super_root${NC}"
