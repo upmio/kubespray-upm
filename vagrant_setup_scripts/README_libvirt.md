@@ -528,7 +528,7 @@ export NO_PROXY="localhost,127.0.0.1,10.0.0.0/8,192.168.0.0/16"
 
 ## 容器镜像仓库配置
 
-### 概述
+### 镜像仓库配置说明
 
 在企业环境中，通常需要配置容器镜像仓库转发以提高镜像拉取速度或使用私有镜像仓库。本脚本支持通过 containerd 配置文件自定义镜像仓库设置。
 
@@ -536,7 +536,7 @@ export NO_PROXY="localhost,127.0.0.1,10.0.0.0/8,192.168.0.0/16"
 
 脚本提供了 `containerd-example.yml` 样例文件，展示了如何配置 containerd 镜像仓库转发。该文件位于：
 
-```
+```bash
 vagrant_setup_scripts/containerd-example.yml
 ```
 
@@ -713,9 +713,6 @@ kubectl top nodes  # 查看资源使用情况
 ### 基础组件管理命令
 
 ```bash
-# 查看所有组件状态
-kubectl get componentstatuses
-
 # 查看系统 Pod 状态
 kubectl get pods -n kube-system
 kubectl get pods -n kube-system -o wide
@@ -792,10 +789,7 @@ kubectl get pods -n monitoring -l app.kubernetes.io/name=alertmanager
 
 ```bash
 # 查看 UPM Engine
-kubectl get pods -n upm-system -l app=upm-engine
-
-# 查看 UPM Platform
-kubectl get pods -n upm-system -l app=upm-platform
+kubectl get pods -n upm-system
 
 # 查看 UPM 服务
 kubectl get services -n upm-system
@@ -811,9 +805,6 @@ kubectl get configmaps -n upm-system
 ```bash
 # 进入项目目录
 cd $KUBESPRAY_DIR
-
-# 激活 Python 虚拟环境
-source venv/bin/activate
 
 # SSH 连接到主节点（控制平面）
 vagrant ssh k8s-1
@@ -931,51 +922,6 @@ sudo subscription-manager repos --enable=codeready-builder-for-rhel-9-x86_64-rpm
 
 # 清理缓存
 sudo dnf clean all && sudo dnf makecache
-```
-
-#### 6. 桥接网络交互输入问题
-
-```bash
-# 检查当前网络接口IP
-ip addr show ens33
-
-# IP地址格式要求: 192.168.1.100 (不要包含/24)
-# 检查IP冲突
-nmap -sn 192.168.1.0/24
-```
-
-**自动化解决方案**:
-
-```bash
-# 使用NAT模式避免交互
-bash ./libvirt_kubespray_setup.sh --k8s -n nat -y
-
-# 或预配置环境变量
-export BRIDGE_INTERFACE="enp0s3"
-export BRIDGE_IP="192.168.1.100"
-export BRIDGE_GATEWAY="192.168.1.1"
-bash ./libvirt_kubespray_setup.sh --k8s -n bridge -y
-```
-
-#### 7. 组件安装问题
-
-```bash
-# LVM LocalPV 问题
-sudo dnf install lvm2 -y
-helm repo add openebs https://openebs.github.io/lvm-localpv
-helm install lvm-localpv openebs/lvm-localpv -n openebs --create-namespace
-
-# CloudNativePG 问题
-kubectl get pods -n cnpg-system
-kubectl apply -f https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.24/releases/cnpg-1.24.1.yaml
-
-# Prometheus 问题
-helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-helm install prometheus prometheus-community/kube-prometheus-stack -n monitoring --create-namespace
-
-# UPM 组件问题
-kubectl logs -n upm-system -l app=upm-engine
-kubectl logs -n upm-system -l app=upm-platform
 ```
 
 ### 调试和日志
