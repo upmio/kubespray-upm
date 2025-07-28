@@ -18,11 +18,12 @@ CONFIG = File.join(File.dirname(__FILE__), ENV['KUBESPRAY_VAGRANT_CONFIG'] || 'v
 SUPPORTED_OS = {
   "ubuntu2204"          => {box: "generic/ubuntu2204",         user: "vagrant"},
   "ubuntu2404"          => {box: "bento/ubuntu-24.04",         user: "vagrant"},
-  "rockylinux8"         => {box: "bento/rockylinux-8",         user: "vagrant"},
-  "rockylinux9"         => {box: "bento/rockylinux-9",         user: "vagrant"},
+  "rockylinux8"         => {box: "bento/rockylinux-8.10",      user: "vagrant"},
+  "rockylinux9"         => {box: "bento/rockylinux-9.5",       user: "vagrant"},
   "opensuse"            => {box: "opensuse/Leap-15.4.x86_64",  user: "vagrant"},
   "opensuse-tumbleweed" => {box: "opensuse/Tumbleweed.x86_64", user: "vagrant"},
-  "oraclelinux8"        => {box: "generic/oracle8",            user: "vagrant"},
+  "oraclelinux8"        => {box: "bento/oraclelinux-8.10",     user: "vagrant"},
+  "oraclelinux9"        => {box: "bento/oraclelinux-9.5",      user: "vagrant"},
   "rhel8"               => {box: "generic/rhel8",              user: "vagrant"},
 }.freeze
 
