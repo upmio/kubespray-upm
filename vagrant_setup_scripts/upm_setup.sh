@@ -76,7 +76,7 @@ readonly SCRIPT_LICENSE="Apache License 2.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 readonly SCRIPT_DIR
 readonly KUBE_DIR="${HOME}/.kube"
-readonly VAGRANT_CONF_FILE="${SCRIPT_DIR}/../Vagrantfile"
+readonly VAGRANT_CONF_FILE="${SCRIPT_DIR}/../vagrant/config.rb"
 export KUBECONFIG="${KUBE_DIR}/config"
 
 readonly LVM_LOCALPV_NAMESPACE="openebs"
