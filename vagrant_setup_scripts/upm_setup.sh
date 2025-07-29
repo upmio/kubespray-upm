@@ -437,19 +437,19 @@ validate_required_variables() {
 
     # Display cluster information
     log_info "Kubernetes cluster information:"
-    echo "${GREEN}=== 集群概览 ===${NC}"
-    echo "集群地址: $(kubectl cluster-info | grep 'Kubernetes control plane' | awk '{print $NF}' 2>/dev/null || echo 'N/A')"
-    echo "集群版本: $(kubectl version --short 2>/dev/null | grep 'Server Version' | awk '{print $3}' || echo 'N/A')"
+    echo -e "${GREEN}=== Cluster Overview ===${NC}"
+    echo -e "   ${GREEN}•${NC} Cluster Address: ${CYAN}$(kubectl cluster-info | grep 'Kubernetes control plane' | awk '{print $NF}' 2>/dev/null || echo 'N/A')${NC}"
+    echo -e "   ${GREEN}•${NC} Cluster Version: ${CYAN}$(kubectl version --short 2>/dev/null | grep 'Server Version' | awk '{print $3}' || echo 'N/A')${NC}"
     echo
     
-    echo "${GREEN}=== 节点状态 ===${NC}"
+    echo -e "${GREEN}=== Node Status ===${NC}"
     kubectl get nodes --no-headers 2>/dev/null | while read -r node status role age version; do
-        echo "节点: $node | 状态: $status | 版本: $version"
-    done || echo "无法获取节点信息"
+        echo -e "   ${GREEN}•${NC} Node: ${WHITE}$node${NC} | Status: ${CYAN}$status${NC} | Version: ${CYAN}$version${NC}"
+    done || echo -e "   ${RED}•${NC} Unable to retrieve node information"
     echo
     
-    echo "${GREEN}=== 命名空间 ===${NC}"
-    echo "总计: $(kubectl get namespaces --no-headers 2>/dev/null | wc -l | tr -d ' ') 个命名空间"
+    echo -e "${GREEN}=== Namespaces ===${NC}"
+    echo -e "   ${GREEN}•${NC} Total: ${WHITE}$(kubectl get namespaces --no-headers 2>/dev/null | wc -l | tr -d ' ')${NC} namespaces"
     echo
 
     log_info "Variable validation passed"
