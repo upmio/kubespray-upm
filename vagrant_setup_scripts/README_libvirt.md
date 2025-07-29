@@ -281,7 +281,7 @@ sudo virsh undefine <vm_name> --remove-all-storage
 - **网络配置**: 支持 NAT 和桥接网络模式
 - **基础组件**: 安装 Calico CNI、基础存储类等
 
-#### 系统要求
+#### 基础系统需求
 
 - **硬件要求**: 12+ CPU 核心，32+ GB 内存，200+ GB 磁盘空间
 - **操作系统**: RHEL/Rocky/AlmaLinux 8.x/9.x，CentOS Stream 9.x
@@ -308,7 +308,6 @@ sudo virsh undefine <vm_name> --remove-all-storage
 - **CNI 插件**: Calico
 - **容器运行时**: containerd
 - **Kubernetes 版本**: 由 Kubespray 项目决定（通常是稳定版本）
-
 
 ## 网络配置选项
 
@@ -807,4 +806,5 @@ virsh net-list --all
 ### 扩展组件文档
 
 如需了解更多扩展组件（存储、数据库、监控等），请参考：
+
 - [UPM Setup 脚本文档](https://github.com/upmio/kubespray-upm/blob/master/vagrant_setup_scripts/README.md)
