@@ -418,7 +418,7 @@ validate_cluster_connectivity() {
     log_info "Kubernetes cluster information:"
     echo -e "${GREEN}=== Cluster Overview ===${NC}"
     echo -e "   ${GREEN}•${NC} Cluster Address: ${CYAN}$(kubectl cluster-info | grep 'Kubernetes control plane' | awk '{print $NF}' 2>/dev/null || echo 'N/A')${NC}"
-    echo -e "   ${GREEN}•${NC} Cluster Version: ${CYAN}$(kubectl version --short 2>/dev/null | grep 'Server Version' | awk '{print $3}' || echo 'N/A')${NC}"
+    echo -e "   ${GREEN}•${NC} Cluster Version: ${CYAN}$(kubectl version -o json 2>/dev/null | jq -r '.serverVersion.gitVersion' 2>/dev/null || echo 'N/A')${NC}"
     echo
     
     echo -e "${GREEN}=== Node Status ===${NC}"
