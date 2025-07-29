@@ -407,31 +407,6 @@ prompt_yes_no() {
     done
 }
 
-# Unified IP address validation function
-# Usage: validate_ip_address "ip_address"
-# Returns: 0 if valid, 1 if invalid
-validate_ip_address() {
-    local ip="$1"
-    local ip_regex='^([0-9]{1,3}\.){3}[0-9]{1,3}$'
-    
-    [[ $ip =~ $ip_regex ]] || return 1
-    
-    # Check each octet with proper IFS handling
-    local IFS='.'
-    local -a octets
-    read -ra octets <<<"$ip"
-    
-    local octet
-    for octet in "${octets[@]}"; do
-        # Validate octet range (0-255) and ensure no leading zeros (except for "0")
-        if [[ $octet -lt 0 || $octet -gt 255 ]] || [[ $octet =~ ^0[0-9] ]]; then
-            return 1
-        fi
-    done
-    
-    return 0
-}
-
 #######################################
 # Variable Validation Functions
 #######################################
@@ -462,20 +437,19 @@ validate_required_variables() {
 
     # Display cluster information
     log_info "Kubernetes cluster information:"
-    echo "${GREEN}=== Cluster Info ===${NC}"
-    kubectl cluster-info 2>/dev/null || true
+    echo "${GREEN}=== 集群概览 ===${NC}"
+    echo "集群地址: $(kubectl cluster-info | grep 'Kubernetes control plane' | awk '{print $NF}' 2>/dev/null || echo 'N/A')"
+    echo "集群版本: $(kubectl version --short 2>/dev/null | grep 'Server Version' | awk '{print $3}' || echo 'N/A')"
     echo
     
-    echo "${GREEN}=== Cluster Version ===${NC}"
-    kubectl version --short 2>/dev/null || kubectl version --client 2>/dev/null || true
+    echo "${GREEN}=== 节点状态 ===${NC}"
+    kubectl get nodes --no-headers 2>/dev/null | while read -r node status role age version; do
+        echo "节点: $node | 状态: $status | 版本: $version"
+    done || echo "无法获取节点信息"
     echo
     
-    echo "${GREEN}=== Node Status ===${NC}"
-    kubectl get nodes -o wide 2>/dev/null || true
-    echo
-    
-    echo "${GREEN}=== Namespace List ===${NC}"
-    kubectl get namespaces 2>/dev/null || true
+    echo "${GREEN}=== 命名空间 ===${NC}"
+    echo "总计: $(kubectl get namespaces --no-headers 2>/dev/null | wc -l | tr -d ' ') 个命名空间"
     echo
 
     log_info "Variable validation passed"
@@ -620,7 +594,7 @@ install_lvm_localpv() {
     local ctl_end_index=$((G_KUBE_MASTER_INSTANCES + G_UPM_CTL_INSTANCES))
 
     local nodes
-    nodes=$("$KUBECTL" get nodes --no-headers -o custom-columns=":metadata.name")
+    nodes=$(kubectl get nodes --no-headers -o custom-columns=":metadata.name")
 
     while IFS= read -r node; do
         # Extract node number from node name (assuming format: prefix-number)
@@ -628,7 +602,7 @@ install_lvm_localpv() {
             local node_num="${BASH_REMATCH[1]}"
             if [[ "$node_num" -ge "$ctl_start_index" ]] && [[ "$node_num" -le "$ctl_end_index" ]]; then
                 log_info "Labeling control plane node: $node (node number: $node_num)"
-                "$KUBECTL" label node "$node" "openebs.io/control-plane=enable" --overwrite || {
+                kubectl label node "$node" "openebs.io/control-plane=enable" --overwrite || {
                     error_exit "Failed to label OpenEBS LVM LocalPV control plane node: $node"
                 }
             fi
@@ -646,7 +620,7 @@ install_lvm_localpv() {
             local node_num="${BASH_REMATCH[1]}"
             if [[ "$node_num" -ge "$worker_start_index" ]] && [[ "$node_num" -le "$worker_end_index" ]]; then
                 log_info "Labeling worker node: $node"
-                "$KUBECTL" label node "$node" "openebs.io/node=enable" --overwrite || {
+                kubectl label node "$node" "openebs.io/node=enable" --overwrite || {
                     error_exit "Failed to label worker node: $node"
                 }
             fi
@@ -692,14 +666,14 @@ EOF
 
     # Wait for pods to be ready
     log_info "Waiting for OpenEBS pods to be ready..."
-    "$KUBECTL" wait --for=condition=ready pod -l release="$lvm_localpv_release_name" -n "$LVM_LOCALPV_NAMESPACE" --timeout=900s || {
+    kubectl wait --for=condition=ready pod -l release="$lvm_localpv_release_name" -n "$LVM_LOCALPV_NAMESPACE" --timeout=900s || {
         error_exit "OpenEBS pods failed to become ready"
     }
     log_info "OpenEBS LVM LocalPV installed successfully"
 
     # Create StorageClass
     log_info "Creating OpenEBS LVM LocalPV StorageClass..."
-    if "$KUBECTL" apply -f - <<EOF
+    if kubectl apply -f - <<EOF
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
@@ -807,7 +781,7 @@ install_prometheus() {
     local ctl_end_index=$((G_KUBE_MASTER_INSTANCES + G_UPM_CTL_INSTANCES))
 
     local nodes
-    nodes=$("$KUBECTL" get nodes --no-headers -o custom-columns=":metadata.name")
+    nodes=$(kubectl get nodes --no-headers -o custom-columns=":metadata.name")
 
     while IFS= read -r node; do
         # Extract node number from node name (assuming format: prefix-number)
@@ -815,7 +789,7 @@ install_prometheus() {
             local node_num="${BASH_REMATCH[1]}"
             if [[ "$node_num" -ge "$ctl_start_index" ]] && [[ "$node_num" -le "$ctl_end_index" ]]; then
                 log_info "Labeling Prometheus control plane node: $node"
-                "$KUBECTL" label node "$node" "prometheus.node=true" --overwrite || {
+                kubectl label node "$node" "prometheus.node=true" --overwrite || {
                     error_exit "Failed to label Prometheus control plane node: $node"
                 }
             fi
@@ -919,7 +893,7 @@ EOF
 
     # Wait for Prometheus to be ready
     log_info "Waiting for Prometheus to be ready..."
-    "$KUBECTL" wait --for=condition=ready pod -l "app.kubernetes.io/name=prometheus" -n "$PROMETHEUS_NAMESPACE" --timeout=900s || {
+    kubectl wait --for=condition=ready pod -l "app.kubernetes.io/name=prometheus" -n "$PROMETHEUS_NAMESPACE" --timeout=900s || {
         error_exit "Prometheus failed to become ready"
     }
 
@@ -940,8 +914,8 @@ EOF
     # Get service information for access
     local prometheus_svc
     local grafana_svc
-    prometheus_svc=$("$KUBECTL" get svc -n "$PROMETHEUS_NAMESPACE" -l "app.kubernetes.io/name=prometheus" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-    grafana_svc=$("$KUBECTL" get svc -n "$PROMETHEUS_NAMESPACE" -l "app.kubernetes.io/name=grafana" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+    prometheus_svc=$(kubectl get svc -n "$PROMETHEUS_NAMESPACE" -l "app.kubernetes.io/name=prometheus" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+    grafana_svc=$(kubectl get svc -n "$PROMETHEUS_NAMESPACE" -l "app.kubernetes.io/name=grafana" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
     
     # Display Prometheus access information
     echo -e "${WHITE}🌐 Prometheus Access Information:${NC}"
@@ -1019,7 +993,7 @@ install_cnpg() {
     local ctl_end_index=$((G_KUBE_MASTER_INSTANCES + G_UPM_CTL_INSTANCES))
 
     local nodes
-    nodes=$("$KUBECTL" get nodes --no-headers -o custom-columns=":metadata.name")
+    nodes=$(kubectl get nodes --no-headers -o custom-columns=":metadata.name")
 
     while IFS= read -r node; do
         # Extract node number from node name (assuming format: prefix-number)
@@ -1027,7 +1001,7 @@ install_cnpg() {
             local node_num="${BASH_REMATCH[1]}"
             if [[ "$node_num" -ge "$ctl_start_index" ]] && [[ "$node_num" -le "$ctl_end_index" ]]; then
                 log_info "Labeling CloudNative-PG control plane node: $node"
-                "$KUBECTL" label node "$node" "cnpg.io/control-plane=enable" --overwrite || {
+                kubectl label node "$node" "cnpg.io/control-plane=enable" --overwrite || {
                     error_exit "Failed to label CloudNative-PG control plane node: $node"
                 }
             fi
@@ -1070,7 +1044,7 @@ EOF
 
     # Wait for operator to be ready
     log_info "Waiting for CloudNative-PG operator to be ready..."
-    "$KUBECTL" wait --for=condition=ready pod -l app.kubernetes.io/instance="$cnpg_release_name" -n "$CNPG_NAMESPACE" --timeout=300s || {
+    kubectl wait --for=condition=ready pod -l app.kubernetes.io/instance="$cnpg_release_name" -n "$CNPG_NAMESPACE" --timeout=300s || {
         error_exit "CloudNative-PG operator failed to become ready"
     }
 
@@ -1150,7 +1124,7 @@ install_upm_engine() {
     local ctl_end_index=$((G_KUBE_MASTER_INSTANCES + G_UPM_CTL_INSTANCES))
 
     local nodes
-    nodes=$("$KUBECTL" get nodes --no-headers -o custom-columns=":metadata.name")
+    nodes=$(kubectl get nodes --no-headers -o custom-columns=":metadata.name")
 
     while IFS= read -r node; do
         # Extract node number from node name (assuming format: prefix-number)
@@ -1158,7 +1132,7 @@ install_upm_engine() {
             local node_num="${BASH_REMATCH[1]}"
             if [[ "$node_num" -ge "$ctl_start_index" ]] && [[ "$node_num" -le "$ctl_end_index" ]]; then
                 log_info "Labeling UPM Engine control plane node: $node"
-                "$KUBECTL" label node "$node" "upm.engine.node=enable" --overwrite || {
+                kubectl label node "$node" "upm.engine.node=enable" --overwrite || {
                     error_exit "Failed to label UPM Engine control plane node: $node"
                 }
             fi
@@ -1176,7 +1150,7 @@ install_upm_engine() {
 
     # Wait for operator to be ready
     log_info "Waiting for UPM Engine to be ready..."
-    "$KUBECTL" wait --for=condition=ready pod -l "app.kubernetes.io/instance=$upm_engine_release_name" -n "$UPM_NAMESPACE" --timeout=300s || {
+    kubectl wait --for=condition=ready pod -l "app.kubernetes.io/instance=$upm_engine_release_name" -n "$UPM_NAMESPACE" --timeout=300s || {
         error_exit "UPM Engine failed to become ready"
     }
 
@@ -1225,11 +1199,11 @@ install_upm_platform() {
     log_info "✅ LVM LocalPV Helm release found"
     
     # Check if the required StorageClass exists
-    if ! "$KUBECTL" get storageclass "$LVM_LOCALPV_STORAGECLASS_NAME" >/dev/null 2>&1; then
+    if ! ku be c t l get storageclass "$LVM_LOCALPV_STORAGECLASS_NAME" >/dev/null 2>&1; then
         log_error "Required StorageClass '$LVM_LOCALPV_STORAGECLASS_NAME' not found."
         echo -e "${RED}❌ LVM LocalPV StorageClass is missing.${NC}"
         echo -e "${WHITE}Available StorageClasses:${NC}"
-        "$KUBECTL" get storageclass || true
+        kubectl get storageclass || true
         echo -e "${WHITE}\nTo fix this issue:${NC}"
         echo -e "   ${CYAN}1. Check LVM LocalPV Helm release: helm list -n openebs${NC}"
         echo -e "   ${CYAN}2. Verify StorageClass configuration${NC}"
@@ -1284,7 +1258,7 @@ install_upm_platform() {
     local ctl_end_index=$((G_KUBE_MASTER_INSTANCES + G_UPM_CTL_INSTANCES))
 
     local nodes
-    nodes=$("$KUBECTL" get nodes --no-headers -o custom-columns=":metadata.name")
+    nodes=$(kubectl get nodes --no-headers -o custom-columns=":metadata.name")
 
     while IFS= read -r node; do
         # Extract node number from node name (assuming format: prefix-number)
@@ -1292,16 +1266,16 @@ install_upm_platform() {
             local node_num="${BASH_REMATCH[1]}"
             if [[ "$node_num" -ge "$ctl_start_index" ]] && [[ "$node_num" -le "$ctl_end_index" ]]; then
                 log_info "Labeling UPM Platform control plane node: $node"
-                "$KUBECTL" label node "$node" "upm.platform.node=enable" --overwrite || {
+                kubectl label node "$node" "upm.platform.node=enable" --overwrite || {
                     error_exit "Failed to label UPM Platform control plane node: $node"
                 }
-                "$KUBECTL" label node "$node" 'nacos.io/control-plane=enable' --overwrite || {
+                kubectl label node "$node" 'nacos.io/control-plane=enable' --overwrite || {
                     error_exit "Failed to label UPM Platform nacos node: $node"
                 }
-                "$KUBECTL" label node "$node" 'mysql.standalone.node=enable' --overwrite || {
+                kubectl label node "$node" 'mysql.standalone.node=enable' --overwrite || {
                     error_exit "Failed to label UPM Platform database node: $node"
                 }
-                "$KUBECTL" label node "$node" 'redis.standalone.node=enable' --overwrite || {
+                kubectl label node "$node" 'redis.standalone.node=enable' --overwrite || {
                     error_exit "Failed to label UPM Platform cache node: $node"
                 }
             fi
@@ -1386,11 +1360,11 @@ EOF
 
     # Wait for platform to be ready
     log_info "Waiting for UPM Platform to be ready..."
-    if ! "$KUBECTL" wait --for=condition=ready pod -l "app.kubernetes.io/instance=$upm_platform_release_name,!job-name" -n "$UPM_NAMESPACE" --timeout=900s; then
+    if ! kubectl wait --for=condition=ready pod -l "app.kubernetes.io/instance=$upm_platform_release_name,!job-name" -n "$UPM_NAMESPACE" --timeout=900s; then
         log_error "UPM Platform pods failed to become ready. Checking pod status..."
-        "$KUBECTL" get pods -n "$UPM_NAMESPACE" -l "app.kubernetes.io/instance=$upm_platform_release_name,!job-name" || true
-        "$KUBECTL" describe pods -n "$UPM_NAMESPACE" -l "app.kubernetes.io/instance=$upm_platform_release_name,!job-name" || true
-        "$KUBECTL" get events -n "$UPM_NAMESPACE" --sort-by='.lastTimestamp' | tail -20 || true
+        kubectl get pods -n "$UPM_NAMESPACE" -l "app.kubernetes.io/instance=$upm_platform_release_name,!job-name" || true
+        kubectl describe pods -n "$UPM_NAMESPACE" -l "app.kubernetes.io/instance=$upm_platform_release_name,!job-name" || true
+        kubectl get events -n "$UPM_NAMESPACE" --sort-by='.lastTimestamp' | tail -20 || true
         error_exit "UPM Platform failed to become ready"
     fi
 
@@ -1411,7 +1385,7 @@ EOF
 
     # Get worker node IP for login URL (prioritize nodes with upm.platform.node label)
     local worker_node_ip
-    worker_node_ip=$($KUBECTL get nodes -l upm.platform.node=enable -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null)
+    worker_node_ip=$(kubectl get nodes -l upm.platform.node=enable -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null)
     if [[ -n "$worker_node_ip" ]]; then
         echo "Worker node IP: $worker_node_ip"
     else
@@ -1431,7 +1405,7 @@ EOF
 
     # Create ClusterRoleBinding for upm-system default service account
     log_info "Creating ClusterRoleBinding for upm-system default service account..."
-    "$KUBECTL" apply -f - <<EOF || error_exit "Failed to create ClusterRoleBinding for upm-system default service account"
+    kubectl apply -f - <<EOF || error_exit "Failed to create ClusterRoleBinding for upm-system default service account"
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -1459,12 +1433,12 @@ configure_nginx_for_upm() {
     log_info "Starting Nginx configuration for UPM Platform..."
     
     # Check if kubectl is available
-    if ! command_exists "$KUBECTL"; then
+    if ! command_exists kubectl; then
         error_exit "kubectl not found. Please ensure Kubernetes cluster is set up."
     fi
     
     # Check if UPM namespace exists
-    if ! "$KUBECTL" get namespace "$UPM_NAMESPACE" >/dev/null 2>&1; then
+    if ! kubectl get namespace "$UPM_NAMESPACE" >/dev/null 2>&1; then
         error_exit "UPM namespace '$UPM_NAMESPACE' not found. Please install UPM Platform first."
     fi
     
@@ -1485,18 +1459,18 @@ configure_nginx_for_upm() {
     
     # Step 1: Configure upm-platform-gateway service to NodePort
     log_info "Configuring upm-platform-gateway service to NodePort..."
-    if "$KUBECTL" get service upm-platform-gateway -n "$UPM_NAMESPACE" >/dev/null 2>&1; then
+    if kubectl get service upm-platform-gateway -n "$UPM_NAMESPACE" >/dev/null 2>&1; then
         # Check if service is already NodePort with correct port
         local current_type
-        current_type=$("$KUBECTL" get service upm-platform-gateway -n "$UPM_NAMESPACE" -o jsonpath='{.spec.type}')
+        current_type=$(kubectl get service upm-platform-gateway -n "$UPM_NAMESPACE" -o jsonpath='{.spec.type}')
         local current_nodeport
-        current_nodeport=$("$KUBECTL" get service upm-platform-gateway -n "$UPM_NAMESPACE" -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || echo "")
+        current_nodeport=$(kubectl get service upm-platform-gateway -n "$UPM_NAMESPACE" -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || echo "")
         
         if [[ "$current_type" == "NodePort" && "$current_nodeport" == "31404" ]]; then
             log_info "✅ upm-platform-gateway service already configured as NodePort with port 31404"
         else
             log_info "Patching upm-platform-gateway service to NodePort with port 31404..."
-            "$KUBECTL" patch service upm-platform-gateway -n "$UPM_NAMESPACE" -p '{
+            kubectl patch service upm-platform-gateway -n "$UPM_NAMESPACE" -p '{
                 "spec": {
                     "type": "NodePort",
                     "ports": [{
@@ -1516,18 +1490,18 @@ configure_nginx_for_upm() {
     
     # Step 2: Configure upm-platform-ui service to NodePort
     log_info "Configuring upm-platform-ui service to NodePort..."
-    if "$KUBECTL" get service upm-platform-ui -n "$UPM_NAMESPACE" >/dev/null 2>&1; then
+    if kubectl get service upm-platform-ui -n "$UPM_NAMESPACE" >/dev/null 2>&1; then
         # Check if service is already NodePort with correct port
         local current_type
-        current_type=$("$KUBECTL" get service upm-platform-ui -n "$UPM_NAMESPACE" -o jsonpath='{.spec.type}')
+        current_type=$(kubectl get service upm-platform-ui -n "$UPM_NAMESPACE" -o jsonpath='{.spec.type}')
         local current_nodeport
-        current_nodeport=$("$KUBECTL" get service upm-platform-ui -n "$UPM_NAMESPACE" -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || echo "")
+        current_nodeport=$(kubectl get service upm-platform-ui -n "$UPM_NAMESPACE" -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || echo "")
         
         if [[ "$current_type" == "NodePort" && "$current_nodeport" == "31405" ]]; then
             log_info "✅ upm-platform-ui service already configured as NodePort with port 31405"
         else
             log_info "Patching upm-platform-ui service to NodePort with port 31405..."
-            "$KUBECTL" patch service upm-platform-ui -n "$UPM_NAMESPACE" -p '{
+            kubectl patch service upm-platform-ui -n "$UPM_NAMESPACE" -p '{
                 "spec": {
                     "type": "NodePort",
                     "ports": [{
@@ -1558,10 +1532,10 @@ configure_nginx_for_upm() {
     # Step 4: Get worker node IP for Nginx configuration
     log_info "Getting worker node IP for Nginx configuration..."
     local worker_node_ip
-    worker_node_ip=$("$KUBECTL" get nodes -l upm.platform.node=enable -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null)
+    worker_node_ip=$(kubectl get nodes -l upm.platform.node=enable -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null)
     if [[ -z "$worker_node_ip" ]]; then
         # Fallback to any worker node
-        worker_node_ip=$("$KUBECTL" get nodes --no-headers -o custom-columns=":metadata.name" | head -1 | xargs "$KUBECTL" get node -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}')
+        worker_node_ip=$(kubectl get nodes --no-headers -o custom-columns=":metadata.name" | head -1 | xargs kubectl get node -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}')
     fi
     
     if [[ -z "$worker_node_ip" ]]; then
@@ -1586,7 +1560,6 @@ configure_nginx_for_upm() {
     safe_sudo tee "$nginx_conf" > /dev/null <<EOF
 # For more information on configuration, see:
 #   * Official English Documentation: http://nginx.org/en/docs/
-#   * Official Russian Documentation: http://nginx.org/ru/docs/
 
 user nginx;
 worker_processes 2;
