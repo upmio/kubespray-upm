@@ -97,15 +97,10 @@ declare AUTO_CONFIRM=false
 declare -a INSTALLATION_OPTIONS=()
 
 # Global variables for Vagrant configuration (extracted from config.rb)
-declare G_NUM_INSTANCES="5"
+declare G_NUM_INSTANCES=""
 declare G_KUBE_MASTER_INSTANCES=""
 declare G_UPM_CTL_INSTANCES=""
-declare G_KUBE_MASTER_VM_CPUS=""
-declare G_KUBE_MASTER_VM_MEMORY=""
-declare G_UPM_CONTROL_PLANE_VM_CPUS=""
-declare G_UPM_CONTROL_PLANE_VM_MEMORY=""
 declare G_INSTANCE_NAME_PREFIX=""
-declare G_WORKER_NODES=""
 
 # Log file configuration
 LOG_FILE="${SCRIPT_DIR}/upm_setup.log"
@@ -118,6 +113,9 @@ readonly YELLOW='\033[1;33m'
 readonly RED='\033[0;31m'
 readonly CYAN='\033[0;36m'
 readonly WHITE='\033[1;37m'
+readonly BLUE='\033[0;34m'
+readonly MAGENTA='\033[0;35m'
+readonly BOLD='\033[1m'
 readonly NC='\033[0m'
 
 #######################################
@@ -498,28 +496,14 @@ extract_vagrant_config_variables() {
     log_info "Extracting Vagrant configuration variables from: $VAGRANT_CONF_FILE"
 
     # Extract configuration values from config.rb and set as global variables
-    G_NUM_INSTANCES=$(grep "^\$num_instances\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/' || echo "5")
-    G_KUBE_MASTER_INSTANCES=$(grep "^\$kube_master_instances\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/' || echo "1")
-    G_UPM_CTL_INSTANCES=$(grep "^\$upm_ctl_instances\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/' || echo "1")
-    G_KUBE_MASTER_VM_CPUS=$(grep "^\$kube_master_vm_cpus\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/' || echo "4")
-    G_KUBE_MASTER_VM_MEMORY=$(grep "^\$kube_master_vm_memory\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/' || echo "4096")
-    G_UPM_CONTROL_PLANE_VM_CPUS=$(grep "^\$upm_control_plane_vm_cpus\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/' || echo "12")
-    G_UPM_CONTROL_PLANE_VM_MEMORY=$(grep "^\$upm_control_plane_vm_memory\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/' || echo "24576")
-    G_INSTANCE_NAME_PREFIX=$(grep "^\$instance_name_prefix\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "k8s")
+    G_NUM_INSTANCES=$(grep "^\$num_instances\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/')
+    G_KUBE_MASTER_INSTANCES=$(grep "^\$kube_master_instances\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/')
+    G_UPM_CTL_INSTANCES=$(grep "^\$upm_ctl_instances\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/')
+    G_INSTANCE_NAME_PREFIX=$(grep "^\$instance_name_prefix\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/')
 
-    # Ensure all numeric variables have valid default values to prevent arithmetic errors
-    G_NUM_INSTANCES=${G_NUM_INSTANCES:-5}
-    G_KUBE_MASTER_INSTANCES=${G_KUBE_MASTER_INSTANCES:-1}
-    G_UPM_CTL_INSTANCES=${G_UPM_CTL_INSTANCES:-1}
-    G_KUBE_MASTER_VM_CPUS=${G_KUBE_MASTER_VM_CPUS:-4}
-    G_KUBE_MASTER_VM_MEMORY=${G_KUBE_MASTER_VM_MEMORY:-4096}
-    G_UPM_CONTROL_PLANE_VM_CPUS=${G_UPM_CONTROL_PLANE_VM_CPUS:-12}
-    G_UPM_CONTROL_PLANE_VM_MEMORY=${G_UPM_CONTROL_PLANE_VM_MEMORY:-24576}
-
-    # Calculate derived values
-    G_WORKER_NODES=$((G_NUM_INSTANCES - G_KUBE_MASTER_INSTANCES - G_UPM_CTL_INSTANCES))
-    if [[ $G_WORKER_NODES -lt 0 ]]; then
-        G_WORKER_NODES=0
+    # Check if required variables are set
+    if [[ -z "$G_NUM_INSTANCES" || -z "$G_KUBE_MASTER_INSTANCES" || -z "$G_UPM_CTL_INSTANCES" || -z "$G_INSTANCE_NAME_PREFIX" ]]; then
+        error_exit "Required Vagrant configuration variables are missing or empty"
     fi
 
     log_info "Vagrant configuration variables extracted successfully"
