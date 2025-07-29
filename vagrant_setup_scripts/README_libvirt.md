@@ -176,7 +176,7 @@ curl -sSL https://raw.githubusercontent.com/upmio/kubespray-upm/refs/heads/maste
 
 ```bash
 # NAT 模式自动配置网络，一键安装 Kubernetes 集群
-bash ./libvirt_kubespray_setup.sh --k8s -y
+bash ./libvirt_kubespray_setup.sh -y
 ```
 
 **安装过程说明**：
@@ -294,7 +294,7 @@ sudo virsh undefine <vm_name> --remove-all-storage
 - **虚拟化环境**: libvirt、QEMU/KVM、virt-manager
 - **开发工具**: Development Tools、Python 开发环境
 - **容器运行时**: Vagrant 和 vagrant-libvirt 插件
-- **Python 环境**: pyenv、Python 3.11、虚拟环境
+- **Python 环境**: pyenv、Python 3.12.11、虚拟环境
 - **Kubespray 项目**: 完整的 Kubespray 部署环境
 - **Kubernetes 集群**: 1 master + 4 worker 节点（默认配置）
 - **网络组件**: Calico CNI、网络策略支持
@@ -317,7 +317,7 @@ sudo virsh undefine <vm_name> --remove-all-storage
 ### NAT 网络模式（默认）
 
 ```bash
-bash ./libvirt_kubespray_setup.sh --k8s -n nat
+bash ./libvirt_kubespray_setup.sh -n nat
 ```
 
 - **隔离安全**: 虚拟机网络与宿主机网络隔离
@@ -327,7 +327,7 @@ bash ./libvirt_kubespray_setup.sh --k8s -n nat
 ### 桥接网络模式
 
 ```bash
-bash ./libvirt_kubespray_setup.sh --k8s -n bridge
+bash ./libvirt_kubespray_setup.sh -n bridge
 ```
 
 - **直接访问**: 虚拟机获得真实网络IP，可被外部直接访问
@@ -371,7 +371,7 @@ bash ./libvirt_kubespray_setup.sh -y -n bridge      # 自动确认 + 桥接模�
 
 - **系统依赖**: Development Tools、Git、curl、wget、vim 等基础工具
 - **虚拟化组件**: libvirt、qemu-kvm、virt-manager、libguestfs-tools
-- **开发环境**: Vagrant、vagrant-libvirt、pyenv、Python 3.11.10
+- **开发环境**: Vagrant、vagrant-libvirt、pyenv、Python 3.12.11
 - **虚拟机管理**: 智能虚拟机检测、生命周期管理、状态监控和交互式处理
 
 #### Kubernetes 集群
@@ -570,7 +570,7 @@ sudo crictl info | grep -A 20 "registry"
 
 ```bash
 # kubectl 二进制文件位置
-~/.local/bin/kubectl
+~/bin/kubectl
 
 # kubeconfig 文件位置
 ~/.kube/config
@@ -754,7 +754,7 @@ sudo dnf clean all && sudo dnf makecache
 
 ```bash
 # 启用调试模式
-bash -x ./libvirt_kubespray_setup.sh --k8s
+bash -x ./libvirt_kubespray_setup.sh
 
 # 查看日志
 tail -f /tmp/libvirt_kubespray_setup.log
