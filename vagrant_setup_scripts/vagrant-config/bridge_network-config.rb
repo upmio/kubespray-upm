@@ -184,4 +184,4 @@ $inventory = "inventory/sample"
 $shared_folders = {}
 
 # Kubernetes version to install
-$kube_version = "1.33.2"
+$kube_version = "1.33.3"
