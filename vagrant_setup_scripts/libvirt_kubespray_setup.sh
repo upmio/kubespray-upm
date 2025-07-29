@@ -1481,10 +1481,42 @@ setup_python_environment() {
     # Install Python version
     if ! pyenv versions --bare | grep -q "$PYTHON_VERSION"; then
         log_info "Installing Python $PYTHON_VERSION using pyenv..."
-        pyenv install "$PYTHON_VERSION"
+        if ! pyenv update; then
+            log_error "Failed to update pyenv"
+            exit 1
+        fi
+        if ! pyenv install "$PYTHON_VERSION"; then
+            log_error "Failed to install Python $PYTHON_VERSION using pyenv"
+            exit 1
+        fi
     else
         log_info "Python $PYTHON_VERSION is already installed"
     fi
+
+    # Create virtual environment
+    log_info "Creating virtual environment..."
+    cd "$KUBESPRAY_DIR" || {
+        log_error "Failed to change directory to $KUBESPRAY_DIR"
+        exit 1
+    }
+    
+    # Check if virtual environment already exists
+    if pyenv versions --bare | grep -q "kubespray-env"; then
+        log_info "Virtual environment 'kubespray-env' already exists"
+    else
+        if ! pyenv virtualenv "$PYTHON_VERSION" "kubespray-env"; then
+            log_error "Failed to create virtual environment 'kubespray-env' with Python $PYTHON_VERSION"
+            exit 1
+        fi
+        log_info "Virtual environment 'kubespray-env' created successfully"
+    fi
+    
+    # Set local Python version
+    if ! pyenv local "kubespray-env"; then
+        log_error "Failed to set local Python environment to 'kubespray-env'"
+        exit 1
+    fi
+    log_info "Local Python environment set to 'kubespray-env'"
 
     log_info "Python environment setup completed"
 }
