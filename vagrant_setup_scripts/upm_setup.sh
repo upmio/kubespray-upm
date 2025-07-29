@@ -405,27 +405,9 @@ prompt_yes_no() {
 }
 
 #######################################
-# Variable Validation Functions
+# Cluster Connectivity Validation Function
 #######################################
-validate_required_variables() {
-    log_info "Validating required variables..."
-
-    # Initialize log file with proper permissions
-    touch "$LOG_FILE" 2>/dev/null || {
-        echo "Warning: Cannot create log file $LOG_FILE, logging to stdout only"
-        LOG_FILE="/dev/stdout"
-    }
-    chmod 666 "$LOG_FILE" 2>/dev/null || true
-
-    # Validate kubectl command availability
-    log_info "Checking kubectl command availability..."
-    if ! command -v kubectl >/dev/null 2>&1; then
-        log_error "kubectl command not found. Please install kubectl and ensure it's in your PATH."
-        exit 1
-    fi
-    log_info "kubectl command found: $(which kubectl)"
-
-    # Validate kubectl cluster connectivity
+validate_cluster_connectivity() {
     log_info "Validating Kubernetes cluster connectivity..."
     if ! kubectl cluster-info >/dev/null 2>&1; then
         log_error "Cannot connect to Kubernetes cluster. Please check your kubeconfig and cluster status."
@@ -448,6 +430,42 @@ validate_required_variables() {
     echo -e "${GREEN}=== Namespaces ===${NC}"
     echo -e "   ${GREEN}•${NC} Total: ${WHITE}$(kubectl get namespaces --no-headers 2>/dev/null | wc -l | tr -d ' ')${NC} namespaces"
     echo
+
+    # Interactive confirmation unless in non-interactive mode
+    if [[ "$NON_INTERACTIVE" != "true" ]]; then
+        echo -e "${YELLOW}⚠️  Do you want to proceed with the installation on this cluster?${NC}"
+        if ! confirm_action; then
+            log_info "Installation cancelled by user."
+            exit 0
+        fi
+    else
+        log_info "Non-interactive mode: proceeding with installation."
+    fi
+}
+
+#######################################
+# Variable Validation Functions
+#######################################
+validate_required_variables() {
+    log_info "Validating required variables..."
+
+    # Initialize log file with proper permissions
+    touch "$LOG_FILE" 2>/dev/null || {
+        echo "Warning: Cannot create log file $LOG_FILE, logging to stdout only"
+        LOG_FILE="/dev/stdout"
+    }
+    chmod 666 "$LOG_FILE" 2>/dev/null || true
+
+    # Validate kubectl command availability
+    log_info "Checking kubectl command availability..."
+    if ! command -v kubectl >/dev/null 2>&1; then
+        log_error "kubectl command not found. Please install kubectl and ensure it's in your PATH."
+        exit 1
+    fi
+    log_info "kubectl command found: $(which kubectl)"
+
+    # Validate kubectl cluster connectivity and display information
+    validate_cluster_connectivity
 
     log_info "Variable validation passed"
 }
@@ -1708,51 +1726,49 @@ EOF
 # Help Function
 #######################################
 show_help() {
-    cat <<EOF
-${GREEN}UPM Setup Script v${SCRIPT_VERSION}${NC}
-
-${WHITE}USAGE:${NC}
-    $0 [OPTIONS] [INSTALL_OPTIONS]
-
-${WHITE}OPTIONS:${NC}
-    -h, --help              Show this help message and exit
-    -v, --version           Show version information and exit
-    -y                      Automatic yes to prompts (non-interactive mode)
-
-${WHITE}INSTALL OPTIONS:${NC}
-    --lvmlocalpv            Install OpenEBS LVM LocalPV for persistent storage
-    --prometheus            Install Prometheus monitoring stack
-    --cnpg                  Install CloudNative-PG PostgreSQL operator
-    --upm-engine            Install UPM Engine (requires LVM LocalPV)
-    --upm-platform          Install UPM Platform (requires LVM LocalPV)
-    --config_nginx          Configure Nginx for UPM Platform access
-    --all                   Install all components
-
-${WHITE}PREREQUISITES:${NC}
-    • Kubernetes cluster (v1.28+) with kubectl configured
-    • Root/sudo privileges for system operations
-    • Internet connectivity for downloads
-    • Minimum: 8+ CPU cores, 16GB+ RAM, 100GB+ storage
-
-${WHITE}DESCRIPTION:${NC}
-    Automates UPM (Unified Platform Management) component installation
-    on existing Kubernetes clusters with modular installation options.
-
-${WHITE}COMPONENTS:${NC}
-    ${YELLOW}LVM LocalPV:${NC}     Persistent storage using LVM (namespace: openebs)
-    ${YELLOW}Prometheus:${NC}      Monitoring stack (ports: 30090, 30091)
-    ${YELLOW}CNPG:${NC}            PostgreSQL operator (namespace: cnpg-system)
-    ${YELLOW}UPM Engine:${NC}      Core management engine (namespace: upm-system)
-    ${YELLOW}UPM Platform:${NC}    Web interface (port: 32010, user: super_root/Upm@2024!)
-    ${YELLOW}Nginx:${NC}           Reverse proxy configuration
-
-${WHITE}EXAMPLES:${NC}
-    $0 --all                                    # Install all components
-    $0 --lvmlocalpv --prometheus                # Storage + monitoring
-    $0 -y --lvmlocalpv --upm-platform          # Platform (non-interactive)
-    $0 --config_nginx                           # Configure Nginx only
-
-EOF
+    echo -e "${GREEN}UPM Setup Script v${SCRIPT_VERSION}${NC}"
+    echo
+    echo -e "${WHITE}USAGE:${NC}"
+    echo "    $0 [OPTIONS] [INSTALL_OPTIONS]"
+    echo
+    echo -e "${WHITE}OPTIONS:${NC}"
+    echo "    -h, --help              Show this help message and exit"
+    echo "    -v, --version           Show version information and exit"
+    echo "    -y                      Automatic yes to prompts (non-interactive mode)"
+    echo
+    echo -e "${WHITE}INSTALL OPTIONS:${NC}"
+    echo "    --lvmlocalpv            Install OpenEBS LVM LocalPV for persistent storage"
+    echo "    --prometheus            Install Prometheus monitoring stack"
+    echo "    --cnpg                  Install CloudNative-PG PostgreSQL operator"
+    echo "    --upm-engine            Install UPM Engine (requires LVM LocalPV)"
+    echo "    --upm-platform          Install UPM Platform (requires LVM LocalPV)"
+    echo "    --config_nginx          Configure Nginx for UPM Platform access"
+    echo "    --all                   Install all components"
+    echo
+    echo -e "${WHITE}PREREQUISITES:${NC}"
+    echo "    • Kubernetes cluster (v1.28+) with kubectl configured"
+    echo "    • Root/sudo privileges for system operations"
+    echo "    • Internet connectivity for downloads"
+    echo "    • Minimum: 8+ CPU cores, 16GB+ RAM, 100GB+ storage"
+    echo
+    echo -e "${WHITE}DESCRIPTION:${NC}"
+    echo "    Automates UPM (Unified Platform Management) component installation"
+    echo "    on existing Kubernetes clusters with modular installation options."
+    echo
+    echo -e "${WHITE}COMPONENTS:${NC}"
+    echo -e "    ${YELLOW}LVM LocalPV:${NC}     Persistent storage using LVM (namespace: openebs)"
+    echo -e "    ${YELLOW}Prometheus:${NC}      Monitoring stack (ports: 30090, 30091)"
+    echo -e "    ${YELLOW}CNPG:${NC}            PostgreSQL operator (namespace: cnpg-system)"
+    echo -e "    ${YELLOW}UPM Engine:${NC}      Core management engine (namespace: upm-system)"
+    echo -e "    ${YELLOW}UPM Platform:${NC}    Web interface (port: 32010, user: super_root/Upm@2024!)"
+    echo -e "    ${YELLOW}Nginx:${NC}           Reverse proxy configuration"
+    echo
+    echo -e "${WHITE}EXAMPLES:${NC}"
+    echo "    $0 --all                                    # Install all components"
+    echo "    $0 --lvmlocalpv --prometheus                # Storage + monitoring"
+    echo "    $0 -y --lvmlocalpv --upm-platform          # Platform (non-interactive)"
+    echo "    $0 --config_nginx                           # Configure Nginx only"
+    echo
 }
 
 #######################################
