@@ -153,10 +153,11 @@ $subnet_split4 = 100
 # Network subnet (first 3 octets) - bridge only
 $subnet = "192.168.29"
 
+$dns_server = "192.168.21.1"         # DNS server
+
 # Network configuration - bridge only
 $netmask = "255.255.240.0"      # Subnet mask
 $gateway = "192.168.21.1"        # Default gateway
-$dns_server = "192.168.21.1"         # DNS server
 
 # Bridge network interface (required when using "bridge")
 # Example: On linux, libvirt bridge interface name: br0

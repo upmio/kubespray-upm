@@ -436,7 +436,6 @@ def configure_rocky_network(node)
   end
 
   # Common DNS configuration for Rocky Linux
-  dns_server = $vm_network == "bridge" ? $dns_server : "8.8.8.8"
   network_script += <<-SHELL
     sudo echo -e "[main]\ndns=default\n\n[global-dns-domain-*]\nservers=#{dns_server}" | sudo tee /etc/NetworkManager/conf.d/dns.conf
     sudo systemctl restart NetworkManager
