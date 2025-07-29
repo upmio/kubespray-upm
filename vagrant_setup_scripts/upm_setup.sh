@@ -75,9 +75,8 @@ readonly SCRIPT_AUTHOR="UPM Team"
 readonly SCRIPT_LICENSE="Apache License 2.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 readonly SCRIPT_DIR
-readonly KUBE_DIR="${HOME}/.kube"
 readonly VAGRANT_CONF_FILE="${SCRIPT_DIR}/../vagrant/config.rb"
-export KUBECONFIG="${KUBE_DIR}/config"
+export KUBECONFIG="${HOME}/.kube/config"
 
 readonly LVM_LOCALPV_NAMESPACE="openebs"
 readonly LVM_LOCALPV_CHART_VERSION="${LVM_LOCALPV_CHART_VERSION:-"1.6.2"}"
@@ -457,22 +456,6 @@ validate_required_variables() {
 # Install Helm Function
 #######################################
 install_helm() {
-    # Check if running on macOS
-    if [[ "$(detect_os)" == "macos" ]]; then
-        log_error "Helm installation on macOS detected"
-        echo -e "${RED}❌ This script is designed for Linux environments only.${NC}"
-        echo -e "${WHITE}To install Helm on macOS, please use one of the following methods:${NC}\n"
-        echo -e "${YELLOW}Method 1 - Using Homebrew (Recommended):${NC}"
-        echo -e "   ${CYAN}brew install helm${NC}\n"
-        echo -e "${YELLOW}Method 2 - Using the official installer:${NC}"
-        echo -e "   ${CYAN}curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash${NC}\n"
-        echo -e "${YELLOW}Method 3 - Download binary directly:${NC}"
-        echo -e "   ${CYAN}# Visit https://github.com/helm/helm/releases${NC}"
-        echo -e "   ${CYAN}# Download the macOS binary and add to PATH${NC}\n"
-        echo -e "${WHITE}After installing Helm, you can use it independently for Kubernetes operations.${NC}"
-        error_exit "macOS is not supported by this automated setup script"
-    fi
-
     # Check if helm is installed
     if ! command -v helm >/dev/null 2>&1; then
         log_info "Installing Helm..."
