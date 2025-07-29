@@ -2,24 +2,19 @@
 
 ## 概述
 
-本文档详细介绍如何使用 `libvirt_kubespray_setup.sh` 脚本在 libvirt 虚拟化环境中快速部署 Kubespray Kubernetes 集群。该脚本专为 Red Hat 系列 Linux 系统（RHEL 9、Rocky Linux 9、CentOS 9、AlmaLinux 9）设计，提供完整的自动化环境配置、交互式部署体验以及企业级容器镜像仓库配置支持。
-
-### 脚本架构特点
-
-- **模块化设计**: 采用功能模块化架构，支持独立安装和配置各个组件
-- **智能检测**: 自动检测系统环境、网络配置和虚拟机状态
-- **跨平台兼容**: 支持多种 RHEL 系发行版，自动适配不同系统特性
+本文档详细介绍如何使用 `libvirt_kubespray_setup.sh` 脚本在 libvirt 虚拟化环境中快速部署 Kubespray Kubernetes 集群。该脚本专为 Red Hat 系列 Linux 系统（RHEL 8/9、Rocky Linux 8/9、AlmaLinux 8/9）设计，提供完整的自动化环境配置和 Kubernetes 集群部署。
 
 ### 脚本特性
 
 - **版本**: v1.0
-- **模块化安装**: 支持选择性安装不同组件（K8s、LVM LocalPV、Prometheus、CloudNativePG、UPM Engine、UPM Platform）
+- **专注 Kubernetes**: 专门用于部署基础 Kubernetes 集群环境
 - **智能系统检测**: 自动检测操作系统类型、硬件资源和虚拟化支持
-- **网络配置管理**: 自动检测和配置网络模式（NAT/桥接），支持智能网络参数配置
+- **网络配置管理**: 支持 NAT 和桥接网络模式，自动配置网络参数
 - **虚拟机生命周期管理**: 提供完整的虚拟机创建、更新、销毁和状态管理功能
 - **交互式配置**: 提供详细的安装预览和确认机制
 - **错误处理**: 完善的错误处理和恢复机制
 - **安全特性**: 交互式确认、权限验证、RHEL订阅验证、网络安全检查
+- **Sudo 会话管理**: 自动管理长时间运行操作的 sudo 会话
 
 ### ⚡ 一键命令
 
@@ -28,8 +23,10 @@
 ### 下载脚本并安装 Kubernetes 集群（NAT 模式）
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/upmio/kubespray-upm/refs/heads/master/vagrant_setup_scripts/libvirt_kubespray_setup.sh -o ./libvirt_kubespray_setup.sh && chmod +x ./libvirt_kubespray_setup.sh && bash ./libvirt_kubespray_setup.sh --k8s -y
+curl -sSL https://raw.githubusercontent.com/upmio/kubespray-upm/refs/heads/master/vagrant_setup_scripts/libvirt_kubespray_setup.sh -o ./libvirt_kubespray_setup.sh && chmod +x ./libvirt_kubespray_setup.sh && bash ./libvirt_kubespray_setup.sh -y
 ```
+
+**注意**: 该脚本专门用于部署 Kubernetes 集群。如需安装 UPM 相关组件（如 LVM LocalPV、Prometheus、CloudNativePG、UPM Engine、UPM Platform），请在集群部署完成后使用 `upm_setup.sh` 脚本。
 
 ## 系统要求
 
@@ -48,12 +45,10 @@ curl -sSL https://raw.githubusercontent.com/upmio/kubespray-upm/refs/heads/maste
 
 脚本会自动检测以下 RHEL 系发行版：
 
-- **Red Hat Enterprise Linux (RHEL)** 9.x
-- **Rocky Linux** 9.x
+- **Red Hat Enterprise Linux (RHEL)** 8.x/9.x
+- **Rocky Linux** 8.x/9.x
+- **AlmaLinux** 8.x/9.x
 - **CentOS Stream** 9.x
-- **AlmaLinux** 9.x
-
-> **重要**: `--all` 和 `--config_nginx` 选项仅支持 Linux 系统
 
 #### 系统组件要求
 
@@ -208,222 +203,112 @@ kubectl get pods --all-namespaces
 
 ### 基础选项
 
-| 参数 | 长选项 | 描述 | 系统要求 |
-|------|--------|------|----------|
-| `-h` | `--help` | 显示帮助信息 | 所有系统 |
-| `-v` | `--version` | 显示详细版本信息 | 所有系统 |
-| | `--version-short` | 显示简要版本信息 | 所有系统 |
-| | `--version-changelog` | 显示版本更新日志 | 所有系统 |
-| `-y` | | 自动确认所有是/否提示（网络桥接配置除外） | 所有系统 |
-| `-n <network_type>` | | 设置网络类型（nat\|bridge，默认：nat）。仅在使用 `--k8s` 或完整安装模式时有效。设置为 'bridge' 时需要交互式配置 | 所有系统 |
+| 参数 | 长选项 | 描述 |
+|------|--------|------|
+| `-h` | `--help` | 显示帮助信息 |
+| `-v` | `--version` | 显示详细版本信息 |
+| `-y` | | 自动确认所有是/否提示（网络桥接配置除外） |
+| `-n <network_type>` | | 设置网络类型（nat\|bridge，默认：nat）。设置为 'bridge' 时需要交互式配置 |
 
-### 安装选项（必须指定其中一个）
+### 功能说明
 
-| 选项 | 描述 | 安装时间 | 要求 | 系统要求 |
-|------|------|----------|------|----------|
-| `--k8s` | 仅安装 Kubernetes 集群环境 | ~15 分钟 | 基础系统要求 | 所有支持的系统 |
-| `--lvmlocalpv` | 仅安装 OpenEBS LVM LocalPV 存储解决方案 | ~3 分钟 | 已有 K8s 集群 + Helm 3.x | 所有支持的系统 |
-| `--cnpg` | 仅安装 CloudNative-PG PostgreSQL 数据库 | ~5 分钟 | 已有 K8s 集群 + Helm 3.x | 所有支持的系统 |
-| `--upm-engine` | 仅安装 UPM Engine 管理组件 | ~5 分钟 | 已有 K8s 集群 + Helm 3.x | 所有支持的系统 |
-| `--upm-platform` | 仅安装 UPM Platform 平台界面 | ~3 分钟 | 已有 K8s 集群 + Helm 3.x | 所有支持的系统 |
-| `--prometheus` | 仅安装 Prometheus 监控和告警系统 | ~8 分钟 | 已有 K8s 集群 + Helm 3.x | 所有支持的系统 |
-| `--all` | 安装所有组件（K8s + 存储 + 数据库 + 监控 + UPM） | ~25 分钟 | 基础系统要求 | **仅限 Linux 系统** |
-| `--config_nginx` | 配置 Nginx 反向代理 | ~2 分钟 | 已有 K8s 集群 | **仅限 Linux 系统** |
+**主要功能**: 该脚本专门用于部署 Kubespray Kubernetes 集群环境，包括：
 
-**重要提示：** 必须指定且仅能指定一个安装选项。`--all` 和 `--config_nginx` 选项仅支持 Linux 系统。
+- **libvirt 虚拟化环境配置**: 自动安装和配置 libvirt、QEMU/KVM
+- **Vagrant 环境设置**: 安装 Vagrant 和 vagrant-libvirt 插件
+- **Python 环境管理**: 使用 pyenv 管理 Python 版本和虚拟环境
+- **Kubespray 项目部署**: 下载并配置 Kubespray 项目
+- **Kubernetes 集群创建**: 部署完整的 Kubernetes 集群（默认 1 master + 4 worker 节点）
+- **网络配置**: 支持 NAT 和桥接网络模式
+- **基础组件**: 安装 Calico CNI、基础存储类等
 
-### 虚拟机管理选项（可选）
+**安装时间**: 约 15-20 分钟（取决于网络速度和硬件性能）
 
-| 选项 | 描述 | 要求 | 说明 |
-|------|------|------|------|
-| `--status` | 查看虚拟机状态和基本信息 | 已部署的虚拟机 | 显示所有 VM 的运行状态 |
-| `--ssh <node_name>` | SSH 连接到指定节点（如 k8s-1, k8s-2） | 已部署且运行的虚拟机 | 支持交互式选择节点 |
-| `--destroy` | 销毁所有 kubespray 虚拟机 | 已部署的虚拟机 | 不可恢复操作，需确认 |
-| `--halt` | 停止所有 kubespray 虚拟机 | 已部署且运行的虚拟机 | 保留 VM 配置和数据 |
-| `--up` | 启动所有 kubespray 虚拟机 | 已部署但停止的虚拟机 | 启动已停止的 VM |
+**UPM 组件安装**: 如需安装 UPM 相关组件（LVM LocalPV、Prometheus、CloudNativePG、UPM Engine、UPM Platform），请在 Kubernetes 集群部署完成后使用 `upm_setup.sh` 脚本。
 
-**注意事项：** 虚拟机管理选项不能与安装选项同时使用。
+### 虚拟机管理
 
-### 详细的安装选项要求
+脚本部署完成后，您可以使用标准的 Vagrant 和 virsh 命令来管理虚拟机：
 
-#### `--k8s` - Kubernetes 集群安装
+#### Vagrant 命令
 
-**功能描述**：
+```bash
+# 进入 kubespray 目录
+cd "$KUBESPRAY_DIR"
 
-- 自动配置 libvirt 虚拟化环境
-- 部署基础 Kubernetes 集群（使用 Kubespray）
-- 配置网络（支持 NAT 和桥接模式）
-- 安装必要的系统组件和依赖
+# 查看虚拟机状态
+vagrant status
 
-**系统要求**：
+# SSH 连接到节点
+vagrant ssh k8s-1
+vagrant ssh k8s-2
 
-- 满足基础硬件要求（12+ CPU 核心，32+ GB 内存）
-- RHEL 系发行版（RHEL/Rocky/CentOS/AlmaLinux 9.x）
-- 网络连接正常，支持代理配置
-- 用户具有 sudo 权限
+# 停止虚拟机
+vagrant halt
 
-**安装内容**：
+# 启动虚拟机
+vagrant up --provider=libvirt --no-parallel
 
-- libvirt 虚拟化环境和相关工具
-- Vagrant 和 vagrant-libvirt 插件
-- Kubespray 项目和 Python 虚拟环境
-- Kubernetes 集群（默认 1 master + 4 worker 节点）
-- 网络配置（Calico CNI）
-- 基础存储类和服务配置
+# 销毁虚拟机
+vagrant destroy -f
+```
 
-#### `--lvmlocalpv` - LVM LocalPV 存储
+#### virsh 命令
 
-**功能描述**：
+```bash
+# 查看所有虚拟机
+sudo virsh list --all
 
-- 安装 OpenEBS LVM LocalPV 存储驱动
-- 配置动态存储供应和存储类
-- 提供高性能本地存储解决方案
+# 查看网络配置
+sudo virsh net-list --all
 
-**前置要求**：
+# 强制删除虚拟机（如果 vagrant destroy 失败）
+sudo virsh destroy <vm_name>
+sudo virsh undefine <vm_name> --remove-all-storage
+```
 
-- 已有运行的 Kubernetes 集群
-- Helm 3.x 已安装并配置
-- 集群节点支持 LVM 和有可用磁盘空间
-- 节点已安装 LVM2 工具
+### Kubernetes 集群安装详情
 
-**安装内容**：
+#### 功能描述
 
-- OpenEBS LVM LocalPV Operator
-- 默认存储类配置（openebs-lvmpv）
-- 节点标签和污点配置
-- LVM 卷组管理工具
+该脚本专门用于部署完整的 Kubespray Kubernetes 集群环境，包括：
 
-#### `--cnpg` - CloudNativePG 数据库
+- **libvirt 虚拟化环境配置**: 自动安装和配置 libvirt、QEMU/KVM、相关工具
+- **Vagrant 环境设置**: 安装 Vagrant 和 vagrant-libvirt 插件
+- **Python 环境管理**: 使用 pyenv 管理 Python 版本和虚拟环境
+- **Kubespray 项目部署**: 下载并配置 Kubespray 项目
+- **Kubernetes 集群创建**: 部署完整的 Kubernetes 集群
+- **网络配置**: 支持 NAT 和桥接网络模式
+- **基础组件**: 安装 Calico CNI、基础存储类等
 
-**功能描述**：
+#### 系统要求
 
-- 安装 CloudNative-PG PostgreSQL Operator
-- 提供云原生 PostgreSQL 数据库服务
-- 支持高可用、自动故障转移和备份恢复
+- **硬件要求**: 12+ CPU 核心，32+ GB 内存，200+ GB 磁盘空间
+- **操作系统**: RHEL/Rocky/AlmaLinux 8.x/9.x，CentOS Stream 9.x
+- **网络要求**: 稳定的互联网连接，支持代理配置
+- **权限要求**: 用户具有 sudo 权限
+- **虚拟化支持**: CPU 支持硬件虚拟化（Intel VT-x/AMD-V）
 
-**前置要求**：
+#### 安装内容
 
-- 已有运行的 Kubernetes 集群
-- Helm 3.x 已安装并配置
-- 推荐配置持久化存储类
-- 足够的计算和存储资源
+- **虚拟化环境**: libvirt、QEMU/KVM、virt-manager
+- **开发工具**: Development Tools、Python 开发环境
+- **容器运行时**: Vagrant 和 vagrant-libvirt 插件
+- **Python 环境**: pyenv、Python 3.11、虚拟环境
+- **Kubespray 项目**: 完整的 Kubespray 部署环境
+- **Kubernetes 集群**: 1 master + 4 worker 节点（默认配置）
+- **网络组件**: Calico CNI、网络策略支持
+- **存储组件**: 基础存储类、持久卷支持
 
-**安装内容**：
+#### 集群配置
 
-- CloudNative-PG Operator（最新稳定版）
-- PostgreSQL 集群 CRD 定义
-- 默认配置模板和示例
-- 备份和恢复策略配置
+- **节点配置**: 1 个控制平面节点 + 4 个工作节点
+- **资源分配**: 每个节点 2 CPU 核心，4 GB 内存
+- **网络模式**: NAT（默认）或桥接模式
+- **CNI 插件**: Calico
+- **容器运行时**: containerd
+- **Kubernetes 版本**: 由 Kubespray 项目决定（通常是稳定版本）
 
-#### `--upm-engine` - UPM Engine
-
-**功能描述**：
-
-- 安装 UPM (Unified Platform Management) Engine
-- 提供统一的平台管理和编排能力
-- 支持多集群管理和资源调度
-
-**前置要求**：
-
-- 已有运行的 Kubernetes 集群
-- Helm 3.x 已安装并配置
-- 网络连接正常，支持镜像拉取
-- 推荐配置监控和存储组件
-
-**安装内容**：
-
-- UPM Engine 核心组件
-- 管理 API 服务
-- 资源调度器
-- 集群管理界面
-
-#### `--upm-platform` - UPM Platform
-
-**功能描述**：
-
-- 安装 UPM Platform 用户界面
-- 提供 Web 管理控制台和仪表板
-- 集成监控、日志和管理功能
-
-**前置要求**：
-
-- 已有运行的 Kubernetes 集群
-- Helm 3.x 已安装并配置
-- 推荐先安装 UPM Engine
-- 网络访问和负载均衡配置
-
-**安装内容**：
-
-- UPM Platform Web 界面
-- 用户认证和授权服务
-- 管理 API 和代理服务
-- 集成监控仪表板
-
-#### `--prometheus` - Prometheus 监控
-
-**功能描述**：
-
-- 安装完整的 Prometheus 监控栈
-- 包含 Grafana 可视化和 AlertManager 告警
-- 提供集群和应用级别的监控能力
-
-**前置要求**：
-
-- 已有运行的 Kubernetes 集群
-- Helm 3.x 已安装并配置
-- 推荐配置持久化存储类
-- 足够的计算资源用于监控组件
-
-**安装内容**：
-
-- Prometheus Server 和时序数据库
-- Grafana 仪表板和可视化
-- AlertManager 告警管理
-- Node Exporter 和 kube-state-metrics
-- 预配置的监控规则和仪表板
-
-#### `--config_nginx` - Nginx 配置 (仅限 Linux)
-
-**功能描述**：
-
-- 配置 Nginx 反向代理服务
-- 提供负载均衡和 SSL 终止
-- 支持多服务路由和访问控制
-
-**前置要求**：
-
-- 已有运行的 Kubernetes 集群
-- Linux 操作系统（脚本会自动检查）
-- 网络配置和域名解析
-
-**安装内容**：
-
-- Nginx 配置文件
-- 反向代理规则
-- SSL 证书配置
-- 访问日志和监控配置
-
-#### `--all` - 完整安装 (仅限 Linux)
-
-**功能描述**：
-
-- 一次性安装所有组件和服务
-- 提供完整的企业级 Kubernetes 生态系统
-- 适合生产环境和开发测试环境
-
-**系统要求**：
-
-- Linux 操作系统（脚本会自动检查）
-- 满足所有组件的硬件要求（推荐 24+ CPU 核心，64+ GB 内存）
-- 充足的网络带宽和稳定连接
-- 足够的磁盘空间（推荐 500+ GB）
-
-**安装内容**：
-
-- 包含上述所有组件（除 --config_nginx）
-- 完整的监控、存储和数据库解决方案
-- 企业级管理平台和用户界面
-- 预配置的集成和优化设置
 
 ## 网络配置选项
 
@@ -463,26 +348,19 @@ chmod +x ./libvirt_kubespray_setup.sh
 bash ./libvirt_kubespray_setup.sh -h
 bash ./libvirt_kubespray_setup.sh --version
 
-# 基础安装（仅 Kubernetes 集群）
-bash ./libvirt_kubespray_setup.sh --k8s
+# 基础安装（Kubernetes 集群）
+bash ./libvirt_kubespray_setup.sh
 
 # 自动确认模式（非交互）
-bash ./libvirt_kubespray_setup.sh --k8s -y
+bash ./libvirt_kubespray_setup.sh -y
 
 # 设置网络类型
-bash ./libvirt_kubespray_setup.sh --k8s -n nat            # NAT 模式（默认）
-bash ./libvirt_kubespray_setup.sh --k8s -n bridge         # 桥接模式
+bash ./libvirt_kubespray_setup.sh -n nat            # NAT 模式（默认）
+bash ./libvirt_kubespray_setup.sh -n bridge         # 桥接模式
 
-# 模块化安装
-bash ./libvirt_kubespray_setup.sh --lvmlocalpv             # 安装 LVM LocalPV 存储
-bash ./libvirt_kubespray_setup.sh --cnpg                   # 安装 CloudNativePG 数据库
-bash ./libvirt_kubespray_setup.sh --prometheus             # 安装 Prometheus 监控
-bash ./libvirt_kubespray_setup.sh --upm-engine            # 安装 UPM Engine
-bash ./libvirt_kubespray_setup.sh --upm-platform          # 安装 UPM Platform
-
-# 完整安装（所有组件）
-bash ./libvirt_kubespray_setup.sh --all -y -n nat            # NAT 模式（默认）
-bash ./libvirt_kubespray_setup.sh --all -y -n bridge         # 桥接模式
+# 组合使用
+bash ./libvirt_kubespray_setup.sh -y -n nat         # 自动确认 + NAT 模式
+bash ./libvirt_kubespray_setup.sh -y -n bridge      # 自动确认 + 桥接模式
 
 
 ### 安装组件说明
@@ -496,14 +374,12 @@ bash ./libvirt_kubespray_setup.sh --all -y -n bridge         # 桥接模式
 - **开发环境**: Vagrant、vagrant-libvirt、pyenv、Python 3.11.10
 - **虚拟机管理**: 智能虚拟机检测、生命周期管理、状态监控和交互式处理
 
-#### Kubernetes 生态组件
+#### Kubernetes 集群
 
-- **Kubernetes 集群** (`--k8s`): 基础 Kubernetes 集群部署
-- **LVM LocalPV** (`--lvmlocalpv`): 本地持久卷存储解决方案
-- **CloudNativePG** (`--cnpg`): 云原生 PostgreSQL 数据库
-- **Prometheus** (`--prometheus`): 监控和告警系统
-- **UPM Engine** (`--upm-engine`): UPM 核心引擎组件
-- **UPM Platform** (`--upm-platform`): UPM 平台管理界面
+- **Kubernetes 集群**: 基于 Kubespray 的生产级 Kubernetes 集群部署
+- **网络插件**: Calico CNI 网络插件
+- **容器运行时**: containerd
+- **集群配置**: 高可用配置，支持多节点部署
 
 ### 环境配置（可选）
 
@@ -641,14 +517,14 @@ containerd_registries_mirrors:
 
 ```bash
 # 运行部署脚本（脚本会自动应用 containerd 配置）
-bash ./libvirt_kubespray_setup.sh --k8s
+bash ./libvirt_kubespray_setup.sh
 
 # 如果已经部署了集群，需要重新部署以应用新配置
-# 1. 销毁现有集群
-bash ./libvirt_kubespray_setup.sh --destroy
+# 1. 销毁现有集群（使用 Vagrant 命令）
+cd $KUBESPRAY_DIR && vagrant destroy -f
 
 # 2. 重新部署集群
-bash ./libvirt_kubespray_setup.sh --k8s
+bash ./libvirt_kubespray_setup.sh
 ```
 
 > **自动化说明**: 脚本在部署前会自动检测脚本目录下的 `containerd.yml` 文件，如果存在则自动备份原配置并应用新配置。
@@ -728,74 +604,24 @@ kubectl get pv,pvc --all-namespaces
 kubectl get networkpolicies --all-namespaces
 ```
 
-### 专用组件管理命令
+### 扩展组件安装
 
-#### LVM LocalPV 存储管理
-
-```bash
-# 查看存储类
-kubectl get storageclass
-
-# 查看 LVM LocalPV 组件
-kubectl get pods -n openebs
-
-# 查看持久卷
-kubectl get pv
-kubectl get pvc --all-namespaces
-
-# 查看节点标签
-kubectl get nodes --show-labels | grep openebs
-```
-
-#### CloudNativePG 数据库管理
+如需安装额外的 Kubernetes 生态组件（如存储、数据库、监控等），请使用专门的 `upm_setup.sh` 脚本：
 
 ```bash
-# 查看 PostgreSQL 集群
-kubectl get clusters.postgresql.cnpg.io --all-namespaces
+# 下载 UPM 安装脚本
+curl -sSL https://raw.githubusercontent.com/upmio/kubespray-upm/refs/heads/master/vagrant_setup_scripts/upm_setup.sh -o "upm_setup.sh"
+chmod +x ./upm_setup.sh
 
-# 查看数据库 Pod
-kubectl get pods -l cnpg.io/cluster --all-namespaces
+# 查看可用组件
+bash ./upm_setup.sh -h
 
-# 查看 CloudNativePG Operator
-kubectl get pods -n cnpg-system
-
-# 查看数据库服务
-kubectl get services -l cnpg.io/cluster --all-namespaces
-```
-
-#### Prometheus 监控管理
-
-```bash
-# 查看 Prometheus 组件
-kubectl get pods -n monitoring
-
-# 查看 Prometheus 服务
-kubectl get services -n monitoring
-
-# 访问 Prometheus Web UI（端口转发）
-kubectl port-forward -n monitoring svc/prometheus-server 9090:80
-# 然后访问 http://localhost:9090
-
-# 访问 Grafana（端口转发）
-kubectl port-forward -n monitoring svc/prometheus-grafana 3000:80
-# 然后访问 http://localhost:3000
-# 默认用户名: admin, 密码: prom-operator
-
-# 查看 AlertManager
-kubectl get pods -n monitoring -l app.kubernetes.io/name=alertmanager
-```
-
-#### UPM 组件管理
-
-```bash
-# 查看 UPM Engine
-kubectl get pods -n upm-system
-
-# 查看 UPM 服务
-kubectl get services -n upm-system
-
-# 查看 UPM 配置
-kubectl get configmaps -n upm-system
+# 安装示例
+bash ./upm_setup.sh --lvmlocalpv     # LVM LocalPV 存储
+bash ./upm_setup.sh --cnpg           # CloudNativePG 数据库
+bash ./upm_setup.sh --prometheus     # Prometheus 监控
+bash ./upm_setup.sh --upm-engine     # UPM Engine
+bash ./upm_setup.sh --upm-platform   # UPM Platform
 ```
 
 ### SSH 访问集群节点
@@ -971,34 +797,14 @@ virsh net-list --all
 - [Rocky Linux 文档](https://docs.rockylinux.org/)
 - [脚本源码](https://github.com/upmio/kubespray-upm/blob/master/vagrant_setup_scripts/libvirt_kubespray_setup.sh)
 
-### 存储组件
-
-- [LVM LocalPV 文档](https://github.com/openebs/lvm-localpv)
-- [OpenEBS 官方文档](https://openebs.io/docs/)
-- [LVM2 用户指南](https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/9/html/configuring_and_managing_logical_volumes/index)
-
-### 数据库组件
-
-- [CloudNativePG 官方文档](https://cloudnative-pg.io/documentation/)
-- [PostgreSQL 官方文档](https://www.postgresql.org/docs/)
-- [Kubernetes Operator 模式](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/)
-
-### 监控组件
-
-- [Prometheus 官方文档](https://prometheus.io/docs/)
-- [Grafana 官方文档](https://grafana.com/docs/)
-- [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack)
-- [AlertManager 文档](https://prometheus.io/docs/alerting/latest/alertmanager/)
-
-### UPM 组件
-
-- [UPM Engine 文档](https://docs.upm.io/engine/)
-- [UPM Platform 文档](https://docs.upm.io/platform/)
-- [UPM 架构指南](https://docs.upm.io/architecture/)
-
 ### 工具和实用程序
 
-- [Helm 官方文档](https://helm.sh/docs/)
 - [kubectl 参考文档](https://kubernetes.io/docs/reference/kubectl/)
 - [NetworkManager 文档](https://networkmanager.dev/docs/)
 - [RHEL 订阅管理](https://access.redhat.com/documentation/en-us/red_hat_subscription_management/)
+- [containerd 配置文档](https://github.com/containerd/containerd/blob/main/docs/cri/config.md)
+
+### 扩展组件文档
+
+如需了解更多扩展组件（存储、数据库、监控等），请参考：
+- [UPM Setup 脚本文档](https://github.com/upmio/kubespray-upm/blob/master/vagrant_setup_scripts/README.md)
