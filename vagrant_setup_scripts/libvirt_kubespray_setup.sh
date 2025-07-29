@@ -1610,22 +1610,34 @@ setup_pyenv_environment() {
 }
 
 setup_virtual_environment() {
-    local venv_dir="$KUBESPRAY_DIR/venv"
+    local venv_name="kubespray-venv"
 
-    log_info "Setting up Python virtual environment..."
+    log_info "Setting up Python virtual environment using pyenv..."
 
-    # Create virtual environment
-    if [ ! -d "$venv_dir" ]; then
-        log_info "Creating virtual environment: $venv_dir"
-        python3 -m venv "$venv_dir"
+    # Change to kubespray directory
+    cd "$KUBESPRAY_DIR" || {
+        log_error "Failed to change directory to $KUBESPRAY_DIR"
+        exit 1
+    }
+
+    # Check if virtual environment already exists
+    if pyenv versions --bare | grep -q "$venv_name"; then
+        log_info "Virtual environment '$venv_name' already exists"
     else
-        log_info "Virtual environment already exists: $venv_dir"
+        log_info "Creating virtual environment: $venv_name"
+        if ! pyenv virtualenv "$PYTHON_VERSION" "$venv_name"; then
+            log_error "Failed to create virtual environment '$venv_name' with Python $PYTHON_VERSION"
+            exit 1
+        fi
+        log_info "Virtual environment '$venv_name' created successfully"
     fi
 
-    # Activate virtual environment
+    # Set local Python version to use the virtual environment
     log_info "Activating virtual environment..."
-    # shellcheck disable=SC1091
-    source "${venv_dir}"/bin/activate
+    if ! pyenv local "$venv_name"; then
+        log_error "Failed to set local Python environment to '$venv_name'"
+        exit 1
+    fi
 
     # Upgrade pip
     pip_install_cmd="pip install"
@@ -2679,7 +2691,7 @@ parse_arguments() {
             esac
             ;;
         *)
-            log_error "Unknown argument: $1. This script only supports --k8s option."
+            log_error "Unknown argument: $1. This script is dedicated to Kubernetes cluster deployment."
             log_error "For UPM components installation, please use upm_setup.sh script."
             show_help
             exit 1
