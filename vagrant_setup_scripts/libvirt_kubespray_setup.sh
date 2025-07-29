@@ -1493,31 +1493,6 @@ setup_python_environment() {
         log_info "Python $PYTHON_VERSION is already installed"
     fi
 
-    # Create virtual environment
-    log_info "Creating virtual environment..."
-    cd "$KUBESPRAY_DIR" || {
-        log_error "Failed to change directory to $KUBESPRAY_DIR"
-        exit 1
-    }
-    
-    # Check if virtual environment already exists
-    if pyenv versions --bare | grep -q "kubespray-env"; then
-        log_info "Virtual environment 'kubespray-env' already exists"
-    else
-        if ! pyenv virtualenv "$PYTHON_VERSION" "kubespray-env"; then
-            log_error "Failed to create virtual environment 'kubespray-env' with Python $PYTHON_VERSION"
-            exit 1
-        fi
-        log_info "Virtual environment 'kubespray-env' created successfully"
-    fi
-    
-    # Set local Python version
-    if ! pyenv local "kubespray-env"; then
-        log_error "Failed to set local Python environment to 'kubespray-env'"
-        exit 1
-    fi
-    log_info "Local Python environment set to 'kubespray-env'"
-
     log_info "Python environment setup completed"
 }
 
@@ -2693,8 +2668,6 @@ EOF
 # Parse Command Line Arguments
 #######################################
 parse_arguments() {
-    local k8s_option_provided=false
-    
     # Process arguments in a single pass
     while [[ $# -gt 0 ]]; do
         case $1 in
