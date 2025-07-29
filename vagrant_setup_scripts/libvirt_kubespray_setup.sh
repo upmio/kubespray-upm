@@ -3,53 +3,30 @@
 # Kubespray Libvirt Environment Setup Script
 #
 # Description:
-#   Enterprise-grade automated setup script for Kubespray Kubernetes cluster environment
-#   with libvirt virtualization on RHEL-based distributions. This script focuses on
-#   setting up the complete infrastructure foundation for Kubernetes deployment.
+#   Automated setup script for Kubespray Kubernetes cluster with libvirt virtualization
+#   on RHEL-based distributions (RHEL/Rocky/AlmaLinux 8/9).
 #
-# System Requirements:
-#   - Operating System: RHEL/Rocky/AlmaLinux 8/9 (x86_64 architecture)
-#   - Hardware: CPU 12+ cores, Memory 32GB+, Storage 200GB+ available
-#   - Access: sudo privileges required, Internet connectivity essential
-#   - Network: Virtualization support (Intel VT-x/AMD-V) enabled in BIOS
+# Requirements:
+#   - Hardware: CPU 12+ cores, Memory 32GB+, Storage 200GB+
+#   - Access: sudo privileges, Internet connectivity
+#   - Virtualization: Intel VT-x/AMD-V enabled
 #
-# Technical Features:
-#   ✓ Complete Kubespray environment automation with error handling
-#   ✓ libvirt/KVM virtualization stack installation and configuration
-#   ✓ Python environment management via pyenv with version control
-#   ✓ Kubernetes cluster deployment with validation and health checks
-#   ✓ Interactive and automated installation modes with confirmation prompts
-#   ✓ Advanced network configuration (nat/bridge networking)
-#   ✓ containerd registry configuration with custom registry support
-#   ✓ Comprehensive logging, monitoring, and troubleshooting capabilities
-#   ✓ Proxy configuration support for enterprise environments
-#   ✓ Intelligent VM management with count validation and flexible handling options
-#   ✓ Smart VM deployment strategies (keep existing, re-provision, or recreate)
+# Features:
+#   - libvirt/KVM virtualization setup
+#   - Python environment via pyenv
+#   - Kubernetes cluster deployment
+#   - Network configuration (nat/bridge)
+#   - Proxy support for enterprise environments
 #
 # Environment Variables:
-#   HTTP_PROXY         - HTTP proxy server URL for package downloads
-#   HTTPS_PROXY        - HTTPS proxy server URL for secure connections
-#   NO_PROXY           - Comma-separated list of hosts to bypass proxy
-#   PYTHON_VERSION     - Python version for pyenv installation (default: 3.12.11)
-#   PIP_PROXY          - Proxy configuration for pip package manager
-#   GIT_PROXY          - Proxy configuration for git operations
+#   HTTP_PROXY/HTTPS_PROXY - Proxy server URLs
+#   NO_PROXY               - Hosts to bypass proxy
+#   PYTHON_VERSION         - Python version (default: 3.12.11)
 #
-# Fixed Directory Paths:
-#   KUBESPRAY_DIR      - ./kubespray-upm (relative to script location)
-#   KUBECONFIG         - $HOME/.kube/config (kubectl configuration)
-#   KUBECTL            - $HOME/bin/kubectl (kubectl binary location)
-#   LOG_FILE           - ./libvirt_kubespray_setup.log (installation log)
-#
-# Network Configuration:
-#   NAT Mode:    Uses NAT networking with libvirt default network
-#   Bridge Mode: Requires bridge interface configuration for direct network access
-#
-# Security Features:
-#   ✓ SELinux compatibility and configuration management
-#   ✓ Firewall rules configuration for required services
-#   ✓ Secure sudo privilege validation and usage
-#   ✓ Input validation and sanitization for all user inputs
-#   ✓ Comprehensive error handling with detailed logging
+# Key Paths:
+#   KUBESPRAY_DIR - ./kubespray-upm
+#   KUBECONFIG    - $HOME/.kube/config
+#   LOG_FILE      - ./libvirt_kubespray_setup.log
 #
 # License: Apache License 2.0
 # Author: Kubespray UPM Team
