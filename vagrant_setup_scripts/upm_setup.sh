@@ -1718,7 +1718,6 @@ ${WHITE}OPTIONS:${NC}
     -h, --help              Show this help message and exit
     -v, --version           Show version information and exit
     -y                      Automatic yes to prompts (non-interactive mode)
-    -n                      Automatic no to prompts (skip all installations)
 
 ${WHITE}INSTALL OPTIONS:${NC}
     --lvmlocalpv            Install OpenEBS LVM LocalPV for persistent storage
