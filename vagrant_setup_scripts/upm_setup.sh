@@ -1166,7 +1166,7 @@ install_upm_platform() {
     log_info "✅ LVM LocalPV Helm release found"
     
     # Check if the required StorageClass exists
-    if ! ku be c t l get storageclass "$LVM_LOCALPV_STORAGECLASS_NAME" >/dev/null 2>&1; then
+    if ! kubectl get storageclass "$LVM_LOCALPV_STORAGECLASS_NAME" >/dev/null 2>&1; then
         log_error "Required StorageClass '$LVM_LOCALPV_STORAGECLASS_NAME' not found."
         echo -e "${RED}❌ LVM LocalPV StorageClass is missing.${NC}"
         echo -e "${WHITE}Available StorageClasses:${NC}"
