@@ -58,6 +58,7 @@ $upm_control_plane_vm_memory ||= 32768         # Memory for UPM control plane (M
 $upm_control_plane_vm_cpus ||= 8               # CPU cores for UPM control plane
 
 # Network Configuration
+$dns_server ||= "8.8.8.8"                      # DNS server
 $vm_network ||= "nat"                          # Network type: nat or bridge
 # When $vm_network is "bridge", use bridge interface br0
 # $bridge_nic ||= "br0"                          # Bridge network interface for bridge mode
@@ -75,7 +76,7 @@ $ntp_manage_config ||= "True"
 # Kubernetes Configuration
 $network_plugin ||= "calico"                   # CNI plugin (calico, flannel, etc.)
 $multi_networking ||= "False"                  # Enable Multus CNI for multi-networking
-$kube_version ||= "1.32.5"                     # Kubernetes version
+$kube_version ||= "1.32.7"                     # Kubernetes version
 
 # Download and Cache Configuration
 $download_run_once ||= "True"                  # Download binaries only once
@@ -436,6 +437,7 @@ def configure_rocky_network(node)
   end
 
   # Common DNS configuration for Rocky Linux
+  dns_server = $dns_server
   network_script += <<-SHELL
     sudo echo -e "[main]\ndns=default\n\n[global-dns-domain-*]\nservers=#{dns_server}" | sudo tee /etc/NetworkManager/conf.d/dns.conf
     sudo systemctl restart NetworkManager
