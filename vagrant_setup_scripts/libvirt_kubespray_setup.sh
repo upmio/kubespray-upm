@@ -117,8 +117,6 @@ declare PROMPT_RESULT=""
 # Global variable for auto-confirm mode (-y parameter)
 declare AUTO_CONFIRM=false
 
-
-
 # Global variables for Vagrant configuration (extracted from config.rb)
 declare G_NUM_INSTANCES="5"
 declare G_KUBE_MASTER_INSTANCES=""
@@ -900,8 +898,6 @@ validate_required_variables() {
     log_info "Variable validation passed"
 }
 
-
-
 #######################################
 # System Validation Functions
 #######################################
@@ -1246,15 +1242,6 @@ check_sudo_privileges() {
 }
 
 #######################################
-# Sudo Session Management Functions
-#######################################
-
-# Check and display sudo configuration for troubleshooting
-
-
-
-
-#######################################
 # Network and Proxy Functions
 #######################################
 
@@ -1284,7 +1271,6 @@ install_libvirt() {
     # Install basic packages
     log_info "Installing basic packages..."
     install_packages "$SYSTEM_PACKAGES"
-
 
     # Install Libvirt packages
     log_info "Installing Libvirt packages..."
