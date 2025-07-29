@@ -431,15 +431,9 @@ validate_cluster_connectivity() {
     echo -e "   ${GREEN}•${NC} Total: ${WHITE}$(kubectl get namespaces --no-headers 2>/dev/null | wc -l | tr -d ' ')${NC} namespaces"
     echo
 
-    # Interactive confirmation unless in non-interactive mode
-    if [[ "$NON_INTERACTIVE" != "true" ]]; then
-        echo -e "${YELLOW}⚠️  Do you want to proceed with the installation on this cluster?${NC}"
-        if ! confirm_action; then
-            log_info "Installation cancelled by user."
-            exit 0
-        fi
-    else
-        log_info "Non-interactive mode: proceeding with installation."
+    if ! prompt_yes_no "Do you want to proceed with the installation on this cluster?"; then
+        log_info "Installation cancelled by user."
+        exit 0
     fi
 }
 
@@ -463,9 +457,6 @@ validate_required_variables() {
         exit 1
     fi
     log_info "kubectl command found: $(which kubectl)"
-
-    # Validate kubectl cluster connectivity and display information
-    validate_cluster_connectivity
 
     log_info "Variable validation passed"
 }
@@ -1826,6 +1817,9 @@ main() {
     
     # Parse command line arguments (sets global INSTALLATION_OPTIONS array)
     parse_arguments "$@"
+
+    # Validate cluster connectivity
+    validate_cluster_connectivity
     
     # Validate that only one installation option is provided
     if [[ ${#INSTALLATION_OPTIONS[@]} -ne 1 ]]; then
