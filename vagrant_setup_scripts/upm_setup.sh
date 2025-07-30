@@ -1168,7 +1168,7 @@ install_upm_platform() {
         log_error "LVM LocalPV Helm release not found. LVM LocalPV is required for UPM Platform."
         echo -e "${RED}❌ LVM LocalPV is not installed.${NC}"
         echo -e "${WHITE}To install LVM LocalPV, run:${NC}"
-        echo -e "   ${CYAN}./libvirt_kubespray_setup.sh --lvmlocalpv${NC}"
+        echo -e "   ${CYAN}./upm_setup.sh --lvmlocalpv${NC}"
         echo -e "${WHITE}Or use the interactive menu option.${NC}\n"
         error_exit "UPM Platform installation cancelled due to missing LVM LocalPV"
     fi
