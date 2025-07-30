@@ -2729,9 +2729,16 @@ main() {
     # Configure bridge network if needed
     if [[ $NETWORK_TYPE == "bridge" ]]; then
         log_info "Configuring bridge network settings..."
-        # Capture network configuration from interactive function
-        BRIDGE_NETWORK_CONFIG=$(configure_bridge_network_interactive)
-        if [[ $? -ne 0 || -z $BRIDGE_NETWORK_CONFIG ]]; then
+        # Execute interactive function directly and capture output via temporary file
+        local temp_config_file="/tmp/bridge_config_$$"
+        if configure_bridge_network_interactive > "$temp_config_file"; then
+            BRIDGE_NETWORK_CONFIG=$(cat "$temp_config_file")
+            rm -f "$temp_config_file"
+            if [[ -z $BRIDGE_NETWORK_CONFIG ]]; then
+                error_exit "Failed to configure bridge network settings - no configuration returned"
+            fi
+        else
+            rm -f "$temp_config_file"
             error_exit "Failed to configure bridge network settings"
         fi
         log_info "Bridge network configuration captured: $BRIDGE_NETWORK_CONFIG"
