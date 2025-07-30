@@ -2188,7 +2188,6 @@ vagrant_and_run_kubespray() {
     # Deployment Commands
     echo -e "\n${WHITE}📋 Commands to Execute:${NC}"
     echo -e "   ${GREEN}1.${NC} ${CYAN}cd $KUBESPRAY_DIR${NC}"
-    echo -e "   ${GREEN}2.${NC} ${CYAN}source venv/bin/activate${NC}"
     echo -e "   ${GREEN}3.${NC} ${CYAN}vagrant up --provider=libvirt --no-parallel${NC}"
 
     # Time Estimate
@@ -2202,11 +2201,6 @@ vagrant_and_run_kubespray() {
         # Change to kubespray directory
         echo -e "${YELLOW}📁 Changing to kubespray directory...${NC}"
         cd "$KUBESPRAY_DIR" || error_exit "Failed to change to kubespray directory: $KUBESPRAY_DIR"
-
-        # Activate virtual environment
-        echo -e "${YELLOW}🐍 Activating Python virtual environment...${NC}"
-        # shellcheck disable=SC1091
-        source venv/bin/activate || error_exit "Failed to activate virtual environment"
 
         # Configure containerd registries before deployment
         configure_containerd_registries
@@ -2469,13 +2463,13 @@ vagrant_and_run_kubespray() {
             echo -e "   ${YELLOW}•${NC} Destroy: ${CYAN}sudo virsh destroy <vm_name> && sudo virsh undefine <vm_name> --remove-all-storage${NC}\n"
         else
             echo -e "\n${RED}❌ Deployment failed! Check logs above.${NC}\n"
-            echo -e "${YELLOW}🔄 Retry: ${CYAN}cd $KUBESPRAY_DIR && source venv/bin/activate && vagrant up --provider=libvirt --no-parallel${NC}\n"
+            echo -e "${YELLOW}🔄 Retry: ${CYAN}cd $KUBESPRAY_DIR && vagrant up --provider=libvirt --no-parallel${NC}\n"
             return 1
         fi
     else
         echo -e "\n${YELLOW}⏸️  Deployment cancelled.${NC}\n"
         echo -e "${WHITE}📝 Config: ${CYAN}$VAGRANT_CONF_FILE${NC}\n"
-        echo -e "${WHITE}🚀 Manual deploy: ${CYAN}cd $KUBESPRAY_DIR && source venv/bin/activate && vagrant up --provider=libvirt --no-parallel${NC}\n"
+        echo -e "${WHITE}🚀 Manual deploy: ${CYAN}cd $KUBESPRAY_DIR && vagrant up --provider=libvirt --no-parallel${NC}\n"
         return 0
     fi
 }
