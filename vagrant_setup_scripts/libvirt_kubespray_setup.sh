@@ -689,8 +689,8 @@ configure_bridge_network_interactive() {
     # Set global variables for backward compatibility
     BRIDGE_INTERFACE="$bridge_interface"
 
-    # Return configuration as pipe-separated string
-    echo "$bridge_interface|$subnet|$netmask|$gateway|$dns_server|$subnet_split4"
+    # Set configuration as global variable instead of echo output
+    BRIDGE_NETWORK_CONFIG="$bridge_interface|$subnet|$netmask|$gateway|$dns_server|$subnet_split4"
     return 0
 }
 
@@ -2729,16 +2729,9 @@ main() {
     # Configure bridge network if needed
     if [[ $NETWORK_TYPE == "bridge" ]]; then
         log_info "Configuring bridge network settings..."
-        # Execute interactive function directly and capture output via temporary file
-        local temp_config_file="/tmp/bridge_config_$$"
-        if configure_bridge_network_interactive > "$temp_config_file"; then
-            BRIDGE_NETWORK_CONFIG=$(cat "$temp_config_file")
-            rm -f "$temp_config_file"
-            if [[ -z $BRIDGE_NETWORK_CONFIG ]]; then
-                error_exit "Failed to configure bridge network settings - no configuration returned"
-            fi
-        else
-            rm -f "$temp_config_file"
+        # Execute interactive function directly in main shell
+        # The function displays interaction to user and sets BRIDGE_NETWORK_CONFIG global variable
+        if ! configure_bridge_network_interactive || [[ -z $BRIDGE_NETWORK_CONFIG ]]; then
             error_exit "Failed to configure bridge network settings"
         fi
         log_info "Bridge network configuration captured: $BRIDGE_NETWORK_CONFIG"
