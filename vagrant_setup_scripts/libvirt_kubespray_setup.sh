@@ -1677,92 +1677,6 @@ setup_virtual_environment() {
 }
 
 # Function to configure bridge network settings interactively
-# Apply bridge network configuration to Vagrant config file
-# Parameters: bridge_interface subnet netmask gateway dns_server subnet_split4 [config_file]
-# Usage: configure_bridge_network_settings "eth0" "192.168.1" "255.255.255.0" "192.168.1.1" "8.8.8.8" "90" [config_file]
-configure_bridge_network_settings() {
-    local bridge_interface="$1"
-    local subnet="$2"
-    local netmask="$3"
-    local gateway="$4"
-    local dns_server="$5"
-    local subnet_split4="$6"
-    local config_file="${7:-$VAGRANT_CONF_FILE}" # Use provided file or default
-
-    # Validate input parameters
-    if [[ $# -lt 6 || $# -gt 7 ]]; then
-        log_error "configure_bridge_network_settings requires 6 or 7 parameters"
-        log_error "Usage: configure_bridge_network_settings bridge_interface subnet netmask gateway dns_server subnet_split4 [config_file]"
-        return 1
-    fi
-
-    # Validate that all parameters are non-empty
-    if [[ -z $bridge_interface || -z $subnet || -z $netmask ||
-        -z $gateway || -z $dns_server || -z $subnet_split4 ]]; then
-        log_error "All network configuration parameters must be non-empty"
-        log_error "Received: bridge_interface='$bridge_interface', subnet='$subnet', netmask='$netmask'"
-        log_error "          gateway='$gateway', dns_server='$dns_server', subnet_split4='$subnet_split4'"
-        return 1
-    fi
-
-    local temp_file
-    local lock_file
-    temp_file="${config_file}.tmp"
-    lock_file="${config_file}.lock"
-
-    log_info "Applying bridge network settings to configuration..."
-    log_info "Bridge Interface: $bridge_interface, Subnet: $subnet, Gateway: $gateway, DNS: $dns_server"
-
-    # Acquire file lock to prevent concurrent modifications
-    if ! (
-        set -C
-        echo $$ >"$lock_file"
-    ) 2>/dev/null; then
-        log_error "Another process is modifying the network configuration. Please wait and try again."
-        return 1
-    fi
-
-    # Set up cleanup trap
-    trap 'rm -f "$lock_file" "$temp_file"' EXIT
-
-    # Apply the configuration to the config file
-    awk -v subnet="$subnet" \
-        -v netmask="$netmask" \
-        -v gateway="$gateway" \
-        -v dns_server="$dns_server" \
-        -v subnet_split4="$subnet_split4" \
-        -v bridge_name="$BRIDGE_NAME" \
-        '{
-        if ($0 ~ /^\$subnet = /) {
-            print "$subnet = \"" subnet "\""
-        } else if ($0 ~ /^\$netmask = /) {
-            print "$netmask = \"" netmask "\""
-        } else if ($0 ~ /^\$gateway = /) {
-            print "$gateway = \"" gateway "\""
-        } else if ($0 ~ /^\$dns_server = /) {
-            print "$dns_server = \"" dns_server "\""
-        } else if ($0 ~ /^\$subnet_split4 = /) {
-            print "$subnet_split4 = " subnet_split4
-        } else if ($0 ~ /^\$bridge_nic = /) {
-            print "$bridge_nic = \"" bridge_name "\""
-        } else {
-            print $0
-        }
-    }' "$config_file" >"$temp_file"
-
-    # Replace the original file
-    if mv "$temp_file" "$config_file"; then
-        log_info "Bridge network configuration applied successfully to $config_file"
-        rm -f "$lock_file"
-        trap - EXIT # Remove trap since we're cleaning up manually
-        return 0
-    else
-        log_error "Failed to apply configuration to $config_file"
-        rm -f "$lock_file" "$temp_file"
-        trap - EXIT # Remove trap since we're cleaning up manually
-        return 1
-    fi
-}
 
 configure_vagrant_config() {
     log_info "Configuring Vagrant config.rb ..."
@@ -1772,9 +1686,24 @@ configure_vagrant_config() {
         mkdir -p "$VAGRANT_CONF_DIR"
     fi
 
+    local temp_file="${VAGRANT_CONF_FILE}.tmp"
+    local lock_file
+    lock_file="${VAGRANT_CONF_FILE}.lock"
+
+    # Acquire file lock to prevent concurrent modifications
+    if ! (
+        set -C
+        echo $$ >"$lock_file"
+    ) 2>/dev/null; then
+        log_error "Another process is modifying the config file. Please wait and try again."
+        error_exit "Failed to acquire config file lock"
+    fi
+
+    # Set up cleanup trap
+    trap 'rm -f "$lock_file" "$temp_file"' EXIT
+
     # Declare local variables
     local template_file
-    local temp_file
     template_file="$KUBESPRAY_DIR/vagrant_setup_scripts/vagrant-config/${NETWORK_TYPE}_network-config.rb"
 
     # Copy template to config.rb
@@ -1793,25 +1722,57 @@ configure_vagrant_config() {
         if [[ -n $BRIDGE_NETWORK_CONFIG ]]; then
             # Parse the bridge network configuration
             IFS='|' read -r bridge_interface subnet netmask gateway dns_server subnet_split4 <<<"$BRIDGE_NETWORK_CONFIG"
-            configure_bridge_network_settings "$bridge_interface" "$subnet" "$netmask" "$gateway" "$dns_server" "$subnet_split4"
+
+            # Validate that all parameters are non-empty
+            if [[ -z $bridge_interface || -z $subnet || -z $netmask ||
+                -z $gateway || -z $dns_server || -z $subnet_split4 ]]; then
+                log_error "All network configuration parameters must be non-empty"
+                log_error "Received: bridge_interface='$bridge_interface', subnet='$subnet', netmask='$netmask'"
+                log_error "          gateway='$gateway', dns_server='$dns_server', subnet_split4='$subnet_split4'"
+                error_exit "Invalid bridge network configuration parameters"
+            fi
+
+            log_info "Applying bridge network settings to configuration..."
+            log_info "Bridge Interface: $bridge_interface, Subnet: $subnet, Gateway: $gateway, DNS: $dns_server"
+
+            # Apply the configuration to the config file
+            awk -v subnet="$subnet" \
+                -v netmask="$netmask" \
+                -v gateway="$gateway" \
+                -v dns_server="$dns_server" \
+                -v subnet_split4="$subnet_split4" \
+                -v bridge_name="$BRIDGE_NAME" \
+                '{
+                if ($0 ~ /^\$subnet = /) {
+                    print "$subnet = \"" subnet "\""
+                } else if ($0 ~ /^\$netmask = /) {
+                    print "$netmask = \"" netmask "\""
+                } else if ($0 ~ /^\$gateway = /) {
+                    print "$gateway = \"" gateway "\""
+                } else if ($0 ~ /^\$dns_server = /) {
+                    print "$dns_server = \"" dns_server "\""
+                } else if ($0 ~ /^\$subnet_split4 = /) {
+                    print "$subnet_split4 = " subnet_split4
+                } else if ($0 ~ /^\$bridge_nic = /) {
+                    print "$bridge_nic = \"" bridge_name "\""
+                } else {
+                    print $0
+                }
+            }' "$VAGRANT_CONF_FILE" >"$temp_file"
+
+            # Replace the original file
+            if mv "$temp_file" "$VAGRANT_CONF_FILE"; then
+                log_info "Bridge network configuration applied successfully to $VAGRANT_CONF_FILE"
+            else
+                log_error "Failed to apply configuration to $VAGRANT_CONF_FILE"
+                error_exit "Failed to update Vagrant configuration file"
+            fi
         else
             error_exit "Bridge network configuration not available. Please run configure_bridge_network_interactive first."
         fi
     elif [[ $NETWORK_TYPE == "nat" ]]; then
-        # Configure DNS server
-        log_info "Configuring DNS server in config.rb"
-
-        # Get DNS server from system
-        dns_server=$(grep nameserver /etc/resolv.conf | awk '{print $2}' | head -1)
-
-        if [[ -n $dns_server ]]; then
-            log_info "Detected DNS server: $dns_server"
-
-            # Create temporary file for processing
-            temp_file="${VAGRANT_CONF_FILE}.tmp"
-
-            # Update DNS server configuration in config.rb
-            awk -v dns_server="$dns_server" '
+        # Update DNS server configuration in config.rb
+        awk -v dns_server="$DNS_SERVER" '
         {
             if ($0 ~ /^# \$dns_server = ""/) {
                 print "$dns_server = \"" dns_server "\""
@@ -1820,21 +1781,18 @@ configure_vagrant_config() {
             }
         }' "$VAGRANT_CONF_FILE" >"$temp_file"
 
-            # Replace the original file
-            mv "$temp_file" "$VAGRANT_CONF_FILE"
-
+        # Replace the original file
+        if mv "$temp_file" "$VAGRANT_CONF_FILE"; then
             log_info "DNS server configuration updated in config.rb"
         else
-            log_warn "Could not detect DNS server, keeping default configuration"
+            log_error "Failed to update DNS server configuration in $VAGRANT_CONF_FILE"
+            error_exit "Failed to update DNS server configuration"
         fi
     fi
 
     # Configure proxy settings if HTTP_PROXY is set
     if [ -n "$HTTP_PROXY" ]; then
         log_info "Configuring proxy settings in config.rb"
-
-        # Create a temporary file for safe editing
-        temp_file="${VAGRANT_CONF_FILE}.tmp"
 
         # Use awk for safer text replacement
         awk -v http_proxy="$HTTP_PROXY" \
@@ -1856,9 +1814,12 @@ configure_vagrant_config() {
         }' "$VAGRANT_CONF_FILE" >"$temp_file"
 
         # Replace the original file
-        mv "$temp_file" "$VAGRANT_CONF_FILE"
-
-        log_info "Proxy configuration completed:"
+        if mv "$temp_file" "$VAGRANT_CONF_FILE"; then
+            log_info "Proxy configuration completed:"
+        else
+            log_error "Failed to update proxy configuration in $VAGRANT_CONF_FILE"
+            error_exit "Failed to update proxy configuration"
+        fi
         log_info "  HTTP_PROXY: $HTTP_PROXY"
         log_info "  HTTPS_PROXY: $HTTPS_PROXY"
         log_info "  NO_PROXY: $NO_PROXY"
@@ -1893,7 +1854,6 @@ configure_vagrant_config() {
         G_VM_MEMORY=49152 # 48GB
     fi
 
-    temp_file="${VAGRANT_CONF_FILE}.tmp"
     # Add VM resource configuration to config.rb
     awk -v vm_cpus="$G_VM_CPUS" \
         -v vm_memory="$G_VM_MEMORY" \
@@ -1908,11 +1868,13 @@ configure_vagrant_config() {
     }' "$VAGRANT_CONF_FILE" >"$temp_file"
 
     # Replace the original file
-    mv "$temp_file" "$VAGRANT_CONF_FILE"
-
-    log_info "Recommended VM resources added to config.rb: CPUs=$G_VM_CPUS, Memory=${G_VM_MEMORY}MB"
-
-    log_info "Vagrant config.rb configuration completed: $VAGRANT_CONF_FILE"
+    if mv "$temp_file" "$VAGRANT_CONF_FILE"; then
+        log_info "Recommended VM resources added to config.rb: CPUs=$G_VM_CPUS, Memory=${G_VM_MEMORY}MB"
+        log_info "Vagrant config.rb configuration completed: $VAGRANT_CONF_FILE"
+    else
+        log_error "Failed to update VM resource configuration in $VAGRANT_CONF_FILE"
+        error_exit "Failed to update VM resource configuration"
+    fi
 }
 
 setup_kubespray_project() {
@@ -1989,6 +1951,7 @@ extract_vagrant_config_variables() {
     G_NETWORK_PLUGIN=$(grep "^\$network_plugin\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "calico")
     G_INSTANCE_NAME_PREFIX=$(grep "^\$instance_name_prefix\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "k8s")
     G_SUBNET_SPLIT4=$(grep "^\$subnet_split4\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/' || echo "100")
+    G_DNS_SERVER=$(grep "^\$dns_server\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "8.8.8.8")
 
     # Extract network configuration
     G_VM_NETWORK=$(grep "^\$vm_network\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "nat")
@@ -1997,13 +1960,10 @@ extract_vagrant_config_variables() {
     if [[ $G_VM_NETWORK == "bridge" ]]; then
         G_SUBNET=$(grep "^\$subnet\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "")
         G_NETMASK=$(grep "^\$netmask\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "")
-        G_GATEWAY=$(grep "^\$gateway\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "")
-        G_DNS_SERVER=$(grep "^\$dns_server\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "")
     else
         G_SUBNET="192.168.200"
         G_NETMASK="255.255.255.0"
         G_GATEWAY=""
-        G_DNS_SERVER=""
     fi
 
     # Ensure all numeric variables have valid default values to prevent arithmetic errors
@@ -2071,6 +2031,7 @@ parse_vagrant_config() {
         echo -e "   ${GREEN}•${NC} Mode: ${CYAN}NAT Network${NC}"
         echo -e "   ${GREEN}•${NC} Subnet: ${CYAN}192.168.200.0${NC}"
         echo -e "   ${GREEN}•${NC} Netmask: ${CYAN}255.255.255.0${NC}"
+        echo -e "   ${GREEN}•${NC} DNS: ${CYAN}$G_DNS_SERVER${NC}"
     fi
 
     # Show VM IP address preview
@@ -2120,6 +2081,7 @@ show_setup_confirmation() {
     else
         echo -e "   ${YELLOW}•${NC} Bridge: ${YELLOW}Not configured${NC}"
         echo -e "   ${GREEN}•${NC} NAT: ${CYAN}192.168.200.0/24${NC} (DHCP: Enabled)"
+        echo -e "   ${GREEN}•${NC} DNS: ${CYAN}${DNS_SERVER}${NC}"
     fi
 
     # Proxy Configuration
@@ -2789,15 +2751,19 @@ main() {
     if [[ $NETWORK_TYPE == "bridge" ]]; then
         log_info "Configuring bridge network settings..."
         # Capture network configuration from interactive function
-        local bridge_config
-        bridge_config=$(configure_bridge_network_interactive)
-        if [[ $? -ne 0 || -z $bridge_config ]]; then
+        BRIDGE_NETWORK_CONFIG=$(configure_bridge_network_interactive)
+        if [[ $? -ne 0 || -z $BRIDGE_NETWORK_CONFIG ]]; then
             error_exit "Failed to configure bridge network settings"
         fi
-
-        # Store configuration for later use
-        BRIDGE_NETWORK_CONFIG="$bridge_config"
         log_info "Bridge network configuration captured: $BRIDGE_NETWORK_CONFIG"
+    elif [[ $NETWORK_TYPE == "nat" ]]; then
+        log_info "Configuring NAT network settings..."
+        DNS_SERVER=$(grep nameserver /etc/resolv.conf | awk '{print $2}' | head -1)
+        if [[ -z $DNS_SERVER ]]; then
+            log_warn "No DNS server detected from system configuration. Using default: 8.8.8.8"
+            DNS_SERVER="8.8.8.8"
+        fi
+        log_info "Detected DNS server: $DNS_SERVER"
     fi
 
     # System validation
