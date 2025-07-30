@@ -1759,7 +1759,7 @@ configure_vagrant_config() {
         # Update DNS server configuration in config.rb
         awk -v dns_server="$DNS_SERVER" '
         {
-            if ($0 ~ /^# \$dns_server = ""/) {
+            if ($0 ~ /^$dns_server = /) {
                 print "$dns_server = \"" dns_server "\""
             } else {
                 print $0

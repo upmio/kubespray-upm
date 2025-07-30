@@ -153,7 +153,7 @@ $subnet_split4 = 100
 # Network subnet (first 3 octets) - bridge only
 $subnet = "192.168.29"
 
-# $dns_server = ""              # DNS server
+$dns_server = "8.8.8.8"         # DNS server
 
 # Network configuration - bridge only
 $netmask = "255.255.240.0"      # Subnet mask
