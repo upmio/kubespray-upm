@@ -2671,12 +2671,12 @@ parse_arguments() {
                 show_help
                 exit 1
             }
-            if [[ $2 =~ ^[1-9][0-9]*$ ]] && [[ $2 -le 50 ]]; then
+            if [[ $2 -ge 3 ]] && [[ $2 -le 50 ]]; then
                 G_NUM_INSTANCES="$2"
                 log_info "Virtual machine count set to: $G_NUM_INSTANCES"
                 shift 2
             else
-                log_error "Invalid virtual machine count: $2. Must be a positive integer between 1 and 50"
+                log_error "Invalid virtual machine count: $2. Must be a positive integer between 3 and 50"
                 exit 1
             fi
             ;;
