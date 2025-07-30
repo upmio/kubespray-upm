@@ -99,28 +99,26 @@ declare BRIDGE_NETWORK_CONFIG=""
 
 # Global variables for Vagrant configuration (extracted from config.rb)
 declare G_NUM_INSTANCES="5"
-declare G_KUBE_MASTER_INSTANCES=""
-declare G_UPM_CTL_INSTANCES=""
-declare G_VM_CPUS=""
-declare G_VM_MEMORY=""
-declare G_KUBE_MASTER_VM_CPUS=""
-declare G_KUBE_MASTER_VM_MEMORY=""
-declare G_UPM_CONTROL_PLANE_VM_CPUS=""
-declare G_UPM_CONTROL_PLANE_VM_MEMORY=""
-declare G_KUBE_VERSION=""
-declare G_OS=""
-declare G_NETWORK_PLUGIN=""
-declare G_INSTANCE_NAME_PREFIX=""
-declare G_WORKER_NODES=""
-declare G_VM_NETWORK=""
-declare G_SUBNET_SPLIT4=""
-declare G_SUBNET=""
-declare G_NETMASK=""
-declare G_GATEWAY=""
-declare G_DNS_SERVER=""
-
-declare SYS_MEMORY_MB=""
-declare SYS_CPU_CORES=""
+declare G_KUBE_MASTER_INSTANCES="1"
+declare G_UPM_CTL_INSTANCES="1"
+declare G_VM_CPUS="6"
+declare G_VM_MEMORY="8192"
+declare G_KUBE_MASTER_VM_CPUS="4"
+declare G_KUBE_MASTER_VM_MEMORY="4096"
+declare G_UPM_CONTROL_PLANE_VM_CPUS="12"
+declare G_UPM_CONTROL_PLANE_VM_MEMORY="24576"
+declare G_KUBE_VERSION="1.32.7"
+declare G_OS="rockylinux9"
+declare G_NETWORK_PLUGIN="calico"
+declare G_INSTANCE_NAME_PREFIX="k8s"
+declare G_WORKER_NODES
+declare G_SUBNET_SPLIT4="100"
+declare G_SUBNET
+declare G_NETMASK
+declare G_GATEWAY
+declare G_DNS_SERVER="8.8.8.8"
+declare SYS_MEMORY_MB
+declare SYS_CPU_CORES
 
 # Log file configuration
 LOG_FILE="${SCRIPT_DIR}/libvirt_kubespray_setup.log"
@@ -1839,14 +1837,17 @@ configure_vagrant_config() {
         G_VM_MEMORY=49152 # 48GB
     fi
 
-    # Add VM resource configuration to config.rb
+    # Add VM resource and instance count configuration to config.rb
     awk -v vm_cpus="$G_VM_CPUS" \
         -v vm_memory="$G_VM_MEMORY" \
+        -v num_instances="$G_NUM_INSTANCES" \
         '{
         if ($0 ~ /^# \$vm_cpus = ""/) {
             print "$vm_cpus = " vm_cpus
         } else if ($0 ~ /^# \$vm_memory = ""/) {
             print "$vm_memory = " vm_memory
+        } else if ($0 ~ /^\$num_instances = /) {
+            print "$num_instances = " num_instances
         } else {
             print $0
         }
@@ -1854,11 +1855,11 @@ configure_vagrant_config() {
 
     # Replace the original file
     if mv "$temp_file" "$VAGRANT_CONF_FILE"; then
-        log_info "Recommended VM resources added to config.rb: CPUs=$G_VM_CPUS, Memory=${G_VM_MEMORY}MB"
+        log_info "VM configuration added to config.rb: Instances=$G_NUM_INSTANCES, CPUs=$G_VM_CPUS, Memory=${G_VM_MEMORY}MB"
         log_info "Vagrant config.rb configuration completed: $VAGRANT_CONF_FILE"
     else
-        log_error "Failed to update VM resource configuration in $VAGRANT_CONF_FILE"
-        error_exit "Failed to update VM resource configuration"
+        log_error "Failed to update VM configuration in $VAGRANT_CONF_FILE"
+        error_exit "Failed to update VM configuration"
     fi
 }
 
@@ -1924,42 +1925,28 @@ extract_vagrant_config_variables() {
     log_info "Extracting Vagrant configuration variables from: $VAGRANT_CONF_FILE"
 
     # Extract configuration values from config.rb and set as global variables
-    G_NUM_INSTANCES=$(grep "^\$num_instances\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/' || echo "5")
-    G_KUBE_MASTER_INSTANCES=$(grep "^\$kube_master_instances\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/' || echo "1")
-    G_UPM_CTL_INSTANCES=$(grep "^\$upm_ctl_instances\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/' || echo "1")
-    G_KUBE_MASTER_VM_CPUS=$(grep "^\$kube_master_vm_cpus\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/' || echo "4")
-    G_KUBE_MASTER_VM_MEMORY=$(grep "^\$kube_master_vm_memory\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/' || echo "4096")
-    G_UPM_CONTROL_PLANE_VM_CPUS=$(grep "^\$upm_control_plane_vm_cpus\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/' || echo "12")
-    G_UPM_CONTROL_PLANE_VM_MEMORY=$(grep "^\$upm_control_plane_vm_memory\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/' || echo "24576")
-    G_KUBE_VERSION=$(grep "^\$kube_version\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "1.33.2")
-    G_OS=$(grep "^\$os\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "rockylinux9")
-    G_NETWORK_PLUGIN=$(grep "^\$network_plugin\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "calico")
-    G_INSTANCE_NAME_PREFIX=$(grep "^\$instance_name_prefix\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "k8s")
-    G_SUBNET_SPLIT4=$(grep "^\$subnet_split4\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/' || echo "100")
-    G_DNS_SERVER=$(grep "^\$dns_server\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "8.8.8.8")
-
-    # Extract network configuration
-    G_VM_NETWORK=$(grep "^\$vm_network\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "nat")
+    G_NUM_INSTANCES=$(grep "^\$num_instances\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/')
+    G_KUBE_MASTER_INSTANCES=$(grep "^\$kube_master_instances\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/')
+    G_UPM_CTL_INSTANCES=$(grep "^\$upm_ctl_instances\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/')
+    G_KUBE_MASTER_VM_CPUS=$(grep "^\$kube_master_vm_cpus\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/')
+    G_KUBE_MASTER_VM_MEMORY=$(grep "^\$kube_master_vm_memory\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/')
+    G_UPM_CONTROL_PLANE_VM_CPUS=$(grep "^\$upm_control_plane_vm_cpus\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/')
+    G_UPM_CONTROL_PLANE_VM_MEMORY=$(grep "^\$upm_control_plane_vm_memory\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/')
+    G_KUBE_VERSION=$(grep "^\$kube_version\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/')
+    G_OS=$(grep "^\$os\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/')
+    G_NETWORK_PLUGIN=$(grep "^\$network_plugin\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/')
+    G_INSTANCE_NAME_PREFIX=$(grep "^\$instance_name_prefix\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/')
+    G_SUBNET_SPLIT4=$(grep "^\$subnet_split4\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/')
+    G_DNS_SERVER=$(grep "^\$dns_server\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/')
 
     # Extract network-specific variables based on network type
-    if [[ $G_VM_NETWORK == "bridge" ]]; then
+    if [[ $NETWORK_TYPE == "bridge" ]]; then
         G_SUBNET=$(grep "^\$subnet\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "")
         G_NETMASK=$(grep "^\$netmask\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "")
     else
         G_SUBNET="192.168.200"
         G_NETMASK="255.255.255.0"
-        G_GATEWAY=""
     fi
-
-    # Ensure all numeric variables have valid default values to prevent arithmetic errors
-    G_NUM_INSTANCES=${G_NUM_INSTANCES:-5}
-    G_KUBE_MASTER_INSTANCES=${G_KUBE_MASTER_INSTANCES:-1}
-    G_UPM_CTL_INSTANCES=${G_UPM_CTL_INSTANCES:-1}
-    G_KUBE_MASTER_VM_CPUS=${G_KUBE_MASTER_VM_CPUS:-4}
-    G_KUBE_MASTER_VM_MEMORY=${G_KUBE_MASTER_VM_MEMORY:-4096}
-    G_UPM_CONTROL_PLANE_VM_CPUS=${G_UPM_CONTROL_PLANE_VM_CPUS:-12}
-    G_UPM_CONTROL_PLANE_VM_MEMORY=${G_UPM_CONTROL_PLANE_VM_MEMORY:-24576}
-    G_SUBNET_SPLIT4=${G_SUBNET_SPLIT4:-100}
 
     # Calculate derived values
     G_WORKER_NODES=$((G_NUM_INSTANCES - G_KUBE_MASTER_INSTANCES - G_UPM_CTL_INSTANCES))
@@ -2000,9 +1987,9 @@ parse_vagrant_config() {
 
     # Display network configuration
     echo -e "${WHITE}🌐 Network Configuration:${NC}"
-    echo -e "   ${GREEN}•${NC} Type: ${CYAN}$G_VM_NETWORK${NC}"
+    echo -e "   ${GREEN}•${NC} Type: ${CYAN}$NETWORK_TYPE${NC}"
 
-    if [[ $G_VM_NETWORK == "bridge" ]]; then
+    if [[ $NETWORK_TYPE == "bridge" ]]; then
         # BRIDGE_NETWORK information:
         echo -e "   ${GREEN}•${NC} Mode: ${CYAN}Bridge Network${NC}"
         echo -e "${GREEN}✅ Network configuration summary:${NC}"
@@ -2627,6 +2614,7 @@ OPTIONS:
   -h, --help                    Show this help message
   -v, --version                 Show version information
   -y                            Auto-confirm all yes/no prompts (except network bridge configuration)
+  -c <count>                    Set number of virtual machines (default: 5)
   -n <network_type>             Set network type (nat|bridge, default: nat)
                                 When set to 'bridge', interactive configuration will be required
 
@@ -2676,6 +2664,21 @@ parse_arguments() {
         -y)
             AUTO_CONFIRM=true
             shift
+            ;;
+        -c)
+            [[ -z $2 || $2 == -* ]] && {
+                log_error "Option -c requires a number argument (virtual machine count)"
+                show_help
+                exit 1
+            }
+            if [[ $2 =~ ^[1-9][0-9]*$ ]] && [[ $2 -le 50 ]]; then
+                G_NUM_INSTANCES="$2"
+                log_info "Virtual machine count set to: $G_NUM_INSTANCES"
+                shift 2
+            else
+                log_error "Invalid virtual machine count: $2. Must be a positive integer between 1 and 50"
+                exit 1
+            fi
             ;;
         -n)
             [[ -z $2 || $2 == -* ]] && {
