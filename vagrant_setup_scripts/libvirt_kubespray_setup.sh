@@ -677,10 +677,10 @@ configure_bridge_network_interactive() {
     echo -e "\n${GREEN}🎯 Final Bridge Network Configuration:${NC}"
     echo -e "   ${GREEN}•${NC} Bridge Interface: ${CYAN}$bridge_interface${NC}"
     echo -e "   ${GREEN}•${NC} Subnet: ${CYAN}$subnet${NC}"
+    echo -e "   ${GREEN}•${NC} Starting IP: ${CYAN}$subnet.$subnet_split4${NC}"
     echo -e "   ${GREEN}•${NC} Netmask: ${CYAN}$netmask${NC}"
     echo -e "   ${GREEN}•${NC} Gateway: ${CYAN}$gateway${NC}"
-    echo -e "   ${GREEN}•${NC} DNS Server: ${CYAN}$dns_server${NC}"
-    echo -e "   ${GREEN}•${NC} Starting IP: ${CYAN}$subnet.$subnet_split4${NC}\n"
+    echo -e "   ${GREEN}•${NC} DNS Server: ${CYAN}$dns_server${NC}\n"
 
     log_info "Bridge network configuration completed successfully"
 
