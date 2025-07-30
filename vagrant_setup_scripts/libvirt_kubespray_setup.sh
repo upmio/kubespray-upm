@@ -1686,23 +1686,8 @@ configure_vagrant_config() {
         mkdir -p "$VAGRANT_CONF_DIR"
     fi
 
-    local temp_file="${VAGRANT_CONF_FILE}.tmp"
-    local lock_file
-    lock_file="${VAGRANT_CONF_FILE}.lock"
-
-    # Acquire file lock to prevent concurrent modifications
-    if ! (
-        set -C
-        echo $$ >"$lock_file"
-    ) 2>/dev/null; then
-        log_error "Another process is modifying the config file. Please wait and try again."
-        error_exit "Failed to acquire config file lock"
-    fi
-
-    # Set up cleanup trap
-    trap 'rm -f "$lock_file" "$temp_file"' EXIT
-
     # Declare local variables
+    local temp_file="${VAGRANT_CONF_FILE}.tmp"
     local template_file
     template_file="$KUBESPRAY_DIR/vagrant_setup_scripts/vagrant-config/${NETWORK_TYPE}_network-config.rb"
 
