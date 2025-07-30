@@ -94,6 +94,9 @@ declare PROMPT_RESULT=""
 # Global variable for auto-confirm mode (-y parameter)
 declare AUTO_CONFIRM=false
 
+# Global variable for bridge network configuration (pipe-separated string)
+declare BRIDGE_NETWORK_CONFIG=""
+
 # Global variables for Vagrant configuration (extracted from config.rb)
 declare G_NUM_INSTANCES="5"
 declare G_KUBE_MASTER_INSTANCES=""
@@ -167,26 +170,26 @@ log_error() { log_with_level "ERROR" "$@"; }
 time_function() {
     local func_name="$1"
     shift
-    
+
     # Simple performance monitoring display with timestamps
     local start_timestamp
     start_timestamp=$(date '+%H:%M:%S')
     echo -e "${YELLOW}⏱️  Starting: ${BOLD}$func_name${NC} ${BLUE}[$start_timestamp]${NC}"
-    
+
     log_info "Starting function: $func_name"
     local start_time
     start_time=$(date +%s)
-    
+
     # Execute the function
     "$func_name" "$@"
     local exit_code=$?
-    
+
     local end_time
     end_time=$(date +%s)
     local duration=$((end_time - start_time))
     local end_timestamp
     end_timestamp=$(date '+%H:%M:%S')
-    
+
     # Simple completion display with timestamps
     if [[ $exit_code -eq 0 ]]; then
         log_info "Function $func_name completed successfully (Duration: ${duration}s)"
@@ -196,7 +199,7 @@ time_function() {
         echo -e "${RED}❌ Failed: ${BOLD}$func_name${NC} ${BLUE}[$end_timestamp]${NC} ${MAGENTA}(${duration}s, exit: $exit_code)${NC}"
     fi
     echo
-    
+
     return $exit_code
 }
 
@@ -244,13 +247,13 @@ prompt_yes_no() {
     local response
 
     # Auto-confirm mode: automatically return 'yes' unless force_interactive is true
-    if [[ "$AUTO_CONFIRM" == "true" && "$force_interactive" != "true" ]]; then
+    if [[ $AUTO_CONFIRM == "true" && $force_interactive != "true" ]]; then
         echo -e "${CYAN}❓ $question${NC} ${GREEN}(auto-confirmed: yes)${NC}"
         return 0
     fi
 
     while true; do
-        if [[ -n "$default" ]]; then
+        if [[ -n $default ]]; then
             printf "${CYAN}❓ %s [%s]: ${NC}" "$question" "$default"
         else
             printf "${CYAN}❓ %s (yes/no): ${NC}" "$question"
@@ -260,7 +263,7 @@ prompt_yes_no() {
         read -r response
 
         # Use default if response is empty
-        if [[ -z "$response" && -n "$default" ]]; then
+        if [[ -z $response && -n $default ]]; then
             response="$default"
         fi
 
@@ -284,14 +287,14 @@ prompt_yes_no() {
 validate_ip_address() {
     local ip="$1"
     local ip_regex='^([0-9]{1,3}\.){3}[0-9]{1,3}$'
-    
+
     [[ $ip =~ $ip_regex ]] || return 1
-    
+
     # Check each octet with proper IFS handling
     local IFS='.'
     local -a octets
     read -ra octets <<<"$ip"
-    
+
     local octet
     for octet in "${octets[@]}"; do
         # Validate octet range (0-255) and ensure no leading zeros (except for "0")
@@ -299,7 +302,7 @@ validate_ip_address() {
             return 1
         fi
     done
-    
+
     return 0
 }
 
@@ -323,7 +326,7 @@ prompt_ip_input() {
         printf "" >&1
         read -r ip_input
 
-        if [[ -z "$ip_input" ]]; then
+        if [[ -z $ip_input ]]; then
             echo -e "${RED}❌ IP address cannot be empty${NC}"
             continue
         fi
@@ -332,7 +335,7 @@ prompt_ip_input() {
             PROMPT_RESULT="$ip_input"
             return 0
         else
-            if [[ "$validation_func" == "validate_vm_ip_range" ]]; then
+            if [[ $validation_func == "validate_vm_ip_range" ]]; then
                 # Special error message for VM IP range validation
                 local fourth_octet
                 fourth_octet=$(echo "$ip_input" | cut -d'.' -f4)
@@ -366,8 +369,8 @@ prompt_text_input() {
         printf "" >&1
         read -r text_input
 
-        if [[ -z "$text_input" ]]; then
-            if [[ "$allow_empty" == "true" ]]; then
+        if [[ -z $text_input ]]; then
+            if [[ $allow_empty == "true" ]]; then
                 PROMPT_RESULT="$text_input"
                 return 0
             else
@@ -376,7 +379,7 @@ prompt_text_input() {
             fi
         fi
 
-        if [[ -n "$validation_func" ]]; then
+        if [[ -n $validation_func ]]; then
             if $validation_func "$text_input"; then
                 PROMPT_RESULT="$text_input"
                 return 0
@@ -407,7 +410,7 @@ prompt_confirmation_with_retry() {
         printf "" >&1
         read -r user_input
 
-        if [[ "$user_input" == "$expected_value" ]]; then
+        if [[ $user_input == "$expected_value" ]]; then
             echo -e "${GREEN}✅ Confirmation successful${NC}"
             return 0
         else
@@ -463,9 +466,9 @@ select_network_interface() {
     local interface_mac
     local interface_ip
     local interface_speed
-    
+
     log_info "Detecting available network interfaces..."
-    
+
     # Get all non-bridge, non-loopback interfaces using ip -br link
     while IFS= read -r line; do
         # Parse ip -br link output: interface_name state mac_address flags
@@ -473,32 +476,32 @@ select_network_interface() {
             interface_name="${BASH_REMATCH[1]}"
             interface_state="${BASH_REMATCH[2]}"
             interface_mac="${BASH_REMATCH[3]}"
-            
+
             # Skip loopback, bridge, and virtual interfaces
-            if [[ "$interface_name" != "lo" && 
-                  "$interface_name" != *"br"* && 
-                  "$interface_name" != *"virbr"* && 
-                  "$interface_name" != *"docker"* &&
-                  "$interface_name" != *"vnet"* &&
-                  "$interface_name" != *"veth"* ]]; then
-                
+            if [[ $interface_name != "lo" &&
+                $interface_name != *"br"* &&
+                $interface_name != *"virbr"* &&
+                $interface_name != *"docker"* &&
+                $interface_name != *"vnet"* &&
+                $interface_name != *"veth"* ]]; then
+
                 # Get IP address if available
                 interface_ip=$(ip addr show "$interface_name" 2>/dev/null | grep -oP 'inet \K[0-9.]+' | head -1)
-                if [[ -z "$interface_ip" ]]; then
+                if [[ -z $interface_ip ]]; then
                     interface_ip="No IP"
                 fi
-                
+
                 # Normalize state (UNKNOWN -> DOWN for display purposes)
-                if [[ "$interface_state" == "UNKNOWN" ]]; then
+                if [[ $interface_state == "UNKNOWN" ]]; then
                     interface_state="DOWN"
                 fi
-                
+
                 # Get interface speed
                 if [[ -r "/sys/class/net/$interface_name/speed" ]]; then
                     local speed_value
                     speed_value=$(cat "/sys/class/net/$interface_name/speed" 2>/dev/null)
-                    if [[ "$speed_value" =~ ^[0-9]+$ ]] && [[ "$speed_value" -gt 0 ]]; then
-                        if [[ "$speed_value" -ge 1000 ]]; then
+                    if [[ $speed_value =~ ^[0-9]+$ ]] && [[ $speed_value -gt 0 ]]; then
+                        if [[ $speed_value -ge 1000 ]]; then
                             interface_speed="$((speed_value / 1000))Gbps"
                         else
                             interface_speed="${speed_value}Mbps"
@@ -509,42 +512,42 @@ select_network_interface() {
                 else
                     interface_speed="Unknown"
                 fi
-                
+
                 interfaces+=("$interface_name")
                 interface_data+=("$interface_name|$interface_ip|$interface_state|$interface_mac|$interface_speed")
             fi
         fi
     done < <(ip -br link)
-    
+
     if [[ ${#interfaces[@]} -eq 0 ]]; then
         log_error "No suitable network interfaces found"
         return 1
     fi
-    
+
     echo -e "\n${YELLOW}🌐 Available Network Interfaces:${NC}"
     printf "  ${CYAN}%-3s %-12s %-15s %-7s %-20s %-10s${NC}\n" "No." "Interface" "IP Address" "State" "MAC Address" "Speed"
     printf "  ${CYAN}%-3s %-12s %-15s %-7s %-20s %-10s${NC}\n" "---" "----------" "-----------" "-----" "-----------" "-----"
-    
+
     for i in "${!interface_data[@]}"; do
-        IFS='|' read -r name ip state mac speed <<< "${interface_data[i]}"
-        
+        IFS='|' read -r name ip state mac speed <<<"${interface_data[i]}"
+
         # Apply color to state
-        if [[ "$state" == "UP" ]]; then
+        if [[ $state == "UP" ]]; then
             colored_state="${GREEN}UP${NC}\t  "
         else
             colored_state="${RED}DOWN${NC}\t  "
         fi
-        
-        printf "  ${CYAN}%-3s${NC} %-12s %-15s %b %-20s %-10s\n" "$((i+1))." "$name" "$ip" "$colored_state" "$mac" "$speed"
+
+        printf "  ${CYAN}%-3s${NC} %-12s %-15s %b %-20s %-10s\n" "$((i + 1))." "$name" "$ip" "$colored_state" "$mac" "$speed"
     done
     echo
-    
+
     while true; do
         printf "${CYAN}🔗 Select network interface (1-%s): ${NC}" "${#interfaces[@]}"
         read -r choice
-        
-        if [[ "$choice" =~ ^[0-9]+$ ]] && [[ "$choice" -ge 1 ]] && [[ "$choice" -le ${#interfaces[@]} ]]; then
-            SELECTED_INTERFACE="${interfaces[$((choice-1))]}"
+
+        if [[ $choice =~ ^[0-9]+$ ]] && [[ $choice -ge 1 ]] && [[ $choice -le ${#interfaces[@]} ]]; then
+            SELECTED_INTERFACE="${interfaces[$((choice - 1))]}"
             echo -e "${GREEN}✅ Selected interface: ${CYAN}$SELECTED_INTERFACE${NC}\n"
             return 0
         else
@@ -556,6 +559,8 @@ select_network_interface() {
 # Function to interactively configure bridge network settings
 # Usage: configure_bridge_network_interactive
 # Sets global variables: BRIDGE_INTERFACE, subnet, netmask, gateway, dns_server, subnet_split4
+# Bridge network configuration structure
+# Returns: "bridge_interface|subnet|netmask|gateway|dns_server|subnet_split4"
 configure_bridge_network_interactive() {
     log_info "Starting interactive bridge network configuration..."
     echo
@@ -567,22 +572,22 @@ configure_bridge_network_interactive() {
     if ! select_network_interface; then
         error_exit "Failed to select network interface"
     fi
-    BRIDGE_INTERFACE="$SELECTED_INTERFACE"
-    
+    local bridge_interface="$SELECTED_INTERFACE"
+
     # Step 1.5: Bridge configuration confirmation
     log_info "Validating bridge interface configuration..."
-    
+
     # Get and validate current IP address of the interface for warning
     local current_ip
-    current_ip=$(ip addr show "$BRIDGE_INTERFACE" 2>/dev/null | grep 'inet ' | grep -v '127.0.0.1' | awk '{print $2}' | cut -d'/' -f1 | head -1 | tr -d '[:space:]')
-    
+    current_ip=$(ip addr show "$bridge_interface" 2>/dev/null | grep 'inet ' | grep -v '127.0.0.1' | awk '{print $2}' | cut -d'/' -f1 | head -1 | tr -d '[:space:]')
+
     # Debug: log the current IP for troubleshooting
-    log_info "Detected IP address for interface '$BRIDGE_INTERFACE': '${current_ip:-<empty>}'"
+    log_info "Detected IP address for interface '$bridge_interface': '${current_ip:-<empty>}'"
 
     # Interactive confirmation for bridge setup
-    if [[ -n "$current_ip" ]]; then
+    if [[ -n $current_ip ]]; then
         echo -e "\n${RED}⚠️  Bridge Configuration Warning${NC}"
-        echo -e "${YELLOW}🔧 Interface:${NC} ${WHITE}$BRIDGE_INTERFACE${NC}"
+        echo -e "${YELLOW}🔧 Interface:${NC} ${WHITE}$bridge_interface${NC}"
         echo -e "${YELLOW}🌐 Current IP:${NC} ${WHITE}$current_ip${NC}"
         echo -e "${RED}⚠️  WARNING:${NC} Configuring bridge will remove this IP address and may disconnect existing connections!\n"
 
@@ -594,7 +599,7 @@ configure_bridge_network_interactive() {
         # Second confirmation: require user to input the current IP address
         echo -e "\n${RED}🔐 Second Confirmation Required${NC}"
         echo -e "${YELLOW}🔒 Security Check:${NC} To proceed with bridge configuration"
-        echo -e "${WHITE}   Please enter the current IP address of '$BRIDGE_INTERFACE'${NC}"
+        echo -e "${WHITE}   Please enter the current IP address of '$bridge_interface'${NC}"
         echo -e "${RED}⚠️  This confirms you understand that IP '$current_ip' will be permanently removed${NC}\n"
 
         if ! prompt_confirmation_with_retry "Enter current IP address to confirm deletion" "$current_ip" 3; then
@@ -603,24 +608,24 @@ configure_bridge_network_interactive() {
         fi
         echo -e "\n${GREEN}✅ IP address confirmed. Proceeding with bridge configuration...${NC}\n"
     fi
-    
+
     # Step 2: Get starting IP with CIDR notation
     local starting_ip_cidr
     local starting_ip
     local cidr_prefix
-    
+
     while true; do
         read -r -p "$(echo -e "${WHITE}Enter starting IP for VM allocation with CIDR (e.g., 192.168.1.90/24): ${NC}")" starting_ip_cidr
-        
+
         # Validate CIDR format
-        if [[ "$starting_ip_cidr" =~ ^([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})/([0-9]{1,2})$ ]]; then
+        if [[ $starting_ip_cidr =~ ^([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})/([0-9]{1,2})$ ]]; then
             starting_ip="${BASH_REMATCH[1]}"
             cidr_prefix="${BASH_REMATCH[2]}"
-            
+
             # Validate IP address
             if validate_vm_ip_range "$starting_ip"; then
                 # Validate CIDR prefix (8-30 for practical use)
-                if [[ "$cidr_prefix" -ge 8 && "$cidr_prefix" -le 30 ]]; then
+                if [[ $cidr_prefix -ge 8 && $cidr_prefix -le 30 ]]; then
                     break
                 else
                     echo -e "${RED}Invalid CIDR prefix. Please use a value between 8 and 30.${NC}"
@@ -634,16 +639,18 @@ configure_bridge_network_interactive() {
     done
 
     # Extract subnet and fourth octet from IP
+    local octets
     IFS='.' read -ra octets <<<"$starting_ip"
-    subnet="${octets[0]}.${octets[1]}.${octets[2]}"
-    subnet_split4="${octets[3]}"
+    local subnet="${octets[0]}.${octets[1]}.${octets[2]}"
+    local subnet_split4="${octets[3]}"
 
     # Convert CIDR prefix to netmask using lookup table
-    if [[ "$cidr_prefix" -ge 8 && "$cidr_prefix" -le 30 ]]; then
+    local netmask
+    if [[ $cidr_prefix -ge 8 && $cidr_prefix -le 30 ]]; then
         local netmasks=(
-            [8]="255.0.0.0"     [9]="255.128.0.0"   [10]="255.192.0.0"  [11]="255.224.0.0"
-            [12]="255.240.0.0"  [13]="255.248.0.0"  [14]="255.252.0.0"  [15]="255.254.0.0"
-            [16]="255.255.0.0"  [17]="255.255.128.0" [18]="255.255.192.0" [19]="255.255.224.0"
+            [8]="255.0.0.0" [9]="255.128.0.0" [10]="255.192.0.0" [11]="255.224.0.0"
+            [12]="255.240.0.0" [13]="255.248.0.0" [14]="255.252.0.0" [15]="255.254.0.0"
+            [16]="255.255.0.0" [17]="255.255.128.0" [18]="255.255.192.0" [19]="255.255.224.0"
             [20]="255.255.240.0" [21]="255.255.248.0" [22]="255.255.252.0" [23]="255.255.254.0"
             [24]="255.255.255.0" [25]="255.255.255.128" [26]="255.255.255.192" [27]="255.255.255.224"
             [28]="255.255.255.240" [29]="255.255.255.248" [30]="255.255.255.252"
@@ -653,7 +660,7 @@ configure_bridge_network_interactive() {
         log_error "Invalid CIDR prefix: $cidr_prefix. Must be between /8 and /30."
         return 1
     fi
-    
+
     echo -e "${GREEN}✅ Parsed network configuration:${NC}"
     echo -e "   ${GREEN}•${NC} Starting IP: ${CYAN}$starting_ip${NC}"
     echo -e "   ${GREEN}•${NC} Subnet: ${CYAN}$subnet.0${NC}"
@@ -662,22 +669,28 @@ configure_bridge_network_interactive() {
 
     # Step 3: Get gateway using unified function
     prompt_ip_input "Enter gateway IP (e.g., $subnet.1)"
-    gateway="$PROMPT_RESULT"
+    local gateway="$PROMPT_RESULT"
 
     # Step 4: Get DNS server using unified function
     prompt_ip_input "Enter DNS server IP (e.g., 8.8.8.8 or $gateway)"
-    dns_server="$PROMPT_RESULT"
-    
+    local dns_server="$PROMPT_RESULT"
+
     # Display final configuration
     echo -e "\n${GREEN}🎯 Final Bridge Network Configuration:${NC}"
-    echo -e "   ${GREEN}•${NC} Bridge Interface: ${CYAN}$BRIDGE_INTERFACE${NC}"
+    echo -e "   ${GREEN}•${NC} Bridge Interface: ${CYAN}$bridge_interface${NC}"
     echo -e "   ${GREEN}•${NC} Subnet: ${CYAN}$subnet${NC}"
     echo -e "   ${GREEN}•${NC} Netmask: ${CYAN}$netmask${NC}"
     echo -e "   ${GREEN}•${NC} Gateway: ${CYAN}$gateway${NC}"
     echo -e "   ${GREEN}•${NC} DNS Server: ${CYAN}$dns_server${NC}"
     echo -e "   ${GREEN}•${NC} Starting IP: ${CYAN}$subnet.$subnet_split4${NC}\n"
-    
+
     log_info "Bridge network configuration completed successfully"
+
+    # Set global variables for backward compatibility
+    BRIDGE_INTERFACE="$bridge_interface"
+
+    # Return configuration as pipe-separated string
+    echo "$bridge_interface|$subnet|$netmask|$gateway|$dns_server|$subnet_split4"
     return 0
 }
 
@@ -866,8 +879,8 @@ validate_required_variables() {
     chmod 666 "$LOG_FILE" 2>/dev/null || true
 
     # Validate kubespray directory permissions
-    if [[ -d "$KUBESPRAY_DIR" ]]; then
-        if [[ ! -w "$KUBESPRAY_DIR" ]]; then
+    if [[ -d $KUBESPRAY_DIR ]]; then
+        if [[ ! -w $KUBESPRAY_DIR ]]; then
             error_exit "No write permission for kubespray directory parent: $KUBESPRAY_DIR"
         fi
     fi
@@ -902,7 +915,7 @@ check_rhel_repositories() {
 
     local rhel_version
     rhel_version=$(grep "VERSION_ID" /etc/os-release | cut -d'"' -f2 | cut -d'.' -f1)
-    if [[ "$rhel_version" != "9" ]]; then
+    if [[ $rhel_version != "9" ]]; then
         error_exit "This script only supports RHEL 9. Current version: $rhel_version"
     fi
 
@@ -1093,9 +1106,9 @@ check_ntp_synchronization() {
         local time_offset
         time_offset=$(echo "$tracking_output" | grep "System time" | awk '{print $4}' | sed 's/seconds//')
 
-        if [[ "$sync_status" == "Normal" ]]; then
+        if [[ $sync_status == "Normal" ]]; then
             log_info "NTP synchronization status: Normal"
-            if [[ -n "$time_offset" ]]; then
+            if [[ -n $time_offset ]]; then
                 local abs_offset=${time_offset#-}
                 if (($(echo "$abs_offset < 5" | bc -l 2>/dev/null || echo "1"))); then
                     log_info "Time offset: ${time_offset} seconds (within acceptable range)"
@@ -1123,7 +1136,7 @@ check_ntp_synchronization() {
 
         log_info "System time status: NTP service: ${ntp_status:-unknown}, Time synchronized: ${sync_status_alt:-unknown}"
 
-        if [[ "$ntp_status" == "active" && "$sync_status_alt" == "yes" ]]; then
+        if [[ $ntp_status == "active" && $sync_status_alt == "yes" ]]; then
             log_info "System time is properly synchronized"
         else
             log_warn "System time synchronization may have issues - this could cause SSL certificate validation problems"
@@ -1154,7 +1167,7 @@ validate_network_and_proxy() {
     local connectivity_passed=false
 
     # Test HTTP proxy if configured
-    if [[ -n "$HTTP_PROXY" ]]; then
+    if [[ -n $HTTP_PROXY ]]; then
         log_info "Testing HTTP proxy: $HTTP_PROXY"
         if curl -s --proxy "$HTTP_PROXY" --connect-timeout 10 "http://www.google.com" >/dev/null; then
             log_info "HTTP proxy validation passed"
@@ -1165,7 +1178,7 @@ validate_network_and_proxy() {
     fi
 
     # Test HTTPS proxy if configured and different from HTTP proxy
-    if [[ -n "$HTTPS_PROXY" && "$HTTPS_PROXY" != "$HTTP_PROXY" ]]; then
+    if [[ -n $HTTPS_PROXY && $HTTPS_PROXY != "$HTTP_PROXY" ]]; then
         log_info "Testing HTTPS proxy: $HTTPS_PROXY"
         if curl -s --proxy "$HTTPS_PROXY" --connect-timeout 10 "https://www.google.com" >/dev/null; then
             log_info "HTTPS proxy validation passed"
@@ -1176,7 +1189,7 @@ validate_network_and_proxy() {
     fi
 
     # Test general network connectivity
-    if [[ "$connectivity_passed" == "false" ]]; then
+    if [[ $connectivity_passed == "false" ]]; then
         log_info "Testing general network connectivity..."
         local proxy_set=""
         if [ -n "$HTTP_PROXY" ]; then
@@ -1198,7 +1211,7 @@ validate_network_and_proxy() {
         export no_proxy="$NO_PROXY"
     fi
 
-    if [[ "$connectivity_passed" == "false" ]]; then
+    if [[ $connectivity_passed == "false" ]]; then
         log_warn "Network connectivity test failed. Please check your internet connection and proxy settings."
         return 1
     fi
@@ -1330,7 +1343,7 @@ setup_libvirt() {
     # Add current user to libvirt group
     add_user_to_group "$USER" "libvirt"
 
-    if [[ -n "${BRIDGE_INTERFACE:-}" ]]; then
+    if [[ -n ${BRIDGE_INTERFACE:-} ]]; then
         log_info "Setting up Libvirt with bridge networking..."
         echo -e "${GREEN}🚀 Starting bridge configuration...${NC}"
         local network_name="bridge-network"
@@ -1664,32 +1677,53 @@ setup_virtual_environment() {
 }
 
 # Function to configure bridge network settings interactively
+# Apply bridge network configuration to Vagrant config file
+# Parameters: bridge_interface subnet netmask gateway dns_server subnet_split4 [config_file]
+# Usage: configure_bridge_network_settings "eth0" "192.168.1" "255.255.255.0" "192.168.1.1" "8.8.8.8" "90" [config_file]
 configure_bridge_network_settings() {
-    # This function now only handles the configuration application
-    # Network information should be gathered beforehand via configure_bridge_network_interactive
-    
+    local bridge_interface="$1"
+    local subnet="$2"
+    local netmask="$3"
+    local gateway="$4"
+    local dns_server="$5"
+    local subnet_split4="$6"
+    local config_file="${7:-$VAGRANT_CONF_FILE}" # Use provided file or default
+
+    # Validate input parameters
+    if [[ $# -lt 6 || $# -gt 7 ]]; then
+        log_error "configure_bridge_network_settings requires 6 or 7 parameters"
+        log_error "Usage: configure_bridge_network_settings bridge_interface subnet netmask gateway dns_server subnet_split4 [config_file]"
+        return 1
+    fi
+
+    # Validate that all parameters are non-empty
+    if [[ -z $bridge_interface || -z $subnet || -z $netmask ||
+        -z $gateway || -z $dns_server || -z $subnet_split4 ]]; then
+        log_error "All network configuration parameters must be non-empty"
+        log_error "Received: bridge_interface='$bridge_interface', subnet='$subnet', netmask='$netmask'"
+        log_error "          gateway='$gateway', dns_server='$dns_server', subnet_split4='$subnet_split4'"
+        return 1
+    fi
+
     local temp_file
     local lock_file
-    temp_file="${VAGRANT_CONF_FILE}.tmp"
-    lock_file="${VAGRANT_CONF_FILE}.lock"
+    temp_file="${config_file}.tmp"
+    lock_file="${config_file}.lock"
 
     log_info "Applying bridge network settings to configuration..."
-    
+    log_info "Bridge Interface: $bridge_interface, Subnet: $subnet, Gateway: $gateway, DNS: $dns_server"
+
     # Acquire file lock to prevent concurrent modifications
-    exec 200>"$lock_file"
-    if ! flock -n 200 2>/dev/null; then
+    if ! (
+        set -C
+        echo $$ >"$lock_file"
+    ) 2>/dev/null; then
         log_error "Another process is modifying the network configuration. Please wait and try again."
         return 1
     fi
-    
-    # Validate that required global variables are set
-    if [[ -z "${subnet:-}" || -z "${netmask:-}" || -z "${gateway:-}" || 
-          -z "${dns_server:-}" || -z "${subnet_split4:-}" || -z "${BRIDGE_INTERFACE:-}" ]]; then
-        log_error "Required network configuration variables are not set"
-        log_error "Please run configure_bridge_network_interactive first"
-        flock -u 200 2>/dev/null
-        return 1
-    fi
+
+    # Set up cleanup trap
+    trap 'rm -f "$lock_file" "$temp_file"' EXIT
 
     # Apply the configuration to the config file
     awk -v subnet="$subnet" \
@@ -1698,7 +1732,7 @@ configure_bridge_network_settings() {
         -v dns_server="$dns_server" \
         -v subnet_split4="$subnet_split4" \
         -v bridge_name="$BRIDGE_NAME" \
-    '{
+        '{
         if ($0 ~ /^\$subnet = /) {
             print "$subnet = \"" subnet "\""
         } else if ($0 ~ /^\$netmask = /) {
@@ -1714,18 +1748,18 @@ configure_bridge_network_settings() {
         } else {
             print $0
         }
-    }' "$VAGRANT_CONF_FILE" >"$temp_file"
+    }' "$config_file" >"$temp_file"
 
     # Replace the original file
-    if mv "$temp_file" "$VAGRANT_CONF_FILE"; then
-        log_info "Bridge network configuration applied successfully to $VAGRANT_CONF_FILE"
-        flock -u 200 2>/dev/null
+    if mv "$temp_file" "$config_file"; then
+        log_info "Bridge network configuration applied successfully to $config_file"
         rm -f "$lock_file"
+        trap - EXIT # Remove trap since we're cleaning up manually
         return 0
     else
-        log_error "Failed to apply configuration to $VAGRANT_CONF_FILE"
-        flock -u 200 2>/dev/null
-        rm -f "$lock_file"
+        log_error "Failed to apply configuration to $config_file"
+        rm -f "$lock_file" "$temp_file"
+        trap - EXIT # Remove trap since we're cleaning up manually
         return 1
     fi
 }
@@ -1745,7 +1779,7 @@ configure_vagrant_config() {
 
     # Copy template to config.rb
     log_info "Copying template to $VAGRANT_CONF_FILE"
-    [[ -f "$template_file" ]] || {
+    [[ -f $template_file ]] || {
         log_error "Template file not found: $template_file"
         error_exit "Template file not found"
     }
@@ -1755,8 +1789,44 @@ configure_vagrant_config() {
     }
 
     # Configure bridge network settings if using bridge network
-    if [[ "$NETWORK_TYPE" == "bridge" ]]; then
-        configure_bridge_network_settings
+    if [[ $NETWORK_TYPE == "bridge" ]]; then
+        if [[ -n $BRIDGE_NETWORK_CONFIG ]]; then
+            # Parse the bridge network configuration
+            IFS='|' read -r bridge_interface subnet netmask gateway dns_server subnet_split4 <<<"$BRIDGE_NETWORK_CONFIG"
+            configure_bridge_network_settings "$bridge_interface" "$subnet" "$netmask" "$gateway" "$dns_server" "$subnet_split4"
+        else
+            error_exit "Bridge network configuration not available. Please run configure_bridge_network_interactive first."
+        fi
+    elif [[ $NETWORK_TYPE == "nat" ]]; then
+        # Configure DNS server
+        log_info "Configuring DNS server in config.rb"
+
+        # Get DNS server from system
+        dns_server=$(grep nameserver /etc/resolv.conf | awk '{print $2}' | head -1)
+
+        if [[ -n $dns_server ]]; then
+            log_info "Detected DNS server: $dns_server"
+
+            # Create temporary file for processing
+            temp_file="${VAGRANT_CONF_FILE}.tmp"
+
+            # Update DNS server configuration in config.rb
+            awk -v dns_server="$dns_server" '
+        {
+            if ($0 ~ /^# \$dns_server = ""/) {
+                print "$dns_server = \"" dns_server "\""
+            } else {
+                print $0
+            }
+        }' "$VAGRANT_CONF_FILE" >"$temp_file"
+
+            # Replace the original file
+            mv "$temp_file" "$VAGRANT_CONF_FILE"
+
+            log_info "DNS server configuration updated in config.rb"
+        else
+            log_warn "Could not detect DNS server, keeping default configuration"
+        fi
     fi
 
     # Configure proxy settings if HTTP_PROXY is set
@@ -1771,7 +1841,7 @@ configure_vagrant_config() {
             -v https_proxy="$HTTPS_PROXY" \
             -v no_proxy="$NO_PROXY" \
             -v additional_no_proxy="$NO_PROXY" \
-        '{
+            '{
             if ($0 ~ /^# \$http_proxy = ""/) {
                 print "$http_proxy = \"" http_proxy "\""
             } else if ($0 ~ /^# \$https_proxy = ""/) {
@@ -1827,7 +1897,7 @@ configure_vagrant_config() {
     # Add VM resource configuration to config.rb
     awk -v vm_cpus="$G_VM_CPUS" \
         -v vm_memory="$G_VM_MEMORY" \
-    '{
+        '{
         if ($0 ~ /^# \$vm_cpus = ""/) {
             print "$vm_cpus = " vm_cpus
         } else if ($0 ~ /^# \$vm_memory = ""/) {
@@ -1881,7 +1951,7 @@ setup_kubespray_project() {
     log_info "Replacing project Vagrantfile with vagrant_setup_scripts version..."
     local source_vagrantfile="$KUBESPRAY_DIR/vagrant_setup_scripts/Vagrantfile"
 
-    if [[ -f "$source_vagrantfile" ]]; then
+    if [[ -f $source_vagrantfile ]]; then
         if cp "$source_vagrantfile" "$VAGRANTFILE_PATH"; then
             log_info "Successfully replaced Vagrantfile"
         else
@@ -1900,7 +1970,7 @@ setup_kubespray_project() {
 # Extract Vagrant configuration variables and set as globals
 #######################################
 extract_vagrant_config_variables() {
-    if [[ ! -f "$VAGRANT_CONF_FILE" ]]; then
+    if [[ ! -f $VAGRANT_CONF_FILE ]]; then
         error_exit "Config file not found: $VAGRANT_CONF_FILE"
     fi
 
@@ -1924,7 +1994,7 @@ extract_vagrant_config_variables() {
     G_VM_NETWORK=$(grep "^\$vm_network\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "nat")
 
     # Extract network-specific variables based on network type
-    if [[ "$G_VM_NETWORK" == "bridge" ]]; then
+    if [[ $G_VM_NETWORK == "bridge" ]]; then
         G_SUBNET=$(grep "^\$subnet\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "")
         G_NETMASK=$(grep "^\$netmask\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "")
         G_GATEWAY=$(grep "^\$gateway\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "")
@@ -1987,7 +2057,7 @@ parse_vagrant_config() {
     echo -e "${WHITE}🌐 Network Configuration:${NC}"
     echo -e "   ${GREEN}•${NC} Type: ${CYAN}$G_VM_NETWORK${NC}"
 
-    if [[ "$G_VM_NETWORK" == "bridge" ]]; then
+    if [[ $G_VM_NETWORK == "bridge" ]]; then
         # BRIDGE_NETWORK information:
         echo -e "   ${GREEN}•${NC} Mode: ${CYAN}Bridge Network${NC}"
         echo -e "${GREEN}✅ Network configuration summary:${NC}"
@@ -2045,7 +2115,7 @@ show_setup_confirmation() {
 
     # Network Configuration
     echo -e "${WHITE}🌐 Network Setup:${NC}"
-    if [[ -n "${BRIDGE_INTERFACE:-}" ]]; then
+    if [[ -n ${BRIDGE_INTERFACE:-} ]]; then
         echo -e "   ${GREEN}•${NC} Bridge: ${CYAN}$BRIDGE_NAME (using interface: ${YELLOW}$BRIDGE_INTERFACE${NC})"
     else
         echo -e "   ${YELLOW}•${NC} Bridge: ${YELLOW}Not configured${NC}"
@@ -2053,12 +2123,12 @@ show_setup_confirmation() {
     fi
 
     # Proxy Configuration
-    if [[ -n "${HTTP_PROXY:-}" ]]; then
+    if [[ -n ${HTTP_PROXY:-} ]]; then
         echo -e "   ${GREEN}•${NC} Proxy: ${CYAN}${HTTP_PROXY}${NC}"
-        if [[ -n "${HTTPS_PROXY:-}" && "${HTTPS_PROXY}" != "${HTTP_PROXY}" ]]; then
+        if [[ -n ${HTTPS_PROXY:-} && ${HTTPS_PROXY} != "${HTTP_PROXY}" ]]; then
             echo -e "   ${GREEN}•${NC} HTTPS Proxy: ${CYAN}${HTTPS_PROXY}${NC}"
         fi
-        if [[ -n "${NO_PROXY:-}" ]]; then
+        if [[ -n ${NO_PROXY:-} ]]; then
             echo -e "   ${GREEN}•${NC} No Proxy: ${CYAN}${NO_PROXY}${NC}"
         fi
     else
@@ -2094,26 +2164,26 @@ show_setup_confirmation() {
 #######################################
 configure_containerd_registries() {
     log_info "Configuring containerd registries and authentication..."
-    
+
     local containerd_config_file
     containerd_config_file="${SCRIPT_DIR}/containerd.yml"
     local target_containerd_file="${KUBESPRAY_DIR}/inventory/sample/group_vars/all/containerd.yml"
-    
+
     # Check if local containerd config file exists
-    if [[ ! -f "$containerd_config_file" ]]; then
+    if [[ ! -f $containerd_config_file ]]; then
         log_info "Local containerd config file not found: $containerd_config_file"
         log_info "Skipping containerd registry configuration"
         return 0
     fi
-    
+
     echo -e "${YELLOW}🔧 Found local containerd configuration file: ${CYAN}$containerd_config_file${NC}"
-    
+
     # Check if target containerd.yml exists
-    if [[ ! -f "$target_containerd_file" ]]; then
+    if [[ ! -f $target_containerd_file ]]; then
         log_error "Target containerd.yml not found: $target_containerd_file"
         return 1
     fi
-    
+
     # Create backup of original containerd.yml
     local backup_file
     backup_file="${SCRIPT_DIR}/containerd.yml.backup.$(date +%Y%m%d_%H%M%S)"
@@ -2124,7 +2194,7 @@ configure_containerd_registries() {
         return 1
     fi
     echo -e "${YELLOW}📝 Overwriting containerd configuration...${NC}"
-    
+
     # Overwrite target file with local configuration
     if cp "$containerd_config_file" "$target_containerd_file"; then
         echo -e "${GREEN}✅ Successfully overwritten containerd configuration${NC}"
@@ -2133,7 +2203,7 @@ configure_containerd_registries() {
         log_error "Failed to overwrite containerd configuration"
         return 1
     fi
-    
+
     return 0
 }
 
@@ -2176,12 +2246,6 @@ vagrant_and_run_kubespray() {
         # shellcheck disable=SC1091
         source venv/bin/activate || error_exit "Failed to activate virtual environment"
 
-        # Apply bridge network configuration if needed
-        if [[ "$NETWORK_TYPE" == "bridge" ]]; then
-            log_info "Applying bridge network configuration..."
-            configure_bridge_network_settings
-        fi
-        
         # Configure containerd registries before deployment
         configure_containerd_registries
 
@@ -2189,15 +2253,15 @@ vagrant_and_run_kubespray() {
         # Get Box Name
         local box_name
         # Try to extract box name from Vagrantfile SUPPORTED_OS configuration
-        if [[ -f "${VAGRANTFILE_PATH}" ]]; then
+        if [[ -f ${VAGRANTFILE_PATH} ]]; then
             # Extract the SUPPORTED_OS hash and find the box name for the given OS
             local supported_os_section
             supported_os_section=$(awk '/SUPPORTED_OS\s*=\s*{/,/^}/' "${VAGRANTFILE_PATH}" 2>/dev/null)
-            
-            if [[ -n "$supported_os_section" ]]; then
+
+            if [[ -n $supported_os_section ]]; then
                 # Look for the OS entry and extract the box name
-                 # Format: "rockylinux9" => {box: "rockylinux/9", user: "vagrant"},
-                 box_name=$(echo "$supported_os_section" | grep "\"$G_OS\"" | grep -o 'box: "[^"]*"' | cut -d'"' -f2 | head -n1)
+                # Format: "rockylinux9" => {box: "rockylinux/9", user: "vagrant"},
+                box_name=$(echo "$supported_os_section" | grep "\"$G_OS\"" | grep -o 'box: "[^"]*"' | cut -d'"' -f2 | head -n1)
             else
                 log_error "Could not extract box name for OS '$G_OS' from $VAGRANTFILE_PATH"
                 error_exit "Failed to extract box name"
@@ -2239,7 +2303,7 @@ vagrant_and_run_kubespray() {
                 ((attempt++))
             done
 
-            if [[ "$success" != "true" ]]; then
+            if [[ $success != "true" ]]; then
                 echo -e "${RED}💥 Failed to add Vagrant box '$box_name' after $max_retries attempts${NC}"
                 echo -e "${YELLOW}💡 Troubleshooting suggestions:${NC}"
                 echo -e "   ${YELLOW}•${NC} Check internet connection"
@@ -2257,20 +2321,20 @@ vagrant_and_run_kubespray() {
         local vm_status
         # Check for VMs matching kubespray+k8s+<number> pattern using virsh
         vm_status=$(sudo virsh list --all 2>/dev/null | grep -E "kubespray${G_INSTANCE_NAME_PREFIX}.*[0-9]+" || true)
-        
-        if [[ -n "$vm_status" ]]; then
+
+        if [[ -n $vm_status ]]; then
             echo -e "${YELLOW}⚠️  Found existing kubespray virtual machines:${NC}"
             echo "$vm_status"
-            
+
             # Count existing VMs
             local existing_vm_count
             existing_vm_count=$(echo "$vm_status" | wc -l)
-            
+
             # Calculate expected total VM count
             echo -e "\n${WHITE}VM Count Analysis:${NC}"
             echo -e "   ${GREEN}•${NC} Found VMs: ${CYAN}$existing_vm_count${NC}"
             echo -e "   ${GREEN}•${NC} Expected VMs: ${CYAN}$G_NUM_INSTANCES${NC}"
-            
+
             if [[ $existing_vm_count -eq $G_NUM_INSTANCES ]]; then
                 echo -e "\n${GREEN}✅ VM count matches expected configuration!${NC}"
                 echo -e "${WHITE}You have the following options:${NC}"
@@ -2278,78 +2342,78 @@ vagrant_and_run_kubespray() {
                 echo -e "   ${GREEN}2.${NC} Keep existing VMs and run ${CYAN}vagrant provision${NC} (re-provision only)"
                 echo -e "   ${RED}3.${NC} Delete all VMs and create fresh ones"
                 echo -e "   ${YELLOW}4.${NC} Cancel deployment\n"
-                
+
                 local choice
                 while true; do
                     read -r -p "Please select an option (1-4): " choice
                     case $choice in
-                        1)
-                            echo -e "${GREEN}✅ Proceeding with existing VMs using vagrant up...${NC}"
-                            break
-                            ;;
-                        2)
-                            echo -e "${GREEN}✅ Proceeding with existing VMs using vagrant provision...${NC}"
-                            if vagrant provision --provision-with ansible; then
-                                echo -e "\n${GREEN}🎉 Provisioning Completed Successfully!${NC}\n"
-                                # Configure kubectl for local access
-                                echo -e "${YELLOW}🔧 Configuring kubectl for local access...${NC}"
-                                if configure_kubectl_access; then
-                                    echo -e "${GREEN}✅ kubectl configured successfully${NC}\n"
-                                    display_cluster_info
-                                else
-                                    echo -e "${YELLOW}⚠️  kubectl configuration failed or artifacts not found${NC}\n"
-                                    error_exit "kubectl configuration failed or artifacts not found"
-                                fi
-                                return 0
+                    1)
+                        echo -e "${GREEN}✅ Proceeding with existing VMs using vagrant up...${NC}"
+                        break
+                        ;;
+                    2)
+                        echo -e "${GREEN}✅ Proceeding with existing VMs using vagrant provision...${NC}"
+                        if vagrant provision --provision-with ansible; then
+                            echo -e "\n${GREEN}🎉 Provisioning Completed Successfully!${NC}\n"
+                            # Configure kubectl for local access
+                            echo -e "${YELLOW}🔧 Configuring kubectl for local access...${NC}"
+                            if configure_kubectl_access; then
+                                echo -e "${GREEN}✅ kubectl configured successfully${NC}\n"
+                                display_cluster_info
                             else
-                                echo -e "\n${RED}❌ Provisioning failed! Check logs above.${NC}\n"
-                                return 1
+                                echo -e "${YELLOW}⚠️  kubectl configuration failed or artifacts not found${NC}\n"
+                                error_exit "kubectl configuration failed or artifacts not found"
                             fi
-                            ;;
-                        3)
-                            echo -e "${RED}🗑️  Deleting existing VMs...${NC}"
-                            # Extract VM names and delete them
-                            local vm_names
-                            vm_names=$(echo "$vm_status" | awk '{print $2}' | grep -E "kubespray${G_INSTANCE_NAME_PREFIX}.*[0-9]+")
-                            
-                            local cleanup_success=true
-                            while IFS= read -r vm_name; do
-                                if [[ -n "$vm_name" ]]; then
-                                    echo -e "${YELLOW}  Destroying VM: $vm_name${NC}"
-                                    
-                                    # First try to destroy (shutdown) the VM if it's running
-                                    if sudo virsh destroy "$vm_name" 2>/dev/null; then
-                                        echo -e "${GREEN}    ✓ VM $vm_name destroyed${NC}"
-                                    else
-                                        echo -e "${YELLOW}    ⚠ VM $vm_name was not running${NC}"
-                                    fi
-                                    
-                                    # Then undefine (remove) the VM completely
-                                    if sudo virsh undefine "$vm_name" --remove-all-storage 2>/dev/null; then
-                                        echo -e "${GREEN}    ✓ VM $vm_name undefined and storage removed${NC}"
-                                    else
-                                        echo -e "${RED}    ✗ Failed to undefine VM $vm_name${NC}"
-                                        cleanup_success=false
-                                    fi
-                                fi
-                            done <<< "$vm_names"
-                            
-                            if $cleanup_success; then
-                                echo -e "${GREEN}✅ VMs cleaned up successfully${NC}"
-                                break
-                            else
-                                echo -e "${RED}❌ Failed to clean up some VMs automatically${NC}"
-                                echo -e "${YELLOW}Please clean up manually and run the script again${NC}"
-                                return 1
-                            fi
-                            ;;
-                        4)
-                            echo -e "${YELLOW}⏸️  Deployment cancelled by user${NC}"
                             return 0
-                            ;;
-                        *)
-                            echo -e "${RED}❌ Invalid option. Please select 1, 2, 3, or 4.${NC}"
-                            ;;
+                        else
+                            echo -e "\n${RED}❌ Provisioning failed! Check logs above.${NC}\n"
+                            return 1
+                        fi
+                        ;;
+                    3)
+                        echo -e "${RED}🗑️  Deleting existing VMs...${NC}"
+                        # Extract VM names and delete them
+                        local vm_names
+                        vm_names=$(echo "$vm_status" | awk '{print $2}' | grep -E "kubespray${G_INSTANCE_NAME_PREFIX}.*[0-9]+")
+
+                        local cleanup_success=true
+                        while IFS= read -r vm_name; do
+                            if [[ -n $vm_name ]]; then
+                                echo -e "${YELLOW}  Destroying VM: $vm_name${NC}"
+
+                                # First try to destroy (shutdown) the VM if it's running
+                                if sudo virsh destroy "$vm_name" 2>/dev/null; then
+                                    echo -e "${GREEN}    ✓ VM $vm_name destroyed${NC}"
+                                else
+                                    echo -e "${YELLOW}    ⚠ VM $vm_name was not running${NC}"
+                                fi
+
+                                # Then undefine (remove) the VM completely
+                                if sudo virsh undefine "$vm_name" --remove-all-storage 2>/dev/null; then
+                                    echo -e "${GREEN}    ✓ VM $vm_name undefined and storage removed${NC}"
+                                else
+                                    echo -e "${RED}    ✗ Failed to undefine VM $vm_name${NC}"
+                                    cleanup_success=false
+                                fi
+                            fi
+                        done <<<"$vm_names"
+
+                        if $cleanup_success; then
+                            echo -e "${GREEN}✅ VMs cleaned up successfully${NC}"
+                            break
+                        else
+                            echo -e "${RED}❌ Failed to clean up some VMs automatically${NC}"
+                            echo -e "${YELLOW}Please clean up manually and run the script again${NC}"
+                            return 1
+                        fi
+                        ;;
+                    4)
+                        echo -e "${YELLOW}⏸️  Deployment cancelled by user${NC}"
+                        return 0
+                        ;;
+                    *)
+                        echo -e "${RED}❌ Invalid option. Please select 1, 2, 3, or 4.${NC}"
+                        ;;
                     esac
                 done
             else
@@ -2358,60 +2422,60 @@ vagrant_and_run_kubespray() {
                 echo -e "${WHITE}You have the following options:${NC}"
                 echo -e "   ${RED}1.${NC} Delete all existing VMs and create fresh ones"
                 echo -e "   ${YELLOW}2.${NC} Cancel deployment and check configuration\n"
-                
+
                 local choice
                 while true; do
                     read -r -p "Please select an option (1-2): " choice
                     case $choice in
-                        1)
-                            echo -e "${RED}🗑️  Deleting existing VMs...${NC}"
-                            # Extract VM names and delete them
-                            local vm_names
-                            vm_names=$(echo "$vm_status" | awk '{print $2}' | grep -E "kubespray${G_INSTANCE_NAME_PREFIX}.*[0-9]+")
-                            
-                            local cleanup_success=true
-                            while IFS= read -r vm_name; do
-                                if [[ -n "$vm_name" ]]; then
-                                    echo -e "${YELLOW}  Destroying VM: $vm_name${NC}"
-                                    
-                                    # First try to destroy (shutdown) the VM if it's running
-                                    if sudo virsh destroy "$vm_name" 2>/dev/null; then
-                                        echo -e "${GREEN}    ✓ VM $vm_name destroyed${NC}"
-                                    else
-                                        echo -e "${YELLOW}    ⚠ VM $vm_name was not running${NC}"
-                                    fi
-                                    
-                                    # Then undefine (remove) the VM completely
-                                    if sudo virsh undefine "$vm_name" --remove-all-storage 2>/dev/null; then
-                                        echo -e "${GREEN}    ✓ VM $vm_name undefined and storage removed${NC}"
-                                    else
-                                        echo -e "${RED}    ✗ Failed to undefine VM $vm_name${NC}"
-                                        cleanup_success=false
-                                    fi
+                    1)
+                        echo -e "${RED}🗑️  Deleting existing VMs...${NC}"
+                        # Extract VM names and delete them
+                        local vm_names
+                        vm_names=$(echo "$vm_status" | awk '{print $2}' | grep -E "kubespray${G_INSTANCE_NAME_PREFIX}.*[0-9]+")
+
+                        local cleanup_success=true
+                        while IFS= read -r vm_name; do
+                            if [[ -n $vm_name ]]; then
+                                echo -e "${YELLOW}  Destroying VM: $vm_name${NC}"
+
+                                # First try to destroy (shutdown) the VM if it's running
+                                if sudo virsh destroy "$vm_name" 2>/dev/null; then
+                                    echo -e "${GREEN}    ✓ VM $vm_name destroyed${NC}"
+                                else
+                                    echo -e "${YELLOW}    ⚠ VM $vm_name was not running${NC}"
                                 fi
-                            done <<< "$vm_names"
-                            
-                            if $cleanup_success; then
-                                echo -e "${GREEN}✅ VMs cleaned up successfully${NC}"
-                                break
-                            else
-                                echo -e "${RED}❌ Failed to clean up some VMs automatically${NC}"
-                                echo -e "${YELLOW}Please clean up manually and run the script again${NC}"
-                                return 1
+
+                                # Then undefine (remove) the VM completely
+                                if sudo virsh undefine "$vm_name" --remove-all-storage 2>/dev/null; then
+                                    echo -e "${GREEN}    ✓ VM $vm_name undefined and storage removed${NC}"
+                                else
+                                    echo -e "${RED}    ✗ Failed to undefine VM $vm_name${NC}"
+                                    cleanup_success=false
+                                fi
                             fi
-                            ;;
-                        2)
-                            echo -e "${YELLOW}⏸️  Deployment cancelled by user${NC}"
-                            echo -e "${WHITE}Manual cleanup commands:${NC}"
-                            echo -e "   ${CYAN}sudo virsh destroy <vm_name>${NC}     # Shutdown VM"
-                            echo -e "   ${CYAN}sudo virsh undefine <vm_name> --remove-all-storage${NC}  # Remove VM"
-                            echo -e "   ${CYAN}sudo virsh list --all${NC}            # Check VM status"
-                            echo -e "\n${WHITE}After cleanup, run this script again.${NC}"
-                            return 0
-                            ;;
-                        *)
-                            echo -e "${RED}❌ Invalid option. Please select 1 or 2.${NC}"
-                            ;;
+                        done <<<"$vm_names"
+
+                        if $cleanup_success; then
+                            echo -e "${GREEN}✅ VMs cleaned up successfully${NC}"
+                            break
+                        else
+                            echo -e "${RED}❌ Failed to clean up some VMs automatically${NC}"
+                            echo -e "${YELLOW}Please clean up manually and run the script again${NC}"
+                            return 1
+                        fi
+                        ;;
+                    2)
+                        echo -e "${YELLOW}⏸️  Deployment cancelled by user${NC}"
+                        echo -e "${WHITE}Manual cleanup commands:${NC}"
+                        echo -e "   ${CYAN}sudo virsh destroy <vm_name>${NC}     # Shutdown VM"
+                        echo -e "   ${CYAN}sudo virsh undefine <vm_name> --remove-all-storage${NC}  # Remove VM"
+                        echo -e "   ${CYAN}sudo virsh list --all${NC}            # Check VM status"
+                        echo -e "\n${WHITE}After cleanup, run this script again.${NC}"
+                        return 0
+                        ;;
+                    *)
+                        echo -e "${RED}❌ Invalid option. Please select 1 or 2.${NC}"
+                        ;;
                     esac
                 done
             fi
@@ -2467,7 +2531,7 @@ configure_kubectl_access() {
     local total_steps=2
 
     # Check if artifacts directory exists
-    if [[ ! -d "$artifacts_dir" ]]; then
+    if [[ ! -d $artifacts_dir ]]; then
         log_warn "Artifacts directory not found: $artifacts_dir"
         return 1
     fi
@@ -2479,7 +2543,7 @@ configure_kubectl_access() {
     }
 
     # Copy kubectl binary
-    if [[ -f "$kubectl_binary" ]]; then
+    if [[ -f $kubectl_binary ]]; then
         if cp "$kubectl_binary" "$LOCAL_BIN_DIR/kubectl" && chmod +x "$LOCAL_BIN_DIR/kubectl"; then
             ((success_count++))
             log_info "kubectl binary configured successfully"
@@ -2491,7 +2555,7 @@ configure_kubectl_access() {
     fi
 
     # Copy kubeconfig file
-    if [[ -f "$kubeconfig_file" ]]; then
+    if [[ -f $kubeconfig_file ]]; then
         if cp "$kubeconfig_file" "$KUBECONFIG" && chmod 600 "$KUBECONFIG"; then
             ((success_count++))
             log_info "kubeconfig configured successfully"
@@ -2508,7 +2572,7 @@ configure_kubectl_access() {
         log_info "kubectl configuration completed successfully ($success_count/$total_steps steps)"
 
         # Test kubectl connection
-        if [[ -x "$KUBECTL" && -f "$KUBECONFIG" ]]; then
+        if [[ -x $KUBECTL && -f $KUBECONFIG ]]; then
             log_info "Testing kubectl connection..."
             for attempt in {1..4}; do
                 log_info "Attempt $attempt/4: Testing kubectl connection..."
@@ -2660,11 +2724,11 @@ parse_arguments() {
     # Process arguments in a single pass
     while [[ $# -gt 0 ]]; do
         case $1 in
-        -h|--help)
+        -h | --help)
             show_help
             exit 0
             ;;
-        -v|--version)
+        -v | --version)
             show_version
             exit 0
             ;;
@@ -2673,13 +2737,13 @@ parse_arguments() {
             shift
             ;;
         -n)
-            [[ -z "$2" || "$2" == -* ]] && {
+            [[ -z $2 || $2 == -* ]] && {
                 log_error "Option -n requires a network type argument (nat|bridge)"
                 show_help
                 exit 1
             }
             case "$2" in
-            nat|bridge)
+            nat | bridge)
                 NETWORK_TYPE="$2"
                 log_info "Network type set to: $NETWORK_TYPE"
                 shift 2
@@ -2707,26 +2771,35 @@ main() {
     # Display script version and basic info at startup
     echo -e "${CYAN}🚀 ${SCRIPT_NAME} v${SCRIPT_VERSION}${NC}"
     echo -e "${WHITE}🔗 Repository: ${SCRIPT_REPOSITORY}${NC}"
-    
+
     # Variable validation
     validate_required_variables
-    
+
     # Parse command line arguments
     parse_arguments "$@"
-    
+
     log_info "Starting environment setup process..."
 
     # Network and proxy validation
     validate_network_and_proxy
 
-    [[ -n "$NETWORK_TYPE" ]] || error_exit "NETWORK_TYPE is not set. Please use -n option to set it."
-    
+    [[ -n $NETWORK_TYPE ]] || error_exit "NETWORK_TYPE is not set. Please use -n option to set it."
+
     # Configure bridge network if needed
-    if [[ "$NETWORK_TYPE" == "bridge" ]]; then
+    if [[ $NETWORK_TYPE == "bridge" ]]; then
         log_info "Configuring bridge network settings..."
-        configure_bridge_network_interactive
+        # Capture network configuration from interactive function
+        local bridge_config
+        bridge_config=$(configure_bridge_network_interactive)
+        if [[ $? -ne 0 || -z $bridge_config ]]; then
+            error_exit "Failed to configure bridge network settings"
+        fi
+
+        # Store configuration for later use
+        BRIDGE_NETWORK_CONFIG="$bridge_config"
+        log_info "Bridge network configuration captured: $BRIDGE_NETWORK_CONFIG"
     fi
-    
+
     # System validation
     check_system_requirements
     check_ntp_synchronization
@@ -2749,6 +2822,6 @@ main() {
 #######################################
 # Script Execution Entry Point
 #######################################
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]] || [[ -z "${BASH_SOURCE[*]}" ]]; then
+if [[ ${BASH_SOURCE[0]} == "${0}" ]] || [[ -z ${BASH_SOURCE[*]} ]]; then
     main "$@"
 fi
