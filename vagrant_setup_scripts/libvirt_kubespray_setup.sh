@@ -2118,14 +2118,25 @@ configure_containerd_registries() {
         return 1
     fi
 
-    # Create backup of original containerd.yml
-    local backup_file
-    backup_file="${SCRIPT_DIR}/containerd.yml.backup.$(date +%Y%m%d_%H%M%S)"
-    if cp "$target_containerd_file" "$backup_file"; then
-        log_info "Created backup: $backup_file"
+    # Check if target file is a symbolic link and remove it
+    if [[ -L $target_containerd_file ]]; then
+        log_info "Target file is a symbolic link, removing it: $target_containerd_file"
+        if rm "$target_containerd_file"; then
+            log_info "Successfully removed symbolic link: $target_containerd_file"
+        else
+            log_error "Failed to remove symbolic link: $target_containerd_file"
+            return 1
+        fi
     else
-        log_error "Failed to create backup of containerd.yml"
-        return 1
+        # Create backup of original containerd.yml if it's a regular file
+        local backup_file
+        backup_file="${SCRIPT_DIR}/containerd.yml.backup.$(date +%Y%m%d_%H%M%S)"
+        if cp "$target_containerd_file" "$backup_file"; then
+            log_info "Created backup: $backup_file"
+        else
+            log_error "Failed to create backup of containerd.yml"
+            return 1
+        fi
     fi
     echo -e "${YELLOW}📝 Overwriting containerd configuration...${NC}"
 
@@ -2470,25 +2481,51 @@ configure_kubectl_access() {
         return 1
     }
 
-    # Copy kubectl binary
+    # Configure kubectl binary with backup and symlink
     if [[ -f $kubectl_binary ]]; then
-        if cp "$kubectl_binary" "$LOCAL_BIN_DIR/kubectl" && chmod +x "$LOCAL_BIN_DIR/kubectl"; then
+        local kubectl_target="$LOCAL_BIN_DIR/kubectl"
+        
+        # Backup existing kubectl if it exists
+        if [[ -f $kubectl_target ]]; then
+            local backup_name="${kubectl_target}.backup.$(date +%Y%m%d_%H%M%S)"
+            if mv "$kubectl_target" "$backup_name"; then
+                log_info "Existing kubectl backed up to: $backup_name"
+            else
+                log_error "Failed to backup existing kubectl"
+                return 1
+            fi
+        fi
+        
+        # Create symlink to kubectl binary
+        if ln -s "$kubectl_binary" "$kubectl_target"; then
             ((success_count++))
-            log_info "kubectl binary configured successfully"
+            log_info "kubectl binary symlink configured successfully"
         else
-            log_error "Failed to configure kubectl binary"
+            log_error "Failed to create kubectl symlink"
         fi
     else
         log_warn "kubectl binary not found: $kubectl_binary"
     fi
 
-    # Copy kubeconfig file
+    # Configure kubeconfig file with backup and symlink
     if [[ -f $kubeconfig_file ]]; then
-        if cp "$kubeconfig_file" "$KUBECONFIG" && chmod 600 "$KUBECONFIG"; then
+        # Backup existing kubeconfig if it exists
+        if [[ -f $KUBECONFIG ]]; then
+            local backup_name="${KUBECONFIG}.backup.$(date +%Y%m%d_%H%M%S)"
+            if mv "$KUBECONFIG" "$backup_name"; then
+                log_info "Existing kubeconfig backed up to: $backup_name"
+            else
+                log_error "Failed to backup existing kubeconfig"
+                return 1
+            fi
+        fi
+        
+        # Create symlink to kubeconfig file
+        if ln -s "$kubeconfig_file" "$KUBECONFIG"; then
             ((success_count++))
-            log_info "kubeconfig configured successfully"
+            log_info "kubeconfig symlink configured successfully"
         else
-            log_error "Failed to configure kubeconfig"
+            log_error "Failed to create kubeconfig symlink"
         fi
     else
         log_warn "kubeconfig file not found: $kubeconfig_file"
