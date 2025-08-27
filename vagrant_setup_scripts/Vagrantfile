@@ -729,6 +729,7 @@ Vagrant.configure("2") do |config|
         # These two settings will put kubectl and admin.config in $inventory/artifacts
         "kubeconfig_localhost": "True",
         "kubectl_localhost": "True",
+        "metrics_server_enabled": "True",
         "cert_manager_enabled": "#{$cert_manager_enabled}",
         "local_path_provisioner_enabled": "#{$local_path_provisioner_enabled}",
         "local_path_provisioner_claim_root": "#{$local_path_provisioner_claim_root}",
