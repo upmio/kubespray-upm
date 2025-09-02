@@ -100,17 +100,15 @@ $upm_ctl_instances = 1
 # If not set, Vagrant will auto-detect available providers in this order:
 # 1. Command line --provider argument (highest priority)
 # 2. VAGRANT_DEFAULT_PROVIDER environment variable
-# 3. Auto-detection of installed providers (parallels > virtualbox > libvirt)
+# 3. Auto-detection of installed providers (libvirt only)
 # 
-# Supported options: "virtualbox", "libvirt", "parallels"
+# Supported options: "libvirt"
 # 
 # Provider recommendations:
-# - virtualbox: Best for development and testing (free, cross-platform)
 # - libvirt: Good for Linux production environments (KVM-based)
-# - parallels: Good for macOS users with Parallels Desktop
 # 
-# Leave commented for auto-detection, or uncomment and set to force a specific provider
-# $provider = "virtualbox"
+# Leave commented for auto-detection, or uncomment and set to force libvirt provider
+# $provider = "libvirt"
 
 # Timezone for all VMs
 $time_zone = "Asia/Shanghai"
@@ -161,7 +159,6 @@ $gateway = "192.168.21.1"       # Default gateway
 
 # Bridge network interface (required when using "bridge")
 # Example: On linux, libvirt bridge interface name: br0
-# Example: On linux, vitrulbox bridge interface name: eth1
 $bridge_nic = "br0"
 
 # =============================================================================
