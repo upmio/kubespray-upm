@@ -27,7 +27,7 @@ kube_version: "{{ (kubelet_checksums['amd64'] | dict2items)[0].key }}"
 ## The minimum version working
 kube_version_min_required: "{{ (kubelet_checksums['amd64'] | dict2items)[-1].key }}"
 
-## Kube Proxy mode One of ['iptables', 'ipvs']
+## Kube Proxy mode One of ['ipvs', 'iptables', 'nftables']
 kube_proxy_mode: ipvs
 
 # Kubeadm config api version
@@ -773,6 +773,9 @@ proxy_disable_env:
 
 # sysctl_file_path to add sysctl conf to
 sysctl_file_path: "/etc/sysctl.d/99-sysctl.conf"
+
+# ignore sysctl errors about unknown keys
+sysctl_ignore_unknown_keys: false
 
 system_upgrade: false
 system_upgrade_reboot: on-upgrade  # never, always
