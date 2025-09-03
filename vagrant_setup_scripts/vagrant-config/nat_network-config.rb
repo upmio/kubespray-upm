@@ -49,8 +49,8 @@ $kube_master_vm_cpus = 4        # CPU cores for Kubernetes master nodes
 $kube_master_vm_memory = 4096   # Memory in MB for Kubernetes master nodes (4GB)
 
 # UPM Control plane node resources (if using UPM)
-$upm_control_plane_vm_cpus = 12      # CPU cores for UPM control plane
-$upm_control_plane_vm_memory = 24576 # Memory in MB for UPM control plane (24GB)
+$upm_control_plane_vm_cpus = 4      # CPU cores for UPM control plane
+$upm_control_plane_vm_memory = 4096 # Memory in MB for UPM control plane (24GB)
 
 # =============================================================================
 # STORAGE CONFIGURATION
