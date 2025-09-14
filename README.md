@@ -119,8 +119,8 @@ Note:
 - Network Plugin
   - [cni-plugins](https://github.com/containernetworking/plugins) 1.4.1
   - [calico](https://github.com/projectcalico/calico) 3.30.3
-  - [cilium](https://github.com/cilium/cilium) 1.17.7
-  - [flannel](https://github.com/flannel-io/flannel) 0.26.7
+  - [cilium](https://github.com/cilium/cilium) 1.18.1
+  - [flannel](https://github.com/flannel-io/flannel) 0.27.3
   - [kube-ovn](https://github.com/alauda/kube-ovn) 1.12.21
   - [kube-router](https://github.com/cloudnativelabs/kube-router) 2.1.1
   - [multus](https://github.com/k8snetworkplumbingwg/multus-cni) 4.2.2
@@ -138,7 +138,7 @@ Note:
   - [azure-csi-plugin](https://github.com/kubernetes-sigs/azuredisk-csi-driver) 1.10.0
   - [cinder-csi-plugin](https://github.com/kubernetes/cloud-provider-openstack/blob/master/docs/cinder-csi-plugin/using-cinder-csi-plugin.md) 1.30.0
   - [gcp-pd-csi-plugin](https://github.com/kubernetes-sigs/gcp-compute-persistent-disk-csi-driver) 1.9.2
-  - [local-path-provisioner](https://github.com/rancher/local-path-provisioner) 0.0.24
+  - [local-path-provisioner](https://github.com/rancher/local-path-provisioner) 0.0.32
   - [local-volume-provisioner](https://github.com/kubernetes-sigs/sig-storage-local-static-provisioner) 2.5.0
   - [node-feature-discovery](https://github.com/kubernetes-sigs/node-feature-discovery) 0.16.4
 
