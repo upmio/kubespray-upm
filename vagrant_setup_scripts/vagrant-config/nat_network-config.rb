@@ -182,4 +182,21 @@ $inventory = "inventory/sample"
 $shared_folders = {}
 
 # Kubernetes version to install
-$kube_version = "1.33.3"
+$kube_version = "1.33.4"
+
+# =============================================================================
+# METALLB LOAD BALANCER CONFIGURATION
+# =============================================================================
+# Enable MetalLB load balancer
+$metallb_enabled = "false"
+
+# MetalLB protocol (layer2 or bgp)
+$metallb_protocol = "layer2"
+
+# MetalLB IP address range for load balancer services
+# Adjust this range according to your network configuration
+$metallb_ip_range = "10.37.129.50-10.37.129.100"
+
+# Kube-proxy strict ARP configuration (required for MetalLB, kube-vip)
+# Set to "true" to enable strict ARP mode for kube-proxy when using IPVS
+$kube_proxy_strict_arp = "true"

@@ -86,7 +86,7 @@ readonly CNPG_CHART_VERSION="${CNPG_CHART_VERSION:-"0.24.0"}"
 readonly UPM_NAMESPACE="upm-system"
 readonly UPM_CHART_VERSION="${UPM_CHART_VERSION:-"1.2.4"}"
 readonly UPM_PWD="${UPM_PWD:-"Upm@2024!"}"
-readonly PROMETHEUS_CHART_VERSION="${PROMETHEUS_CHART_VERSION:-"70.8.0"}"
+readonly PROMETHEUS_CHART_VERSION="${PROMETHEUS_CHART_VERSION:-"77.6.2"}"
 readonly PROMETHEUS_NAMESPACE="prometheus"
 
 # Global variable for auto-confirm mode (-y parameter)
