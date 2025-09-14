@@ -738,18 +738,46 @@ install_prometheus() {
 
     echo -e "${GREEN}✅ Proceeding with Prometheus installation...${NC}\n"
 
-    # Add Prometheus Helm repository
+    # Add Prometheus Helm repository with retry mechanism
     log_info "Adding Prometheus Helm repository..."
-    helm repo add "$prometheus_repo_name" "$prometheus_chart_repo" || {
-        error_exit "Failed to add Prometheus Helm repository"
-    }
-    helm repo update "$prometheus_repo_name"
+    local max_retries=3
+    local retry_count=0
+    
+    while [ $retry_count -lt $max_retries ]; do
+        if helm repo add "$prometheus_repo_name" "$prometheus_chart_repo"; then
+            log_info "Prometheus Helm repository added successfully"
+            break
+        else
+            retry_count=$((retry_count + 1))
+            log_info "Failed to add Prometheus Helm repository (attempt $retry_count/$max_retries)"
+            if [ $retry_count -lt $max_retries ]; then
+                log_info "Retrying in 10 seconds..."
+                sleep 10
+            else
+                error_exit "Failed to add Prometheus Helm repository after $max_retries attempts"
+            fi
+        fi
+    done
+    
+    # Update repository with retry mechanism
+    retry_count=0
+    while [ $retry_count -lt $max_retries ]; do
+        if helm repo update "$prometheus_repo_name"; then
+            log_info "Prometheus Helm repository updated successfully"
+            break
+        else
+            retry_count=$((retry_count + 1))
+            log_info "Failed to update Prometheus Helm repository (attempt $retry_count/$max_retries)"
+            if [ $retry_count -lt $max_retries ]; then
+                log_info "Retrying in 10 seconds..."
+                sleep 10
+            else
+                error_exit "Failed to update Prometheus Helm repository after $max_retries attempts"
+            fi
+        fi
+    done
 
     log_info "Labeling Prometheus worker nodes..."
-    # Use global variables extracted from config
-    extract_vagrant_config_variables
-
-    log_info "Labeling CloudNative-PG control plane nodes..."
     # Use global variables extracted from config
     extract_vagrant_config_variables
 
@@ -855,22 +883,59 @@ kube-state-metrics:
 EOF
 
     log_info "Installing Prometheus via Helm..."
-    helm upgrade --install "$prometheus_release_name" "$prometheus_chart_name" \
-        --namespace "$PROMETHEUS_NAMESPACE" \
-        --create-namespace \
-        --version "$PROMETHEUS_CHART_VERSION" \
-        --values "$values_file" \
-        --wait --timeout=15m || {
-        error_exit "Failed to install Prometheus"
-    }
+    # Install with retry mechanism for network issues
+    retry_count=0
+    while [ $retry_count -lt $max_retries ]; do
+        if helm upgrade --install "$prometheus_release_name" "$prometheus_chart_name" \
+            --namespace "$PROMETHEUS_NAMESPACE" \
+            --create-namespace \
+            --version "$PROMETHEUS_CHART_VERSION" \
+            --values "$values_file" \
+            --wait --timeout=15m; then
+            log_info "Prometheus installed successfully"
+            break
+        else
+            retry_count=$((retry_count + 1))
+            log_info "Failed to install Prometheus (attempt $retry_count/$max_retries)"
+            if [ $retry_count -lt $max_retries ]; then
+                log_info "Retrying in 30 seconds..."
+                sleep 30
+                # Try to update repo again before retry
+                helm repo update "$prometheus_repo_name" || true
+            else
+                error_exit "Failed to install Prometheus after $max_retries attempts. Please check network connectivity and try again."
+            fi
+        fi
+    done
 
     # Clean up values file
     rm -f "$values_file"
 
     # Wait for Prometheus to be ready
     log_info "Waiting for Prometheus to be ready..."
-    kubectl wait --for=condition=ready pod -l "app.kubernetes.io/name=prometheus" -n "$PROMETHEUS_NAMESPACE" --timeout=900s || {
-        error_exit "Prometheus failed to become ready"
+    # Wait for Prometheus operator to be ready
+    kubectl wait --for=condition=ready pod -l "app.kubernetes.io/name=kube-prometheus-stack-prometheus-operator" -n "$PROMETHEUS_NAMESPACE" --timeout=900s || {
+        error_exit "Prometheus operator failed to become ready"
+    }
+    
+    # Wait for Grafana to be ready
+    kubectl wait --for=condition=ready pod -l "app.kubernetes.io/name=grafana" -n "$PROMETHEUS_NAMESPACE" --timeout=900s || {
+        error_exit "Grafana failed to become ready"
+    }
+    
+    # Wait for AlertManager to be ready
+    kubectl wait --for=condition=ready pod -l "app.kubernetes.io/name=alertmanager" -n "$PROMETHEUS_NAMESPACE" --timeout=900s || {
+        error_exit "AlertManager failed to become ready"
+    }
+    
+    # Wait for Kube State Metrics to be ready
+    kubectl wait --for=condition=ready pod -l "app.kubernetes.io/name=kube-state-metrics" -n "$PROMETHEUS_NAMESPACE" --timeout=900s || {
+        error_exit "Kube State Metrics failed to become ready"
+    }
+    
+    # Wait for Prometheus Node Exporter to be ready
+    kubectl wait --for=condition=ready pod -l "app.kubernetes.io/name=prometheus-node-exporter" -n "$PROMETHEUS_NAMESPACE" --timeout=900s || {
+        error_exit "Prometheus Node Exporter failed to become ready"
     }
 
     # Display installation status
