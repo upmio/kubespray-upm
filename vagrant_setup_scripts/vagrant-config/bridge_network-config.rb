@@ -188,7 +188,7 @@ $kube_version = "1.33.4"
 # METALLB LOAD BALANCER CONFIGURATION
 # =============================================================================
 # Enable MetalLB load balancer
-$metallb_enabled = "false"
+$metallb_enabled = "False"
 
 # MetalLB protocol (layer2 or bgp)
 $metallb_protocol = "layer2"
@@ -196,7 +196,3 @@ $metallb_protocol = "layer2"
 # MetalLB IP address range for load balancer services
 # Adjust this range according to your network configuration
 $metallb_ip_range = ""
-
-# Kube-proxy strict ARP configuration (required for MetalLB, kube-vip)
-# Set to "true" to enable strict ARP mode for kube-proxy when using IPVS
-$kube_proxy_strict_arp = "true"

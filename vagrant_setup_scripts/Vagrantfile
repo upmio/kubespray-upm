@@ -79,9 +79,8 @@ $multi_networking ||= "False"                  # Enable Multus CNI for multi-net
 $kube_version ||= "1.32.7"                     # Kubernetes version
 
 # MetalLB Configuration
-$kube_proxy_strict_arp ||= "false"                  # Enable strict ARP for kube-proxy (required for MetalLB, kube-vip)
-$metallb_enabled ||= "false"                        # Enable MetalLB load balancer
-$metallb_protocol ||= "layer2"                     # MetalLB protocol (layer2 or bgp)
+$metallb_enabled ||= "False"                            # Enable MetalLB load balancer
+$metallb_protocol ||= "layer2"                          # MetalLB protocol (layer2 or bgp)
 $metallb_ip_range ||= "192.168.100.100-192.168.100.200" # MetalLB IP address range
 
 # Download and Cache Configuration
@@ -746,7 +745,7 @@ Vagrant.configure("2") do |config|
         "unsafe_show_logs": "True",
         "preinstall_selinux_state": "disabled",
         "kube_version": "#{$kube_version}",
-        "kube_proxy_strict_arp": "#{$kube_proxy_strict_arp}",
+        "kube_proxy_strict_arp": "#{$metallb_enabled}",
         "metallb_enabled": "#{$metallb_enabled}",
         "metallb_protocol": "#{$metallb_protocol}",
         "metallb_config": {
