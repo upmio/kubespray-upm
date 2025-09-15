@@ -81,7 +81,6 @@ $kube_version ||= "1.32.7"                     # Kubernetes version
 # MetalLB Configuration
 $metallb_enabled ||= "False"                            # Enable MetalLB load balancer
 $metallb_protocol ||= "layer2"                          # MetalLB protocol (layer2 or bgp)
-$metallb_ip_range ||= "192.168.100.100-192.168.100.200" # MetalLB IP address range
 
 # Download and Cache Configuration
 $download_run_once ||= "True"                  # Download binaries only once
@@ -747,16 +746,7 @@ Vagrant.configure("2") do |config|
         "kube_version": "#{$kube_version}",
         "kube_proxy_strict_arp": "#{$metallb_enabled}",
         "metallb_enabled": "#{$metallb_enabled}",
-        "metallb_protocol": "#{$metallb_protocol}",
-        "metallb_config": {
-          "address_pools" => {
-            "primary" => {
-              "ip_range" => ["#{$metallb_ip_range}"],
-              "auto_assign" => "true"
-            }
-          },
-          "layer2" => ["primary"]
-        }
+        "metallb_protocol": "#{$metallb_protocol}"
       }
 
       # Add proxy configuration to host_vars if defined in config.rb

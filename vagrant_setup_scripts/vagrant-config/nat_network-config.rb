@@ -192,7 +192,3 @@ $metallb_enabled = "False"
 
 # MetalLB protocol (layer2 or bgp)
 $metallb_protocol = "layer2"
-
-# MetalLB IP address range for load balancer services
-# Adjust this range according to your network configuration
-$metallb_ip_range = "10.37.129.50-10.37.129.100"
