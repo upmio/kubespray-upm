@@ -182,7 +182,7 @@ $inventory = "inventory/sample"
 $shared_folders = {}
 
 # Kubernetes version to install
-$kube_version = "1.33.4"
+$kube_version = "1.34.2"
 
 # =============================================================================
 # METALLB LOAD BALANCER CONFIGURATION

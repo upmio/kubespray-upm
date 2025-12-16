@@ -107,16 +107,16 @@ declare G_KUBE_MASTER_VM_CPUS="4"
 declare G_KUBE_MASTER_VM_MEMORY="4096"
 declare G_UPM_CONTROL_PLANE_VM_CPUS="12"
 declare G_UPM_CONTROL_PLANE_VM_MEMORY="24576"
-declare G_KUBE_VERSION="1.32.7"
-declare G_OS="rockylinux9"
-declare G_NETWORK_PLUGIN="calico"
+declare G_KUBE_VERSION
+declare G_OS
+declare G_NETWORK_PLUGIN
 declare G_INSTANCE_NAME_PREFIX="k8s"
 declare G_WORKER_NODES
 declare G_SUBNET_SPLIT4="100"
 declare G_SUBNET
 declare G_NETMASK
 declare G_GATEWAY
-declare G_DNS_SERVER="8.8.8.8"
+declare G_DNS_SERVER
 declare SYS_MEMORY_MB
 declare SYS_CPU_CORES
 
