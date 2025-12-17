@@ -22,14 +22,14 @@ jobs:
     - run: update-hashes
       env:
         API_KEY: ${{ secrets.GITHUB_TOKEN }}
-    - uses: actions/cache@v4
+    - uses: actions/cache@v5
       with:
         key: pre-commit-hook-propagate
         path: |
           ~/.cache/pre-commit
     - run: pre-commit run --all-files propagate-ansible-variables
       continue-on-error: true
-    - uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676
+    - uses: peter-evans/create-pull-request@98357b18bf14b5342f975ff684046ec3b2a07725
       with:
         commit-message: Patch versions updates
         title: Patch versions updates - ${{ inputs.branch }}
