@@ -613,7 +613,6 @@ install_lvm_localpv() {
     local values_file="/tmp/lvm_localpv_values.yaml"
     cat <<EOF >"$values_file"
 lvmPlugin:
-  image:
   allowedTopologies: "kubernetes.io/hostname,openebs.io/node,"
 lvmController:
   nodeSelector:
