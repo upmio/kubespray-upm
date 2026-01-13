@@ -79,14 +79,14 @@ readonly VAGRANT_CONF_FILE="${SCRIPT_DIR}/../vagrant/config.rb"
 export KUBECONFIG="${HOME}/.kube/config"
 
 readonly LVM_LOCALPV_NAMESPACE="openebs"
-readonly LVM_LOCALPV_CHART_VERSION="${LVM_LOCALPV_CHART_VERSION:-"1.7.0"}"
+readonly LVM_LOCALPV_CHART_VERSION="${LVM_LOCALPV_CHART_VERSION:-"1.8.0"}"
 readonly LVM_LOCALPV_STORAGECLASS_NAME="lvm-localpv"
 readonly CNPG_NAMESPACE="cnpg-system"
 readonly CNPG_CHART_VERSION="${CNPG_CHART_VERSION:-"0.24.0"}"
 readonly UPM_NAMESPACE="upm-system"
 readonly UPM_CHART_VERSION="${UPM_CHART_VERSION:-"1.2.4"}"
 readonly UPM_PWD="${UPM_PWD:-"Upm@2024!"}"
-readonly PROMETHEUS_CHART_VERSION="${PROMETHEUS_CHART_VERSION:-"80.9.1"}"
+readonly PROMETHEUS_CHART_VERSION="${PROMETHEUS_CHART_VERSION:-"80.13.3"}"
 readonly PROMETHEUS_NAMESPACE="prometheus"
 
 # Global variable for auto-confirm mode (-y parameter)
@@ -614,7 +614,6 @@ install_lvm_localpv() {
     cat <<EOF >"$values_file"
 lvmPlugin:
   image:
-    repository: docker.io/openebs/lvm-driver
   allowedTopologies: "kubernetes.io/hostname,openebs.io/node,"
 lvmController:
   nodeSelector:
