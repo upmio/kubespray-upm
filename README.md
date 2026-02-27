@@ -89,13 +89,13 @@ vagrant up
 - **Flatcar Container Linux by Kinvolk**
 - **Debian** Bookworm, Bullseye, Trixie
 - **Ubuntu** 22.04, 24.04
-- **CentOS Stream / RHEL** [9, 10](docs/operating_systems/rhel.md#rhel-8)
-- **Fedora** 39, 40
+- **CentOS Stream / RHEL** 9, 10
+- **Fedora** 39, 40, 41, 42
 - **Fedora CoreOS** (see [fcos Note](docs/operating_systems/fcos.md))
 - **openSUSE** Leap 15.x/Tumbleweed
-- **Oracle Linux** [9, 10](docs/operating_systems/rhel.md#rhel-8)
-- **Alma Linux** [9, 10](docs/operating_systems/rhel.md#rhel-8)
-- **Rocky Linux** [9, 10](docs/operating_systems/rhel.md#rhel-8) (experimental in 10: see [Rocky Linux 10 notes](docs/operating_systems/rhel.md#rocky-linux-10))
+- **Oracle Linux** 9, 10
+- **Alma Linux** 9, 10
+- **Rocky Linux** 9, 10 (experimental in 10: see [Rocky Linux 10 notes](docs/operating_systems/rhel.md#rocky-linux-10))
 - **Kylin Linux Advanced Server V10** (experimental: see [kylin linux notes](docs/operating_systems/kylinlinux.md))
 - **Amazon Linux 2** (experimental: see [amazon linux notes](docs/operating_systems/amazonlinux.md))
 - **UOS Linux** (experimental: see [uos linux notes](docs/operating_systems/uoslinux.md))
@@ -111,11 +111,11 @@ Note:
 <!-- BEGIN ANSIBLE MANAGED BLOCK -->
 
 - Core
-  - [kubernetes](https://github.com/kubernetes/kubernetes) 1.34.3
-  - [etcd](https://github.com/etcd-io/etcd) 3.5.26
+  - [kubernetes](https://github.com/kubernetes/kubernetes) 1.35.1
+  - [etcd](https://github.com/etcd-io/etcd) 3.6.8
   - [docker](https://www.docker.com/) 28.3
   - [containerd](https://containerd.io/) 2.2.1
-  - [cri-o](http://cri-o.io/) 1.34.4 (experimental: see [CRI-O Note](docs/CRI/cri-o.md). Only on fedora, ubuntu and centos based OS)
+  - [cri-o](http://cri-o.io/) 1.35.0 (experimental: see [CRI-O Note](docs/CRI/cri-o.md). Only on fedora, ubuntu and centos based OS)
 - Network Plugin
   - [cni-plugins](https://github.com/containernetworking/plugins) 1.8.0
   - [calico](https://github.com/projectcalico/calico) 3.30.6
@@ -127,10 +127,9 @@ Note:
   - [kube-vip](https://github.com/kube-vip/kube-vip) 1.0.3
 - Application
   - [cert-manager](https://github.com/jetstack/cert-manager) 1.15.3
-  - [coredns](https://github.com/coredns/coredns) 1.12.1
-  - [ingress-nginx](https://github.com/kubernetes/ingress-nginx) 1.13.3
+  - [coredns](https://github.com/coredns/coredns) 1.12.4
   - [argocd](https://argoproj.github.io/) 2.14.5
-  - [helm](https://helm.sh/) 3.18.4
+  - [helm](https://helm.sh/) 4.1.1
   - [metallb](https://metallb.universe.tf/) 0.13.9
   - [registry](https://github.com/distribution/distribution) 2.8.1
 - Storage Plugin
@@ -201,8 +200,6 @@ option to leverage built-in cloud provider networking instead.
 See also [Network checker](docs/advanced/netcheck.md).
 
 ## Ingress Plugins
-
-- [nginx](https://kubernetes.github.io/ingress-nginx): the NGINX Ingress Controller.
 
 - [metallb](docs/ingress/metallb.md): the MetalLB bare-metal service LoadBalancer provider.
 

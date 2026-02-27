@@ -30,9 +30,9 @@ If the latest version supported according to pip is 6.7.0 it means you are runni
 
 Based on the table below and the available python version for your ansible host you should choose the appropriate ansible version to use with kubespray.
 
-| Ansible Version | Python Version |
-|-----------------|----------------|
-| >= 2.17.3       | 3.10-3.12      |
+|  Ansible Version  | Python Version |
+|-------------------|----------------|
+| >=2.18.0, <2.19.0 | 3.11-3.13      |
 
 ## Customize Ansible vars
 
@@ -78,7 +78,6 @@ The following tags are defined in playbooks:
 | crio                           | Configuring crio container engine for hosts           |
 | crun                           | Configuring crun runtime                              |
 | csi-driver                     | Configuring csi driver                                |
-| dashboard                      | Installing and configuring the Kubernetes Dashboard   |
 | dns                            | Remove dns entries when resetting                     |
 | docker                         | Configuring docker engine runtime for hosts           |
 | download                       | Fetching container images to a delegate host          |
