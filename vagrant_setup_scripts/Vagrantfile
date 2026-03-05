@@ -16,15 +16,12 @@ CONFIG = File.join(File.dirname(__FILE__), ENV['KUBESPRAY_VAGRANT_CONFIG'] || 'v
 
 # Supported operating systems with their respective Vagrant boxes and default users
 SUPPORTED_OS = {
-  "ubuntu2204"          => {box: "generic/ubuntu2204",         user: "vagrant"},
   "ubuntu2404"          => {box: "bento/ubuntu-24.04",         user: "vagrant"},
-  "rockylinux8"         => {box: "bento/rockylinux-8.10",      user: "vagrant"},
+  "almalinux9"          => {box: "bento/almalinux-9.6",        user: "vagrant"},
   "rockylinux9"         => {box: "bento/rockylinux-9.6",       user: "vagrant"},
   "opensuse"            => {box: "opensuse/Leap-15.4.x86_64",  user: "vagrant"},
   "opensuse-tumbleweed" => {box: "opensuse/Tumbleweed.x86_64", user: "vagrant"},
-  "oraclelinux8"        => {box: "bento/oraclelinux-8.10",     user: "vagrant"},
   "oraclelinux9"        => {box: "bento/oraclelinux-9.5",      user: "vagrant"},
-  "rhel8"               => {box: "generic/rhel8",              user: "vagrant"},
 }.freeze
 
 # Load custom configuration file if it exists
@@ -353,7 +350,7 @@ end
 # Configure proxy settings if vagrant-proxyconf plugin is available
 if Vagrant.has_plugin?("vagrant-proxyconf")
   # Default no_proxy settings for common private networks
-  $no_proxy = ENV['NO_PROXY'] || ENV['no_proxy'] || 
+  $no_proxy = ENV['NO_PROXY'] || ENV['no_proxy'] ||
               "localhost,127.0.0.1,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,::1"
   # Add VM IPs to no_proxy list
   (1..$num_instances).each do |i|
@@ -678,11 +675,11 @@ Vagrant.configure("2") do |config|
       actual_ip = configure_vm_network(node, ip, i)
 
       # Configure Rocky Linux specific network settings
-      configure_rocky_network(node) if ["rockylinux8", "rockylinux9"].include?($os)
+      configure_rocky_network(node) if ["rockylinux9", "almalinux9"].include?($os)
 
       # if provider = virtualbox , set ethtool -K net device tx-checksum-ip-generic off
       if $provider == "virtualbox"
-        if ["rockylinux8","rockylinux9"].include? $os
+        if ["rockylinux9","almalinux9"].include? $os
           node.vm.provision "shell", inline: <<-SHELL
             sudo ethtool -K eth0 tx-checksum-ip-generic off
             sudo ethtool -K eth1 tx-checksum-ip-generic off
@@ -715,7 +712,7 @@ Vagrant.configure("2") do |config|
       configure_os_specific_settings(node, config)
 
       # Set system timezone
-      node.vm.provision "shell", inline: "timedatectl set-timezone #{$time_zone}", 
+      node.vm.provision "shell", inline: "timedatectl set-timezone #{$time_zone}",
                         name: "Set timezone to #{$time_zone}"
 
       host_vars[vm_name] = {
@@ -783,18 +780,18 @@ end
 def configure_os_specific_settings(node, config)
   # Re-enable IPv6 on Ubuntu systems where it's disabled by default
   if ["ubuntu2204", "ubuntu2404"].include?($os)
-    node.vm.provision "shell", 
+    node.vm.provision "shell",
                       inline: "rm -f /etc/modprobe.d/local.conf",
                       name: "Remove IPv6 disable configuration"
-    node.vm.provision "shell", 
+    node.vm.provision "shell",
                       inline: "sed -i '/net.ipv6.conf.all.disable_ipv6/d' /etc/sysctl.d/99-sysctl.conf /etc/sysctl.conf",
                       name: "Remove IPv6 sysctl disable settings"
   end
 
   # Disable firewalld on RHEL-based systems
-  rhel_based_os = ["oraclelinux", "oraclelinux8", "rhel7", "rhel8", "rockylinux8", "rockylinux9"]
+  rhel_based_os = ["oraclelinux", "rhel7", "rhel8", "rockylinux8", "rockylinux9", "almalinux9"]
   if rhel_based_os.include?($os)
-    node.vm.provision "shell", 
+    node.vm.provision "shell",
                       inline: "systemctl stop firewalld 2>/dev/null || true; systemctl disable firewalld 2>/dev/null || true",
                       name: "Disable firewalld service"
   end

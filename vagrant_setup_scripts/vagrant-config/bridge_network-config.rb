@@ -118,7 +118,7 @@ $ntp_enabled = "True"
 $ntp_manage_config = "True"
 
 # Operating system for VMs
-# Supported options: "ubuntu2004", "ubuntu2204", "centos7", "centos8", "rockylinux8", "rockylinux9", etc.
+# Supported options: "ubuntu2204", "rockylinux9", "almalinux9", etc.
 $os = "rockylinux9"
 
 # =============================================================================
@@ -182,7 +182,7 @@ $inventory = "inventory/sample"
 $shared_folders = {}
 
 # Kubernetes version to install
-$kube_version = "1.34.2"
+$kube_version = "1.35.1"
 
 # =============================================================================
 # METALLB LOAD BALANCER CONFIGURATION
