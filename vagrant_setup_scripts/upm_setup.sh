@@ -86,7 +86,7 @@ readonly CNPG_CHART_VERSION="${CNPG_CHART_VERSION:-"0.24.0"}"
 readonly UPM_NAMESPACE="upm-system"
 readonly UPM_CHART_VERSION="${UPM_CHART_VERSION:-"1.2.4"}"
 readonly UPM_PWD="${UPM_PWD:-"Upm@2024!"}"
-readonly PROMETHEUS_CHART_VERSION="${PROMETHEUS_CHART_VERSION:-"80.13.3"}"
+readonly PROMETHEUS_CHART_VERSION="${PROMETHEUS_CHART_VERSION:-"86.1.1"}"
 readonly PROMETHEUS_NAMESPACE="prometheus"
 
 # Global variable for auto-confirm mode (-y parameter)
@@ -801,7 +801,9 @@ install_prometheus() {
     done <<<"$nodes"
 
     # Create values file
-    local values_file="/tmp/prometheus_values.yaml"
+    local values_file
+    values_file=$(mktemp "${TMPDIR:-/tmp}/prometheus_values.XXXXXX")
+    TEMP_FILES+=("$values_file")
     cat >"$values_file" <<EOF
 prometheusOperator:
   admissionWebhooks:
