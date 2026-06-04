@@ -79,7 +79,7 @@ readonly VAGRANT_CONF_FILE="${SCRIPT_DIR}/../vagrant/config.rb"
 export KUBECONFIG="${HOME}/.kube/config"
 
 readonly LVM_LOCALPV_NAMESPACE="openebs"
-readonly LVM_LOCALPV_CHART_VERSION="${LVM_LOCALPV_CHART_VERSION:-"1.8.0"}"
+readonly LVM_LOCALPV_CHART_VERSION="${LVM_LOCALPV_CHART_VERSION:-"1.9.0"}"
 readonly LVM_LOCALPV_STORAGECLASS_NAME="lvm-localpv"
 readonly CNPG_NAMESPACE="cnpg-system"
 readonly CNPG_CHART_VERSION="${CNPG_CHART_VERSION:-"0.24.0"}"
@@ -610,7 +610,9 @@ install_lvm_localpv() {
     }
     helm repo update "$lvm_localpv_repo_name"
 
-    local values_file="/tmp/lvm_localpv_values.yaml"
+    local values_file
+    values_file=$(mktemp "${TMPDIR:-/tmp}/lvm_localpv_values.XXXXXX")
+    TEMP_FILES+=("$values_file")
     cat <<EOF >"$values_file"
 lvmPlugin:
   allowedTopologies: "kubernetes.io/hostname,openebs.io/node,"
@@ -640,7 +642,7 @@ EOF
 
     # Wait for pods to be ready
     log_info "Waiting for OpenEBS pods to be ready..."
-    kubectl wait --for=condition=ready pod -l release="$lvm_localpv_release_name" -n "$LVM_LOCALPV_NAMESPACE" --timeout=900s || {
+    kubectl wait --for=condition=ready pod -l role=openebs-lvm -n "$LVM_LOCALPV_NAMESPACE" --timeout=900s || {
         error_exit "OpenEBS pods failed to become ready"
     }
     log_info "OpenEBS LVM LocalPV installed successfully"
