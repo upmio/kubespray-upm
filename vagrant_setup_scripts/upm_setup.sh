@@ -84,7 +84,7 @@ readonly LVM_LOCALPV_STORAGECLASS_NAME="lvm-localpv"
 readonly UPM_NAMESPACE="upm-system"
 readonly UPM_CHART_VERSION="${UPM_CHART_VERSION:-"1.2.4"}"
 readonly UPM_PWD="${UPM_PWD:-"Upm@2024!"}"
-readonly PROMETHEUS_CHART_VERSION="${PROMETHEUS_CHART_VERSION:-"86.1.1"}"
+readonly PROMETHEUS_CHART_VERSION="${PROMETHEUS_CHART_VERSION:-"87.10.1"}"
 readonly PROMETHEUS_NAMESPACE="prometheus"
 
 # Global variable for auto-confirm mode (-y parameter)
