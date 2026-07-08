@@ -182,13 +182,4 @@ $inventory = "inventory/sample"
 $shared_folders = {}
 
 # Kubernetes version to install
-$kube_version = "1.35.1"
-
-# =============================================================================
-# METALLB LOAD BALANCER CONFIGURATION
-# =============================================================================
-# Enable MetalLB load balancer
-$metallb_enabled = "False"
-
-# MetalLB protocol (layer2 or bgp)
-$metallb_protocol = "layer2"
+$kube_version = "1.36.1"

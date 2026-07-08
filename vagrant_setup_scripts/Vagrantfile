@@ -73,11 +73,7 @@ $ntp_manage_config ||= "True"
 # Kubernetes Configuration
 $network_plugin ||= "calico"                   # CNI plugin (calico, flannel, etc.)
 $multi_networking ||= "False"                  # Enable Multus CNI for multi-networking
-$kube_version ||= "1.32.7"                     # Kubernetes version
-
-# MetalLB Configuration
-$metallb_enabled ||= "False"                            # Enable MetalLB load balancer
-$metallb_protocol ||= "layer2"                          # MetalLB protocol (layer2 or bgp)
+$kube_version ||= "1.36.1"                     # Kubernetes version
 
 # Download and Cache Configuration
 $download_run_once ||= "True"                  # Download binaries only once
@@ -741,10 +737,7 @@ Vagrant.configure("2") do |config|
         "ansible_ssh_private_key_file": File.join(Dir.home, ".vagrant.d", "insecure_private_key"),
         "unsafe_show_logs": "True",
         "preinstall_selinux_state": "disabled",
-        "kube_version": "#{$kube_version}",
-        "kube_proxy_strict_arp": "#{$metallb_enabled}",
-        "metallb_enabled": "#{$metallb_enabled}",
-        "metallb_protocol": "#{$metallb_protocol}"
+        "kube_version": "#{$kube_version}"
       }
 
       # Add proxy configuration to host_vars if defined in config.rb
