@@ -16,7 +16,7 @@
 # Components:
 #   - OpenEBS LVM LocalPV (persistent storage)
 #   - Prometheus (monitoring stack)
-#   - CloudNative-PG (PostgreSQL operator)
+
 #   - UPM Engine & Platform (management platform)
 #   - Nginx (reverse proxy configuration)
 #
@@ -79,10 +79,8 @@ readonly VAGRANT_CONF_FILE="${SCRIPT_DIR}/../vagrant/config.rb"
 export KUBECONFIG="${HOME}/.kube/config"
 
 readonly LVM_LOCALPV_NAMESPACE="openebs"
-readonly LVM_LOCALPV_CHART_VERSION="${LVM_LOCALPV_CHART_VERSION:-"1.9.0"}"
+readonly LVM_LOCALPV_CHART_VERSION="${LVM_LOCALPV_CHART_VERSION:-"1.9.1"}"
 readonly LVM_LOCALPV_STORAGECLASS_NAME="lvm-localpv"
-readonly CNPG_NAMESPACE="cnpg-system"
-readonly CNPG_CHART_VERSION="${CNPG_CHART_VERSION:-"0.24.0"}"
 readonly UPM_NAMESPACE="upm-system"
 readonly UPM_CHART_VERSION="${UPM_CHART_VERSION:-"1.2.4"}"
 readonly UPM_PWD="${UPM_PWD:-"Upm@2024!"}"
@@ -975,136 +973,7 @@ EOF
     return 0
 }
 
-#######################################
-# Install CloudNative-PG
-#######################################
-install_cnpg() {
-    log_info "Starting CloudNative-PG installation..."
 
-    # Ensure Helm is installed
-    if ! command -v helm >/dev/null 2>&1; then
-        log_info "Helm not found, installing..."
-        install_helm
-    fi
-
-    # Configuration variables
-    local cnpg_chart_repo="https://cloudnative-pg.github.io/charts"
-    local cnpg_repo_name="cnpg"
-    local cnpg_release_name="cloudnative-pg"
-    local cnpg_chart_name="$cnpg_repo_name/cloudnative-pg"
-
-    # Interactive confirmation for CloudNative-PG installation
-    echo -e "\n${YELLOW}📦 CloudNative-PG Installation${NC}\n"
-    echo -e "${WHITE}This will install CloudNative-PG with the following components:${NC}"
-    echo -e "   ${GREEN}•${NC} CloudNative-PG Helm chart"
-    echo -e "   ${GREEN}•${NC} Node labels for CloudNative-PG scheduling"
-    echo -e "   ${GREEN}•${NC} Helm repository configuration\n"
-
-    echo -e "${WHITE}Installation details:${NC}"
-    echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$CNPG_NAMESPACE${NC}"
-    echo -e "   ${GREEN}•${NC} Helm chart: ${CYAN}$cnpg_chart_name${NC}"
-    echo -e "   ${GREEN}•${NC} Helm chart version: ${CYAN}$CNPG_CHART_VERSION${NC}"
-    echo -e "   ${GREEN}•${NC} Installation timeout: ${CYAN}5 minutes${NC}\n"
-
-    echo -e "${YELLOW}⚠️  Note: This installation will:${NC}"
-    echo -e "   ${YELLOW}•${NC} Add node labels to control plane"
-    echo -e "   ${YELLOW}•${NC} Install Helm if not already present\n"
-
-    if ! prompt_yes_no "Do you want to proceed with CloudNative-PG installation?"; then
-        echo -e "${YELLOW}⏸️  CloudNative-PG installation skipped.${NC}\n"
-        log_info "CloudNative-PG installation skipped by user"
-        return 0
-    fi
-
-    echo -e "${GREEN}✅ Proceeding with CloudNative-PG installation...${NC}\n"
-
-    # Add CloudNative-PG Helm repository
-    log_info "Adding CloudNative-PG Helm repository..."
-    helm repo add "$cnpg_repo_name" "$cnpg_chart_repo" || {
-        error_exit "Failed to add CloudNative-PG Helm repository"
-    }
-    helm repo update "$cnpg_repo_name"
-
-    log_info "Labeling CloudNative-PG control plane nodes..."
-    # Use global variables extracted from config
-    extract_vagrant_config_variables
-
-    local ctl_start_index=$((G_KUBE_MASTER_INSTANCES + 1))
-    local ctl_end_index=$((G_KUBE_MASTER_INSTANCES + G_UPM_CTL_INSTANCES))
-
-    local nodes
-    nodes=$(kubectl get nodes --no-headers -o custom-columns=":metadata.name")
-
-    while IFS= read -r node; do
-        # Extract node number from node name (assuming format: prefix-number)
-        if [[ "$node" =~ ^${G_INSTANCE_NAME_PREFIX}-([0-9]+)$ ]]; then
-            local node_num="${BASH_REMATCH[1]}"
-            if [[ "$node_num" -ge "$ctl_start_index" ]] && [[ "$node_num" -le "$ctl_end_index" ]]; then
-                log_info "Labeling CloudNative-PG control plane node: $node"
-                kubectl label node "$node" "cnpg.io/control-plane=enable" --overwrite || {
-                    error_exit "Failed to label CloudNative-PG control plane node: $node"
-                }
-            fi
-        fi
-    done <<<"$nodes"
-
-    # Create values file
-    local values_file="/tmp/cnpg_values.yaml"
-    cat >"$values_file" <<EOF
-# Operator configuration.
-config:
-  data:
-    ENABLE_INSTANCE_MANAGER_INPLACE_UPDATES: "true"
-    INHERITED_ANNOTATIONS: "categories"
-    INHERITED_LABELS: "upm.api/service-group.name, upm.api/service-group.type, upm.api/service.type, upm.io/owner, upm.api/pod.main-container"
-# -- Affinity for the operator to be installed.
-affinity: 
-  nodeAffinity:
-    requiredDuringSchedulingIgnoredDuringExecution:
-      nodeSelectorTerms:
-      - matchExpressions:
-        - key: cnpg.io/control-plane
-          operator: In
-          values:
-          - enable
-EOF
-
-    log_info "Installing CloudNative-PG operator via Helm..."
-    helm upgrade --install "$cnpg_release_name" "$cnpg_chart_name" \
-        --namespace "$CNPG_NAMESPACE" \
-        --create-namespace \
-        --version "$CNPG_CHART_VERSION" \
-        --values "$values_file" \
-        --wait --timeout=5m || {
-        error_exit "Failed to upgrade CloudNative-PG"
-    }
-
-    # Clean up values file
-    rm -f "$values_file"
-
-    # Wait for operator to be ready
-    log_info "Waiting for CloudNative-PG operator to be ready..."
-    kubectl wait --for=condition=ready pod -l app.kubernetes.io/instance="$cnpg_release_name" -n "$CNPG_NAMESPACE" --timeout=300s || {
-        error_exit "CloudNative-PG operator failed to become ready"
-    }
-
-    # Display installation status
-    echo -e "\n${GREEN}🎉 CloudNative-PG Installation Completed!${NC}\n"
-    echo -e "${WHITE}📦 Components:${NC}"
-    echo -e "   ${GREEN}•${NC} Namespace: ${CYAN}$CNPG_NAMESPACE${NC}"
-    echo -e "   ${GREEN}•${NC} Chart: ${CYAN}$cnpg_chart_name${NC}"
-    echo -e "   ${GREEN}•${NC} Chart Version: ${CYAN}$CNPG_CHART_VERSION${NC}\n"
-
-    echo -e "${WHITE}🔍 Verification Commands:${NC}"
-    echo -e "   ${GREEN}•${NC} Check pods: ${CYAN}kubectl get pods -n $CNPG_NAMESPACE${NC}"
-    echo -e "   ${GREEN}•${NC} Check operator logs: ${CYAN}kubectl logs -n $CNPG_NAMESPACE deployment/cnpg-controller-manager${NC}"
-    echo -e "   ${GREEN}•${NC} Check CRDs: ${CYAN}kubectl get crd | grep cnpg${NC}"
-    echo -e "   ${GREEN}•${NC} Check Helm release: ${CYAN}helm list -n $CNPG_NAMESPACE${NC}"
-    echo -e "   ${GREEN}•${NC} Check deployment config: ${CYAN}kubectl get deployment cnpg-controller-manager -n $CNPG_NAMESPACE -o yaml${NC}"
-    echo -e "${GREEN}✅ CloudNative-PG installed successfully${NC}\n"
-
-    return 0
-}
 
 #######################################
 # Install UPM Engine
@@ -1352,8 +1221,6 @@ apiserver:
       redis-cluster:
         enabled: true
       zookeeper:
-        enabled: true
-      cnpg:
         enabled: true
       innodb-cluster:
         enabled: true
@@ -1771,7 +1638,6 @@ System Information:
 
 Component Versions:
   LVM LocalPV: ${LVM_LOCALPV_CHART_VERSION}
-  CNPG:        ${CNPG_CHART_VERSION}
   UPM:         ${UPM_CHART_VERSION}
   Prometheus:  ${PROMETHEUS_CHART_VERSION}
 EOF
@@ -1794,7 +1660,6 @@ show_help() {
     echo -e "${WHITE}INSTALL OPTIONS:${NC}"
     echo "    --lvmlocalpv            Install OpenEBS LVM LocalPV for persistent storage"
     echo "    --prometheus            Install Prometheus monitoring stack"
-    echo "    --cnpg                  Install CloudNative-PG PostgreSQL operator"
     echo "    --upm-engine            Install UPM Engine (requires LVM LocalPV)"
     echo "    --upm-platform          Install UPM Platform (requires LVM LocalPV)"
     echo "    --config_nginx          Configure Nginx for UPM Platform access"
@@ -1813,7 +1678,6 @@ show_help() {
     echo -e "${WHITE}COMPONENTS:${NC}"
     echo -e "    ${YELLOW}LVM LocalPV:${NC}     Persistent storage using LVM (namespace: openebs)"
     echo -e "    ${YELLOW}Prometheus:${NC}      Monitoring stack (ports: 30090, 30091)"
-    echo -e "    ${YELLOW}CNPG:${NC}            PostgreSQL operator (namespace: cnpg-system)"
     echo -e "    ${YELLOW}UPM Engine:${NC}      Core management engine (namespace: upm-system)"
     echo -e "    ${YELLOW}UPM Platform:${NC}    Web interface (port: 32010, user: super_root/Upm@2024!)"
     echo -e "    ${YELLOW}Nginx:${NC}           Reverse proxy configuration"
@@ -1904,10 +1768,6 @@ main() {
             log_info "Executing: install_prometheus"
             time_function install_prometheus
             ;;
-        "--cnpg")
-            log_info "Executing: install_cnpg"
-            time_function install_cnpg
-            ;;
         "--upm-engine")
             log_info "Executing: install_upm_engine"
             time_function install_upm_engine
@@ -1927,7 +1787,6 @@ main() {
             log_info "Executing: complete installation sequence"
             time_function install_lvm_localpv
             time_function install_prometheus
-            time_function install_cnpg
             time_function install_upm_engine
             time_function install_upm_platform
             ;;

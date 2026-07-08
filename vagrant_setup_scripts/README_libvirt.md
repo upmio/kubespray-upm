@@ -26,7 +26,7 @@
 curl -sSL https://raw.githubusercontent.com/upmio/kubespray-upm/refs/heads/master/vagrant_setup_scripts/libvirt_kubespray_setup.sh -o ./libvirt_kubespray_setup.sh && chmod +x ./libvirt_kubespray_setup.sh && bash ./libvirt_kubespray_setup.sh -y
 ```
 
-**注意**: 该脚本专门用于部署 Kubernetes 集群。如需安装 UPM 相关组件（如 LVM LocalPV、Prometheus、CloudNativePG、UPM Engine、UPM Platform），请在集群部署完成后使用 `upm_setup.sh` 脚本。
+**注意**: 该脚本专门用于部署 Kubernetes 集群。如需安装 UPM 相关组件（如 LVM LocalPV、Prometheus、UPM Engine、UPM Platform），请在集群部署完成后使用 `upm_setup.sh` 脚本。
 
 ## 系统要求
 
@@ -224,7 +224,7 @@ kubectl get pods --all-namespaces
 
 **安装时间**: 约 15-20 分钟（取决于网络速度和硬件性能）
 
-**UPM 组件安装**: 如需安装 UPM 相关组件（LVM LocalPV、Prometheus、CloudNativePG、UPM Engine、UPM Platform），请在 Kubernetes 集群部署完成后使用 `upm_setup.sh` 脚本。
+**UPM 组件安装**: 如需安装 UPM 相关组件（LVM LocalPV、Prometheus、UPM Engine、UPM Platform），请在 Kubernetes 集群部署完成后使用 `upm_setup.sh` 脚本。
 
 ### 虚拟机管理
 
@@ -617,7 +617,6 @@ bash ./upm_setup.sh -h
 
 # 安装示例
 bash ./upm_setup.sh --lvmlocalpv     # LVM LocalPV 存储
-bash ./upm_setup.sh --cnpg           # CloudNativePG 数据库
 bash ./upm_setup.sh --prometheus     # Prometheus 监控
 bash ./upm_setup.sh --upm-engine     # UPM Engine
 bash ./upm_setup.sh --upm-platform   # UPM Platform
