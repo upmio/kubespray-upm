@@ -1,5 +1,7 @@
 # Vagrant
 
+> 本页保留的是上游 Kubespray 的通用 Vagrant 开发流程，不代表本 fork 的 libvirt 一键部署默认值。使用 `vagrant_setup_scripts/libvirt_kubespray_setup.sh` 时，请阅读 [Kubespray UPM 自动化脚本](../../vagrant_setup_scripts/README.md) 和 [Libvirt 部署指南](../../vagrant_setup_scripts/README_libvirt.md)。本 fork 当前默认是 5 台 Rocky Linux 9 VM、Kubernetes 1.36.1 和 Calico，并且会在 `vagrant_setup_scripts/kubespray-upm` 中创建独立部署工作区。
+
 Assuming you have Vagrant 2.0+ installed with virtualbox or libvirt/qemu
 (vmware may work, but is untested) you should be able to launch a 3 node
 Kubernetes cluster by simply running `vagrant up`.
@@ -52,7 +54,7 @@ For all available options look at the Vagrantfile (search for "CONFIG")
 
 ## Use alternative OS for Vagrant
 
-By default, Vagrant uses Ubuntu 18.04 box to provision a local cluster.
+By default, Vagrant uses an Ubuntu 20.04 box to provision a local cluster.
 You may use an alternative supported operating system for your local cluster.
 
 Customize `$os` variable in `Vagrantfile` or as override, e.g.,:
@@ -71,7 +73,7 @@ speed, the variable 'download_run_once' is set. This will make kubespray
 download all files and containers just once and then redistributes them to
 the other nodes and as a bonus, also cache all downloads locally and re-use
 them on the next provisioning run. For more information on download settings
-see [download documentation](/docs/advanced/downloads.md).
+see [download documentation](../advanced/downloads.md).
 
 ## Example use of Vagrant
 
@@ -79,9 +81,9 @@ The following is an example of setting up and running kubespray using `vagrant`.
 Customize your settings as shown, above, then run the commands:
 
 ```ShellSession
-# use virtualenv to install all python requirements
+# use Python 3.11-3.13 to install all Python requirements
 VENVDIR=venv
-$ virtualenv --python=/usr/bin/python3.7 $VENVDIR
+$ python3 -m venv "$VENVDIR"
 $ source $VENVDIR/bin/activate
 $ pip install -r requirements.txt
 

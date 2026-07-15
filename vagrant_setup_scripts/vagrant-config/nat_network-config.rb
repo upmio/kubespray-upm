@@ -164,9 +164,17 @@ $dns_server = "8.8.8.8"           # DNS server
 # =============================================================================
 # KUBERNETES CONFIGURATION
 # =============================================================================
-# Container Network Interface (CNI) plugin
-# Options: "calico", "flannel", "weave", "cilium", "kube-ovn", etc.
+# Container Network Interface (CNI) plugin supported by this automation
+# Options: "calico", "cilium"
 $network_plugin = "calico"
+
+# Cilium-only options. They are ignored when $network_plugin is "calico".
+$cilium_kube_proxy_replacement = false
+$cilium_load_balancer_enabled = false
+$cilium_load_balancer_pool_name = "default-lb-pool"
+$cilium_load_balancer_start = ""
+$cilium_load_balancer_stop = ""
+$cilium_l2_announcement_interface = "eth1"
 
 # Cert-Manager Configuration
 $cert_manager_enabled = "True"             # Enable cert-manager

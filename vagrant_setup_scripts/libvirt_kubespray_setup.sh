@@ -88,6 +88,22 @@ declare GIT_PROXY="${GIT_PROXY:-${HTTP_PROXY:-""}}"
 declare BRIDGE_INTERFACE=""
 declare NETWORK_TYPE="nat"
 
+# Kubernetes network configuration
+declare K8S_NETWORK_PLUGIN="calico"
+declare NETWORK_PLUGIN_EXPLICIT=false
+declare CILIUM_KUBE_PROXY_REPLACEMENT=false
+declare CILIUM_KUBE_PROXY_REPLACEMENT_EXPLICIT=false
+declare CILIUM_LOAD_BALANCER_ENABLED=false
+declare CILIUM_LOAD_BALANCER_EXPLICIT=false
+declare CILIUM_LB_RANGE_EXPLICIT=false
+declare CILIUM_LOAD_BALANCER_POOL_NAME="default-lb-pool"
+declare CILIUM_LOAD_BALANCER_START=""
+declare CILIUM_LOAD_BALANCER_STOP=""
+declare CILIUM_L2_ANNOUNCEMENT_INTERFACE="eth1"
+declare CILIUM_L2_INTERFACE_EXPLICIT=false
+declare EXISTING_CLUSTER_CONFIGURATION_LOCKED=false
+readonly CILIUM_L2_ANNOUNCEMENT_POLICY_NAME="default-l2-announcement-policy"
+
 # Global variable for prompt function results
 declare PROMPT_RESULT=""
 
@@ -452,6 +468,366 @@ validate_vm_ip_range() {
     return 0
 }
 
+# Validate an interface name that will be embedded into an anchored regular expression.
+validate_interface_name() {
+    local interface_name="$1"
+    [[ $interface_name =~ ^[a-zA-Z0-9_.:-]+$ ]]
+}
+
+# Convert an IPv4 address to an integer for ordering comparisons.
+ipv4_to_integer() {
+    local ip="$1"
+    local IFS='.'
+    local -a octets
+    read -ra octets <<<"$ip"
+    printf '%u\n' "$((octets[0] * 16777216 + octets[1] * 65536 + octets[2] * 256 + octets[3]))"
+}
+
+# Load the persisted CNI settings before regenerating config.rb. This prevents a
+# routine rerun (especially with -y) from silently changing an existing Cilium
+# cluster back to the default Calico configuration.
+find_existing_libvirt_cluster_vms() {
+    local instance_name_prefix="$1"
+    command -v virsh >/dev/null 2>&1 || return 2
+
+    local vm_names
+    vm_names=$(safe_sudo virsh -c qemu:///system list --all --name 2>/dev/null) || return 2
+
+    printf '%s\n' "$vm_names" | grep -F "kubespray" | grep -F "$instance_name_prefix" | grep -E '[0-9]+$'
+}
+
+load_existing_kubernetes_network_configuration() {
+    local persisted_instance_name_prefix=""
+    if [[ -f $VAGRANT_CONF_FILE ]]; then
+        persisted_instance_name_prefix=$(sed -nE 's/^\$instance_name_prefix[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' "$VAGRANT_CONF_FILE" | head -1)
+    fi
+
+    local machines_dir="${KUBESPRAY_DIR}/.vagrant/machines"
+    local has_existing_vagrant_machines=false
+    local existing_libvirt_vms=""
+    local libvirt_scan_status=0
+    if [[ -d $machines_dir && -n $(find "$machines_dir" -mindepth 1 -maxdepth 1 -type d -print -quit 2>/dev/null) ]]; then
+        has_existing_vagrant_machines=true
+    fi
+    if existing_libvirt_vms=$(find_existing_libvirt_cluster_vms "$persisted_instance_name_prefix"); then
+        log_info "Detected existing libvirt VMs before configuration update: $(tr '\n' ' ' <<<"$existing_libvirt_vms")"
+        has_existing_vagrant_machines=true
+    else
+        libvirt_scan_status=$?
+        if [[ $libvirt_scan_status -eq 2 && -f $VAGRANT_CONF_FILE ]]; then
+            error_exit "Cannot inspect system libvirt VMs; refuse to overwrite existing config.rb networking"
+        fi
+    fi
+    if [[ $has_existing_vagrant_machines == "true" ]]; then
+        EXISTING_CLUSTER_CONFIGURATION_LOCKED=true
+    fi
+
+    if [[ ! -f $VAGRANT_CONF_FILE ]]; then
+        if [[ $EXISTING_CLUSTER_CONFIGURATION_LOCKED == "true" ]]; then
+            error_exit "Existing libvirt VMs were found but config.rb is missing; refuse to overwrite unknown cluster networking"
+        fi
+        return 0
+    fi
+
+    local existing_network_plugin
+    existing_network_plugin=$(sed -nE 's/^\$network_plugin[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' "$VAGRANT_CONF_FILE" | head -1)
+    if [[ $existing_network_plugin != "calico" && $existing_network_plugin != "cilium" ]]; then
+        if [[ $EXISTING_CLUSTER_CONFIGURATION_LOCKED == "true" ]]; then
+            error_exit "Existing libvirt VMs were found but config.rb has no supported CNI setting; refuse to overwrite unknown cluster networking"
+        fi
+        return 0
+    fi
+
+    if [[ $NETWORK_PLUGIN_EXPLICIT == "true" && $K8S_NETWORK_PLUGIN != "$existing_network_plugin" &&
+        $has_existing_vagrant_machines == "true" ]]; then
+        error_exit "Changing an existing cluster CNI from $existing_network_plugin to $K8S_NETWORK_PLUGIN is unsupported; destroy and rebuild the cluster"
+    fi
+
+    if [[ $NETWORK_PLUGIN_EXPLICIT != "true" ]]; then
+        K8S_NETWORK_PLUGIN="$existing_network_plugin"
+        NETWORK_PLUGIN_EXPLICIT=true
+        log_info "Reusing Kubernetes network plugin from existing config.rb: $K8S_NETWORK_PLUGIN"
+    fi
+
+    [[ $K8S_NETWORK_PLUGIN == "cilium" ]] || return 0
+
+    local existing_kube_proxy_replacement=false
+    local existing_load_balancer_enabled=false
+    local existing_pool_name="default-lb-pool"
+    local existing_load_balancer_start=""
+    local existing_load_balancer_stop=""
+    local existing_l2_interface="eth1"
+    local value
+    value=$(sed -nE 's/^\$cilium_kube_proxy_replacement[[:space:]]*=[[:space:]]*(true|false).*/\1/p' "$VAGRANT_CONF_FILE" | head -1)
+    [[ -n $value ]] && existing_kube_proxy_replacement="$value"
+    value=$(sed -nE 's/^\$cilium_load_balancer_enabled[[:space:]]*=[[:space:]]*(true|false).*/\1/p' "$VAGRANT_CONF_FILE" | head -1)
+    [[ -n $value ]] && existing_load_balancer_enabled="$value"
+    value=$(sed -nE 's/^\$cilium_load_balancer_pool_name[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' "$VAGRANT_CONF_FILE" | head -1)
+    [[ -n $value ]] && existing_pool_name="$value"
+    value=$(sed -nE 's/^\$cilium_load_balancer_start[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' "$VAGRANT_CONF_FILE" | head -1)
+    [[ -n $value ]] && existing_load_balancer_start="$value"
+    value=$(sed -nE 's/^\$cilium_load_balancer_stop[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' "$VAGRANT_CONF_FILE" | head -1)
+    [[ -n $value ]] && existing_load_balancer_stop="$value"
+    value=$(sed -nE 's/^\$cilium_l2_announcement_interface[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' "$VAGRANT_CONF_FILE" | head -1)
+    [[ -n $value ]] && existing_l2_interface="$value"
+
+    if [[ $has_existing_vagrant_machines == "true" ]]; then
+        if [[ $CILIUM_KUBE_PROXY_REPLACEMENT_EXPLICIT == "true" &&
+            $CILIUM_KUBE_PROXY_REPLACEMENT != "$existing_kube_proxy_replacement" ]]; then
+            error_exit "Changing kube-proxy replacement on an existing Cilium cluster is unsupported; destroy and rebuild the cluster"
+        fi
+        if [[ $CILIUM_LOAD_BALANCER_EXPLICIT == "true" &&
+            $CILIUM_LOAD_BALANCER_ENABLED != "$existing_load_balancer_enabled" ]]; then
+            error_exit "Changing Cilium LoadBalancer mode on an existing cluster is unsupported; destroy and rebuild the cluster"
+        fi
+        if [[ $CILIUM_LB_RANGE_EXPLICIT == "true" &&
+            ($CILIUM_LOAD_BALANCER_START != "$existing_load_balancer_start" ||
+                $CILIUM_LOAD_BALANCER_STOP != "$existing_load_balancer_stop") ]]; then
+            error_exit "Changing the Cilium LoadBalancer range on an existing cluster is unsupported; destroy and rebuild the cluster"
+        fi
+        if [[ $CILIUM_L2_INTERFACE_EXPLICIT == "true" &&
+            $CILIUM_L2_ANNOUNCEMENT_INTERFACE != "$existing_l2_interface" ]]; then
+            error_exit "Changing the Cilium L2 announcement interface on an existing cluster is unsupported; destroy and rebuild the cluster"
+        fi
+    fi
+
+    if [[ $CILIUM_KUBE_PROXY_REPLACEMENT_EXPLICIT != "true" ]]; then
+        CILIUM_KUBE_PROXY_REPLACEMENT="$existing_kube_proxy_replacement"
+    fi
+    if [[ $CILIUM_LOAD_BALANCER_EXPLICIT != "true" ]]; then
+        CILIUM_LOAD_BALANCER_ENABLED="$existing_load_balancer_enabled"
+    fi
+    CILIUM_LOAD_BALANCER_POOL_NAME="$existing_pool_name"
+    if [[ -z $CILIUM_LOAD_BALANCER_START ]]; then
+        CILIUM_LOAD_BALANCER_START="$existing_load_balancer_start"
+    fi
+    if [[ -z $CILIUM_LOAD_BALANCER_STOP ]]; then
+        CILIUM_LOAD_BALANCER_STOP="$existing_load_balancer_stop"
+    fi
+    if [[ $CILIUM_L2_INTERFACE_EXPLICIT != "true" ]]; then
+        CILIUM_L2_ANNOUNCEMENT_INTERFACE="$existing_l2_interface"
+    fi
+}
+
+parse_cilium_load_balancer_range() {
+    local range="$1"
+    local start_ip
+    local stop_ip
+
+    if [[ $range != *-* ]]; then
+        log_error "Cilium LoadBalancer range must use START_IP-STOP_IP format"
+        return 1
+    fi
+
+    start_ip="${range%%-*}"
+    stop_ip="${range#*-}"
+
+    if ! validate_ip_address "$start_ip" || ! validate_ip_address "$stop_ip"; then
+        log_error "Invalid Cilium LoadBalancer IP range: $range"
+        return 1
+    fi
+
+    if [[ $(ipv4_to_integer "$start_ip") -gt $(ipv4_to_integer "$stop_ip") ]]; then
+        log_error "Cilium LoadBalancer range start must not be greater than the stop address"
+        return 1
+    fi
+
+    CILIUM_LOAD_BALANCER_START="$start_ip"
+    CILIUM_LOAD_BALANCER_STOP="$stop_ip"
+    CILIUM_LOAD_BALANCER_ENABLED=true
+    return 0
+}
+
+validate_cilium_load_balancer_configuration() {
+    [[ $CILIUM_LOAD_BALANCER_ENABLED == "true" ]] || return 0
+
+    if [[ -z $CILIUM_LOAD_BALANCER_START || -z $CILIUM_LOAD_BALANCER_STOP ]]; then
+        log_error "Cilium LoadBalancer requires an IP range"
+        return 1
+    fi
+
+    if ! validate_interface_name "$CILIUM_L2_ANNOUNCEMENT_INTERFACE"; then
+        log_error "Invalid Cilium L2 announcement interface: $CILIUM_L2_ANNOUNCEMENT_INTERFACE"
+        return 1
+    fi
+
+    local node_ip
+    local node_netmask
+    if [[ $NETWORK_TYPE == "nat" ]]; then
+        node_ip="192.168.200.$((G_SUBNET_SPLIT4 + 1))"
+        node_netmask="255.255.255.0"
+    else
+        node_ip="${G_SUBNET}.$((G_SUBNET_SPLIT4 + 1))"
+        node_netmask="$G_NETMASK"
+    fi
+
+    if ! validate_ip_address "$node_ip" || ! validate_ip_address "$node_netmask"; then
+        log_error "Unable to determine the node subnet for Cilium LoadBalancer validation"
+        return 1
+    fi
+
+    local node_value
+    local netmask_value
+    local network_value
+    local broadcast_value
+    local start_value
+    local stop_value
+    node_value=$(ipv4_to_integer "$node_ip")
+    netmask_value=$(ipv4_to_integer "$node_netmask")
+    network_value=$((node_value & netmask_value))
+    broadcast_value=$((network_value | (0xFFFFFFFF ^ netmask_value)))
+    start_value=$(ipv4_to_integer "$CILIUM_LOAD_BALANCER_START")
+    stop_value=$(ipv4_to_integer "$CILIUM_LOAD_BALANCER_STOP")
+
+    if [[ $start_value -le $network_value || $stop_value -ge $broadcast_value ]]; then
+        log_error "Cilium LoadBalancer range must use host addresses in the node subnet (netmask $node_netmask)"
+        return 1
+    fi
+
+    local vm_start_ip="${G_SUBNET}.$((G_SUBNET_SPLIT4 + 1))"
+    local vm_stop_ip="${G_SUBNET}.$((G_SUBNET_SPLIT4 + G_NUM_INSTANCES))"
+    if [[ $NETWORK_TYPE == "nat" ]]; then
+        vm_start_ip="192.168.200.$((G_SUBNET_SPLIT4 + 1))"
+        vm_stop_ip="192.168.200.$((G_SUBNET_SPLIT4 + G_NUM_INSTANCES))"
+    fi
+    local vm_start_value
+    local vm_stop_value
+    vm_start_value=$(ipv4_to_integer "$vm_start_ip")
+    vm_stop_value=$(ipv4_to_integer "$vm_stop_ip")
+    if [[ $start_value -le $vm_stop_value && $stop_value -ge $vm_start_value ]]; then
+        log_error "Cilium LoadBalancer range overlaps VM addresses $vm_start_ip-$vm_stop_ip"
+        return 1
+    fi
+
+    local gateway_ip="$G_GATEWAY"
+    if [[ $NETWORK_TYPE == "nat" ]]; then
+        gateway_ip="192.168.200.1"
+    fi
+    if [[ -n $gateway_ip ]]; then
+        local gateway_value
+        gateway_value=$(ipv4_to_integer "$gateway_ip")
+        if [[ $gateway_value -ge $start_value && $gateway_value -le $stop_value ]]; then
+            log_error "Cilium LoadBalancer range must not include the gateway $gateway_ip"
+            return 1
+        fi
+    fi
+
+    if [[ $NETWORK_TYPE == "nat" && $start_value -le $(ipv4_to_integer "192.168.200.100") ]]; then
+        log_error "Cilium LoadBalancer range overlaps the NAT DHCP pool (192.168.200.2-192.168.200.100)"
+        return 1
+    fi
+
+    return 0
+}
+
+configure_kubernetes_networking_interactive() {
+    if [[ $NETWORK_PLUGIN_EXPLICIT != "true" && $AUTO_CONFIRM != "true" ]]; then
+        echo -e "\n${YELLOW}☸️  Kubernetes CNI Selection${NC}"
+        echo -e "   ${GREEN}1.${NC} Calico (default)"
+        echo -e "   ${GREEN}2.${NC} Cilium"
+        local choice
+        while true; do
+            read -r -p "Select Kubernetes network plugin [1]: " choice
+            choice="${choice:-1}"
+            case "$choice" in
+            1)
+                K8S_NETWORK_PLUGIN="calico"
+                break
+                ;;
+            2)
+                K8S_NETWORK_PLUGIN="cilium"
+                break
+                ;;
+            *)
+                echo -e "${RED}❌ Please select 1 or 2${NC}"
+                ;;
+            esac
+        done
+    fi
+
+    if [[ $K8S_NETWORK_PLUGIN == "calico" ]]; then
+        if [[ $CILIUM_KUBE_PROXY_REPLACEMENT == "true" || $CILIUM_LOAD_BALANCER_ENABLED == "true" ||
+            $CILIUM_L2_INTERFACE_EXPLICIT == "true" ]]; then
+            error_exit "Cilium-specific options require --network-plugin cilium"
+        fi
+        log_info "Kubernetes network plugin selected: Calico"
+        return 0
+    fi
+
+    if [[ $K8S_NETWORK_PLUGIN != "cilium" ]]; then
+        error_exit "Unsupported Kubernetes network plugin: $K8S_NETWORK_PLUGIN"
+    fi
+
+    if [[ $EXISTING_CLUSTER_CONFIGURATION_LOCKED == "true" ]]; then
+        log_info "Existing Cilium cluster detected; retaining its installation-time Cilium configuration"
+        if [[ $CILIUM_LOAD_BALANCER_ENABLED == "true" ]]; then
+            validate_cilium_load_balancer_configuration || error_exit "Invalid persisted Cilium LoadBalancer configuration"
+        fi
+        return 0
+    fi
+
+    if [[ $CILIUM_KUBE_PROXY_REPLACEMENT_EXPLICIT != "true" && $AUTO_CONFIRM != "true" ]]; then
+        if prompt_yes_no "Use Cilium to replace kube-proxy?" "no"; then
+            CILIUM_KUBE_PROXY_REPLACEMENT=true
+        fi
+    fi
+
+    if [[ $CILIUM_LOAD_BALANCER_EXPLICIT != "true" && $AUTO_CONFIRM != "true" ]]; then
+        if prompt_yes_no "Enable Cilium LoadBalancer IPAM and L2 announcements?" "no"; then
+            CILIUM_LOAD_BALANCER_ENABLED=true
+        fi
+    fi
+
+    if [[ $CILIUM_LOAD_BALANCER_ENABLED == "true" ]]; then
+        if [[ $CILIUM_KUBE_PROXY_REPLACEMENT != "true" ]]; then
+            log_warn "Cilium L2 LoadBalancer requires kube-proxy replacement; enabling it automatically"
+            CILIUM_KUBE_PROXY_REPLACEMENT=true
+        fi
+
+        local default_range=""
+        if [[ $NETWORK_TYPE == "nat" ]]; then
+            default_range="192.168.200.201-192.168.200.220"
+        elif [[ $G_NETMASK == "255.255.255.0" ]]; then
+            default_range="${G_SUBNET}.201-${G_SUBNET}.220"
+        fi
+
+        if [[ -z $CILIUM_LOAD_BALANCER_START || -z $CILIUM_LOAD_BALANCER_STOP ]]; then
+            if [[ $AUTO_CONFIRM == "true" ]]; then
+                error_exit "--cilium-load-balancer with -y requires --cilium-lb-range START_IP-STOP_IP"
+            fi
+
+            local range_input
+            while true; do
+                if [[ -n $default_range ]]; then
+                    read -r -p "Cilium LoadBalancer IP range [$default_range]: " range_input
+                    range_input="${range_input:-$default_range}"
+                else
+                    read -r -p "Cilium LoadBalancer IP range (START_IP-STOP_IP, node netmask $G_NETMASK): " range_input
+                fi
+                if parse_cilium_load_balancer_range "$range_input"; then
+                    break
+                fi
+            done
+        fi
+
+        if [[ $CILIUM_L2_INTERFACE_EXPLICIT != "true" && $AUTO_CONFIRM != "true" ]]; then
+            local interface_input
+            read -r -p "Guest interface used for LoadBalancer L2 announcements [eth1]: " interface_input
+            CILIUM_L2_ANNOUNCEMENT_INTERFACE="${interface_input:-eth1}"
+        fi
+
+        validate_cilium_load_balancer_configuration || error_exit "Invalid Cilium LoadBalancer configuration"
+    fi
+
+    log_info "Kubernetes network plugin selected: Cilium"
+    log_info "Cilium kube-proxy replacement: $CILIUM_KUBE_PROXY_REPLACEMENT"
+    log_info "Cilium LoadBalancer: $CILIUM_LOAD_BALANCER_ENABLED"
+    if [[ $CILIUM_LOAD_BALANCER_ENABLED == "true" ]]; then
+        log_info "Cilium LoadBalancer range: $CILIUM_LOAD_BALANCER_START-$CILIUM_LOAD_BALANCER_STOP"
+        log_info "Cilium L2 announcement interface: $CILIUM_L2_ANNOUNCEMENT_INTERFACE"
+    fi
+}
+
 # Function to list and select network interface
 # Usage: select_network_interface
 # Returns: selected interface name via global variable SELECTED_INTERFACE
@@ -686,6 +1062,11 @@ configure_bridge_network_interactive() {
 
     # Set global variables for backward compatibility
     BRIDGE_INTERFACE="$bridge_interface"
+    G_SUBNET="$subnet"
+    G_NETMASK="$netmask"
+    G_GATEWAY="$gateway"
+    G_DNS_SERVER="$dns_server"
+    G_SUBNET_SPLIT4="$subnet_split4"
 
     # Set configuration as global variable instead of echo output
     BRIDGE_NETWORK_CONFIG="$bridge_interface|$subnet|$netmask|$gateway|$dns_server|$subnet_split4"
@@ -1379,7 +1760,42 @@ EOF
             log_info "Bridge network '$network_name' created and configured"
         fi
     else
-        log_info "Skipping bridge network configuration (BRIDGE_INTERFACE not set)"
+        local network_name="nat-200-network"
+        local xml_file="/tmp/$network_name.xml"
+        log_info "Ensuring libvirt NAT network '$network_name' exists..."
+
+        if safe_sudo virsh net-list --all | grep -q "[[:space:]]${network_name}[[:space:]]"; then
+            local network_xml
+            network_xml=$(safe_sudo virsh net-dumpxml "$network_name")
+            if ! grep -q "<ip address='192.168.200.1' netmask='255.255.255.0'>" <<<"$network_xml"; then
+                error_exit "Existing libvirt network '$network_name' does not use 192.168.200.0/24"
+            fi
+            safe_sudo virsh net-list | grep -q "[[:space:]]${network_name}[[:space:]].*active" ||
+                safe_sudo virsh net-start "$network_name"
+            safe_sudo virsh net-list --autostart | grep -q "[[:space:]]${network_name}[[:space:]]" ||
+                safe_sudo virsh net-autostart "$network_name"
+        else
+            cat >"$xml_file" <<EOF
+<network>
+  <name>$network_name</name>
+  <forward mode='nat'/>
+  <bridge name='virbr200' stp='on' delay='0'/>
+  <ip address='192.168.200.1' netmask='255.255.255.0'>
+    <dhcp>
+      <range start='192.168.200.2' end='192.168.200.100'/>
+    </dhcp>
+  </ip>
+</network>
+EOF
+            if ! safe_sudo virsh net-define "$xml_file" ||
+                ! safe_sudo virsh net-autostart "$network_name" ||
+                ! safe_sudo virsh net-start "$network_name"; then
+                rm -f "$xml_file"
+                error_exit "Failed to create libvirt NAT network '$network_name'"
+            fi
+            rm -f "$xml_file"
+        fi
+        log_info "Libvirt NAT network '$network_name' is active and configured"
     fi
 
     log_info "Libvirt setup completed"
@@ -1757,7 +2173,7 @@ configure_vagrant_config() {
         # Update DNS server configuration in config.rb
         awk -v dns_server="$DNS_SERVER" '
         {
-            if ($0 ~ /^$dns_server = /) {
+            if ($0 ~ /^\$dns_server = /) {
                 print "$dns_server = \"" dns_server "\""
             } else {
                 print $0
@@ -1809,6 +2225,41 @@ configure_vagrant_config() {
         log_info "  ADDITIONAL_NO_PROXY: $NO_PROXY"
     else
         log_info "No HTTP_PROXY set, keeping proxy settings commented out"
+    fi
+
+    # Configure Kubernetes networking. VM networking (NAT/bridge) and the Kubernetes
+    # CNI are independent settings and are written separately.
+    awk -v network_plugin="$K8S_NETWORK_PLUGIN" \
+        -v cilium_kpr="$CILIUM_KUBE_PROXY_REPLACEMENT" \
+        -v cilium_lb="$CILIUM_LOAD_BALANCER_ENABLED" \
+        -v cilium_pool_name="$CILIUM_LOAD_BALANCER_POOL_NAME" \
+        -v cilium_lb_start="$CILIUM_LOAD_BALANCER_START" \
+        -v cilium_lb_stop="$CILIUM_LOAD_BALANCER_STOP" \
+        -v cilium_l2_interface="$CILIUM_L2_ANNOUNCEMENT_INTERFACE" '
+        {
+        if ($0 ~ /^\$network_plugin = /) {
+            print "$network_plugin = \"" network_plugin "\""
+        } else if ($0 ~ /^\$cilium_kube_proxy_replacement = /) {
+            print "$cilium_kube_proxy_replacement = " cilium_kpr
+        } else if ($0 ~ /^\$cilium_load_balancer_enabled = /) {
+            print "$cilium_load_balancer_enabled = " cilium_lb
+        } else if ($0 ~ /^\$cilium_load_balancer_pool_name = /) {
+            print "$cilium_load_balancer_pool_name = \"" cilium_pool_name "\""
+        } else if ($0 ~ /^\$cilium_load_balancer_start = /) {
+            print "$cilium_load_balancer_start = \"" cilium_lb_start "\""
+        } else if ($0 ~ /^\$cilium_load_balancer_stop = /) {
+            print "$cilium_load_balancer_stop = \"" cilium_lb_stop "\""
+        } else if ($0 ~ /^\$cilium_l2_announcement_interface = /) {
+            print "$cilium_l2_announcement_interface = \"" cilium_l2_interface "\""
+        } else {
+            print $0
+        }
+    }' "$VAGRANT_CONF_FILE" >"$temp_file"
+
+    if mv "$temp_file" "$VAGRANT_CONF_FILE"; then
+        log_info "Kubernetes network configuration written to config.rb: CNI=$K8S_NETWORK_PLUGIN"
+    else
+        error_exit "Failed to update Kubernetes network configuration"
     fi
 
     # Configure VM resources based on system capacity
@@ -1943,9 +2394,11 @@ extract_vagrant_config_variables() {
     if [[ $NETWORK_TYPE == "bridge" ]]; then
         G_SUBNET=$(grep "^\$subnet\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "")
         G_NETMASK=$(grep "^\$netmask\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "")
+        G_GATEWAY=$(grep "^\$gateway\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/' || echo "")
     else
         G_SUBNET="192.168.200"
         G_NETMASK="255.255.255.0"
+        G_GATEWAY="192.168.200.1"
     fi
 
     # Calculate derived values
@@ -1978,6 +2431,14 @@ parse_vagrant_config() {
     echo -e "   ${GREEN}•${NC} Kubernetes: ${CYAN}$G_KUBE_VERSION${NC}"
     echo -e "   ${GREEN}•${NC} OS: ${CYAN}$G_OS${NC}"
     echo -e "   ${GREEN}•${NC} Network Plugin: ${CYAN}$G_NETWORK_PLUGIN${NC}"
+    if [[ $G_NETWORK_PLUGIN == "cilium" ]]; then
+        echo -e "   ${GREEN}•${NC} kube-proxy Replacement: ${CYAN}$CILIUM_KUBE_PROXY_REPLACEMENT${NC}"
+        echo -e "   ${GREEN}•${NC} Cilium LoadBalancer: ${CYAN}$CILIUM_LOAD_BALANCER_ENABLED${NC}"
+        if [[ $CILIUM_LOAD_BALANCER_ENABLED == "true" ]]; then
+            echo -e "   ${GREEN}•${NC} LoadBalancer Pool: ${CYAN}$CILIUM_LOAD_BALANCER_START-$CILIUM_LOAD_BALANCER_STOP${NC}"
+            echo -e "   ${GREEN}•${NC} L2 Interface: ${CYAN}$CILIUM_L2_ANNOUNCEMENT_INTERFACE${NC}"
+        fi
+    fi
     echo -e "   ${GREEN}•${NC} Prefix: ${CYAN}$G_INSTANCE_NAME_PREFIX${NC}\n"
 
     echo -e "${WHITE}🖥️  Nodes:${NC}"
@@ -2054,6 +2515,14 @@ show_setup_confirmation() {
         echo -e "   ${YELLOW}•${NC} Bridge: ${YELLOW}Not configured${NC}"
         echo -e "   ${GREEN}•${NC} NAT: ${CYAN}192.168.200.0/24${NC} (DHCP: Enabled)"
         echo -e "   ${GREEN}•${NC} DNS: ${CYAN}${DNS_SERVER}${NC}"
+    fi
+    echo -e "   ${GREEN}•${NC} Kubernetes CNI: ${CYAN}${K8S_NETWORK_PLUGIN}${NC}"
+    if [[ $K8S_NETWORK_PLUGIN == "cilium" ]]; then
+        echo -e "   ${GREEN}•${NC} kube-proxy Replacement: ${CYAN}${CILIUM_KUBE_PROXY_REPLACEMENT}${NC}"
+        if [[ $CILIUM_LOAD_BALANCER_ENABLED == "true" ]]; then
+            echo -e "   ${GREEN}•${NC} Cilium LB Pool: ${CYAN}${CILIUM_LOAD_BALANCER_START}-${CILIUM_LOAD_BALANCER_STOP}${NC}"
+            echo -e "   ${GREEN}•${NC} Cilium L2 Interface: ${CYAN}${CILIUM_L2_ANNOUNCEMENT_INTERFACE}${NC}"
+        fi
     fi
 
     # Proxy Configuration
@@ -2150,6 +2619,63 @@ configure_containerd_registries() {
     fi
 
     return 0
+}
+
+configure_cilium_load_balancer() {
+    if [[ $K8S_NETWORK_PLUGIN != "cilium" || $CILIUM_LOAD_BALANCER_ENABLED != "true" ]]; then
+        return 0
+    fi
+
+    log_info "Configuring Cilium L2 announcement policy..."
+
+    if ! "$KUBECTL" wait --for=condition=established --timeout=120s \
+        crd/ciliumloadbalancerippools.cilium.io; then
+        error_exit "CiliumLoadBalancerIPPool CRD is not ready"
+    fi
+    if ! "$KUBECTL" wait --for=condition=established --timeout=120s \
+        crd/ciliuml2announcementpolicies.cilium.io; then
+        error_exit "CiliumL2AnnouncementPolicy CRD is not ready"
+    fi
+
+    if ! "$KUBECTL" get ciliumloadbalancerippool "$CILIUM_LOAD_BALANCER_POOL_NAME" >/dev/null 2>&1; then
+        error_exit "Cilium LoadBalancer pool '$CILIUM_LOAD_BALANCER_POOL_NAME' was not created by Kubespray"
+    fi
+
+    local node_data
+    node_data=$("$KUBECTL" get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.status.addresses[?(@.type=="InternalIP")].address}{"\n"}{end}')
+    local node_name
+    local node_ip
+    while IFS='|' read -r node_name node_ip; do
+        [[ -n $node_name && -n $node_ip ]] || continue
+        if ! vagrant ssh "$node_name" -c \
+            "ip -o -4 addr show dev '$CILIUM_L2_ANNOUNCEMENT_INTERFACE' | grep -F '$node_ip/'" >/dev/null 2>&1; then
+            log_error "Node $node_name does not have InternalIP $node_ip on interface $CILIUM_L2_ANNOUNCEMENT_INTERFACE"
+            log_error "Inspect the guest with: vagrant ssh $node_name -c 'ip -br addr'"
+            error_exit "Cilium L2 announcement interface validation failed"
+        fi
+    done <<<"$node_data"
+
+    local interface_pattern="${CILIUM_L2_ANNOUNCEMENT_INTERFACE//./[.]}"
+    if ! "$KUBECTL" apply -f - <<EOF
+apiVersion: cilium.io/v2alpha1
+kind: CiliumL2AnnouncementPolicy
+metadata:
+  name: ${CILIUM_L2_ANNOUNCEMENT_POLICY_NAME}
+spec:
+  serviceSelector: {}
+  nodeSelector: {}
+  interfaces:
+    - "^${interface_pattern}$"
+  externalIPs: false
+  loadBalancerIPs: true
+EOF
+    then
+        error_exit "Failed to apply Cilium L2 announcement policy"
+    fi
+
+    "$KUBECTL" get ciliumloadbalancerippool "$CILIUM_LOAD_BALANCER_POOL_NAME"
+    "$KUBECTL" get ciliuml2announcementpolicy "$CILIUM_L2_ANNOUNCEMENT_POLICY_NAME"
+    log_info "Cilium LoadBalancer IPAM and L2 announcement policy configured successfully"
 }
 
 #######################################
@@ -2258,8 +2784,9 @@ vagrant_and_run_kubespray() {
         # Check for existing VMs and handle them intelligently
         echo -e "${YELLOW}🔍 Checking for existing virtual machines...${NC}"
         local vm_status
-        # Check for VMs matching kubespray+k8s+<number> pattern using virsh
-        vm_status=$(sudo virsh list --all 2>/dev/null | grep -E "kubespray${G_INSTANCE_NAME_PREFIX}.*[0-9]+" || true)
+        # Check for VMs belonging to this Kubespray Vagrant project. libvirt
+        # provider names may contain separators between the project and VM name.
+        vm_status=$(sudo virsh list --all 2>/dev/null | grep -E "kubespray.*${G_INSTANCE_NAME_PREFIX}.*[0-9]+" || true)
 
         if [[ -n $vm_status ]]; then
             echo -e "${YELLOW}⚠️  Found existing kubespray virtual machines:${NC}"
@@ -2277,7 +2804,7 @@ vagrant_and_run_kubespray() {
             if [[ $existing_vm_count -eq $G_NUM_INSTANCES ]]; then
                 echo -e "\n${GREEN}✅ VM count matches expected configuration!${NC}"
                 echo -e "${WHITE}You have the following options:${NC}"
-                echo -e "   ${GREEN}1.${NC} Keep existing VMs and run ${CYAN}vagrant up${NC} (recommended for updates)"
+                echo -e "   ${GREEN}1.${NC} Keep existing VMs and run ${CYAN}vagrant up --provision${NC} (recommended for updates)"
                 echo -e "   ${GREEN}2.${NC} Keep existing VMs and run ${CYAN}vagrant provision${NC} (re-provision only)"
                 echo -e "   ${RED}3.${NC} Delete all VMs and create fresh ones"
                 echo -e "   ${YELLOW}4.${NC} Cancel deployment\n"
@@ -2287,7 +2814,7 @@ vagrant_and_run_kubespray() {
                     read -r -p "Please select an option (1-4): " choice
                     case $choice in
                     1)
-                        echo -e "${GREEN}✅ Proceeding with existing VMs using vagrant up...${NC}"
+                        echo -e "${GREEN}✅ Proceeding with existing VMs using vagrant up --provision...${NC}"
                         break
                         ;;
                     2)
@@ -2298,6 +2825,7 @@ vagrant_and_run_kubespray() {
                             echo -e "${YELLOW}🔧 Configuring kubectl for local access...${NC}"
                             if configure_kubectl_access; then
                                 echo -e "${GREEN}✅ kubectl configured successfully${NC}\n"
+                                configure_cilium_load_balancer
                                 display_cluster_info
                             else
                                 echo -e "${YELLOW}⚠️  kubectl configuration failed or artifacts not found${NC}\n"
@@ -2313,7 +2841,7 @@ vagrant_and_run_kubespray() {
                         echo -e "${RED}🗑️  Deleting existing VMs...${NC}"
                         # Extract VM names and delete them
                         local vm_names
-                        vm_names=$(echo "$vm_status" | awk '{print $2}' | grep -E "kubespray${G_INSTANCE_NAME_PREFIX}.*[0-9]+")
+                        vm_names=$(echo "$vm_status" | awk '{print $2}' | grep -E "kubespray.*${G_INSTANCE_NAME_PREFIX}.*[0-9]+")
 
                         local cleanup_success=true
                         while IFS= read -r vm_name; do
@@ -2370,7 +2898,7 @@ vagrant_and_run_kubespray() {
                         echo -e "${RED}🗑️  Deleting existing VMs...${NC}"
                         # Extract VM names and delete them
                         local vm_names
-                        vm_names=$(echo "$vm_status" | awk '{print $2}' | grep -E "kubespray${G_INSTANCE_NAME_PREFIX}.*[0-9]+")
+                        vm_names=$(echo "$vm_status" | awk '{print $2}' | grep -E "kubespray.*${G_INSTANCE_NAME_PREFIX}.*[0-9]+")
 
                         local cleanup_success=true
                         while IFS= read -r vm_name; do
@@ -2422,13 +2950,13 @@ vagrant_and_run_kubespray() {
             echo -e "${GREEN}✅ No existing kubespray VMs found${NC}"
         fi
 
-        if vagrant up --provider=libvirt --no-parallel; then
+        if vagrant up --provider=libvirt --no-parallel --provision; then
             echo -e "\n${GREEN}🎉 Deployment Completed Successfully!${NC}\n"
             # Configure kubectl for local access
             echo -e "${YELLOW}🔧 Configuring kubectl for local access...${NC}"
             if configure_kubectl_access; then
                 echo -e "${GREEN}✅ kubectl configured successfully${NC}\n"
-
+                configure_cilium_load_balancer
                 display_cluster_info
             else
                 echo -e "${YELLOW}⚠️  kubectl configuration failed or artifacts not found${NC}\n"
@@ -2446,13 +2974,13 @@ vagrant_and_run_kubespray() {
             echo -e "   ${YELLOW}•${NC} Destroy: ${CYAN}sudo virsh destroy <vm_name> && sudo virsh undefine <vm_name> --remove-all-storage${NC}\n"
         else
             echo -e "\n${RED}❌ Deployment failed! Check logs above.${NC}\n"
-            echo -e "${YELLOW}🔄 Retry: ${CYAN}cd $KUBESPRAY_DIR && vagrant up --provider=libvirt --no-parallel${NC}\n"
+            echo -e "${YELLOW}🔄 Retry: ${CYAN}cd $KUBESPRAY_DIR && vagrant up --provider=libvirt --no-parallel --provision${NC}\n"
             return 1
         fi
     else
         echo -e "\n${YELLOW}⏸️  Deployment cancelled.${NC}\n"
         echo -e "${WHITE}📝 Config: ${CYAN}$VAGRANT_CONF_FILE${NC}\n"
-        echo -e "${WHITE}🚀 Manual deploy: ${CYAN}cd $KUBESPRAY_DIR && vagrant up --provider=libvirt --no-parallel${NC}\n"
+        echo -e "${WHITE}🚀 Manual deploy: ${CYAN}cd $KUBESPRAY_DIR && vagrant up --provider=libvirt --no-parallel --provision${NC}\n"
         return 0
     fi
 }
@@ -2654,6 +3182,13 @@ OPTIONS:
   -c <count>                    Set number of virtual machines (default: 5)
   -n <network_type>             Set network type (nat|bridge, default: nat)
                                 When set to 'bridge', interactive configuration will be required
+  -p, --network-plugin <cni>    Kubernetes CNI: calico|cilium (default: calico)
+  --cilium-kube-proxy-replacement
+                                Use Cilium eBPF instead of kube-proxy
+  --cilium-load-balancer        Enable Cilium LB IPAM/L2 (also enables kube-proxy replacement)
+  --cilium-lb-range <start-stop>
+                                LoadBalancer IP range, for example 192.168.200.201-192.168.200.220
+  --cilium-lb-interface <name>  Guest interface for L2 announcements (default: eth1)
 
 DESCRIPTION:
   This script sets up a complete Kubespray Kubernetes cluster environment with libvirt
@@ -2661,24 +3196,22 @@ DESCRIPTION:
   configuration of all necessary components including libvirt, Vagrant, Python environment,
   and Kubespray project setup.
 
-  SUDO SESSION MANAGEMENT:
-  The script automatically manages sudo sessions for long-running operations.
-  You will be prompted for your sudo password once at the beginning, and the
-  session will be maintained throughout the entire execution with automatic
-  background refresh every 4 minutes. If you encounter sudo timeout errors:
-  
-  1. Ensure you have sudo privileges: sudo -v
-  2. Check sudo timeout settings: sudo -l | grep timestamp_timeout
-  3. For very long operations, consider running: sudo visudo
-     and adding: Defaults timestamp_timeout=60
-  
-  The script uses a 60-second timeout for password input to prevent hanging.
+  VM networking (nat/bridge) and Kubernetes CNI networking (calico/cilium)
+  are independent choices. Cilium LoadBalancer mode configures LB IPAM and
+  creates a CiliumL2AnnouncementPolicy after Kubernetes becomes available.
 
 REQUIREMENTS:
-  - Operating System: RHEL/Rocky/AlmaLinux 8/9 (x86_64 architecture)
-  - Hardware: CPU 12+ cores, Memory 32GB+, Storage 200GB+ available
+  - Operating System: RHEL 9 or a supported RHEL-family distribution
+  - Hardware: CPU 12+ cores, 32GB+ memory recommended, 200GB+ root disk available
   - Access: sudo privileges required, Internet connectivity essential
   - Network: Virtualization support (Intel VT-x/AMD-V) enabled in BIOS
+
+EXAMPLES:
+  $0 -y -p calico
+  $0 -y -p cilium --cilium-kube-proxy-replacement
+  $0 -y -p cilium --cilium-load-balancer \\
+    --cilium-lb-range 192.168.200.201-192.168.200.220 \\
+    --cilium-lb-interface eth1
 
 EOF
 }
@@ -2735,6 +3268,74 @@ parse_arguments() {
                 ;;
             esac
             ;;
+        -p | --network-plugin)
+            [[ -z $2 || $2 == -* ]] && {
+                log_error "Option $1 requires a network plugin argument (calico|cilium)"
+                show_help
+                exit 1
+            }
+            case "$2" in
+            calico | cilium)
+                K8S_NETWORK_PLUGIN="$2"
+                NETWORK_PLUGIN_EXPLICIT=true
+                log_info "Kubernetes network plugin set to: $K8S_NETWORK_PLUGIN"
+                shift 2
+                ;;
+            *)
+                log_error "Invalid Kubernetes network plugin: $2. Valid options: calico, cilium"
+                exit 1
+                ;;
+            esac
+            ;;
+        --cilium-kube-proxy-replacement)
+            if [[ $NETWORK_PLUGIN_EXPLICIT != "true" ]]; then
+                K8S_NETWORK_PLUGIN="cilium"
+                NETWORK_PLUGIN_EXPLICIT=true
+            fi
+            CILIUM_KUBE_PROXY_REPLACEMENT=true
+            CILIUM_KUBE_PROXY_REPLACEMENT_EXPLICIT=true
+            shift
+            ;;
+        --cilium-load-balancer)
+            if [[ $NETWORK_PLUGIN_EXPLICIT != "true" ]]; then
+                K8S_NETWORK_PLUGIN="cilium"
+                NETWORK_PLUGIN_EXPLICIT=true
+            fi
+            CILIUM_LOAD_BALANCER_ENABLED=true
+            CILIUM_LOAD_BALANCER_EXPLICIT=true
+            shift
+            ;;
+        --cilium-lb-range)
+            [[ -z $2 || $2 == -* ]] && {
+                log_error "Option --cilium-lb-range requires START_IP-STOP_IP"
+                exit 1
+            }
+            if [[ $NETWORK_PLUGIN_EXPLICIT != "true" ]]; then
+                K8S_NETWORK_PLUGIN="cilium"
+                NETWORK_PLUGIN_EXPLICIT=true
+            fi
+            parse_cilium_load_balancer_range "$2" || exit 1
+            CILIUM_LOAD_BALANCER_EXPLICIT=true
+            CILIUM_LB_RANGE_EXPLICIT=true
+            shift 2
+            ;;
+        --cilium-lb-interface)
+            [[ -z $2 || $2 == -* ]] && {
+                log_error "Option --cilium-lb-interface requires a guest interface name"
+                exit 1
+            }
+            if ! validate_interface_name "$2"; then
+                log_error "Invalid guest interface name: $2"
+                exit 1
+            fi
+            if [[ $NETWORK_PLUGIN_EXPLICIT != "true" ]]; then
+                K8S_NETWORK_PLUGIN="cilium"
+                NETWORK_PLUGIN_EXPLICIT=true
+            fi
+            CILIUM_L2_ANNOUNCEMENT_INTERFACE="$2"
+            CILIUM_L2_INTERFACE_EXPLICIT=true
+            shift 2
+            ;;
         *)
             log_error "Unknown argument: $1. This script is dedicated to Kubernetes cluster deployment."
             log_error "For UPM components installation, please use upm_setup.sh script."
@@ -2784,6 +3385,11 @@ main() {
         fi
         log_info "Detected DNS server: $DNS_SERVER"
     fi
+
+    load_existing_kubernetes_network_configuration
+
+    # Select and validate the Kubernetes CNI independently from the VM network mode.
+    configure_kubernetes_networking_interactive
 
     # System validation
     check_system_requirements

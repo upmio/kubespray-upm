@@ -71,9 +71,15 @@ $ntp_enabled ||= "True"
 $ntp_manage_config ||= "True"
 
 # Kubernetes Configuration
-$network_plugin ||= "calico"                   # CNI plugin (calico, flannel, etc.)
+$network_plugin ||= "calico"                   # Supported by this automation: calico or cilium
 $multi_networking ||= "False"                  # Enable Multus CNI for multi-networking
 $kube_version ||= "1.36.1"                     # Kubernetes version
+$cilium_kube_proxy_replacement ||= false
+$cilium_load_balancer_enabled ||= false
+$cilium_load_balancer_pool_name ||= "default-lb-pool"
+$cilium_load_balancer_start ||= ""
+$cilium_load_balancer_stop ||= ""
+$cilium_l2_announcement_interface ||= "eth1"
 
 # Download and Cache Configuration
 $download_run_once ||= "True"                  # Download binaries only once
@@ -322,10 +328,135 @@ def validate_configuration
     puts "ERROR: Invalid network type: #{$vm_network}. Must be 'nat' or 'bridge'"
     exit 1
   end
+
+  unless ["calico", "cilium"].include?($network_plugin)
+    puts "ERROR: Unsupported Kubernetes CNI: #{$network_plugin}. Must be 'calico' or 'cilium'"
+    exit 1
+  end
+
+  if $network_plugin != "cilium" && ($cilium_kube_proxy_replacement || $cilium_load_balancer_enabled)
+    puts "ERROR: Cilium-specific options require $network_plugin = \"cilium\""
+    exit 1
+  end
+
+  return unless $cilium_load_balancer_enabled
+
+  if $network_plugin != "cilium"
+    puts "ERROR: Cilium LoadBalancer requires the cilium network plugin"
+    exit 1
+  end
+
+  unless $cilium_kube_proxy_replacement
+    puts "ERROR: Cilium L2 LoadBalancer requires kube-proxy replacement"
+    exit 1
+  end
+
+  if $cilium_load_balancer_start.to_s.empty? || $cilium_load_balancer_stop.to_s.empty?
+    puts "ERROR: Cilium LoadBalancer requires start and stop IP addresses"
+    exit 1
+  end
+
+  unless $cilium_load_balancer_pool_name.match?(/\A[a-z0-9]([-a-z0-9]*[a-z0-9])?\z/) &&
+         $cilium_load_balancer_pool_name.length <= 63
+    puts "ERROR: Invalid Cilium LoadBalancer pool name: #{$cilium_load_balancer_pool_name}"
+    exit 1
+  end
+
+  begin
+    if $cilium_load_balancer_start.include?("/") || $cilium_load_balancer_stop.include?("/")
+      raise ArgumentError
+    end
+    start_ip = IPAddr.new($cilium_load_balancer_start)
+    stop_ip = IPAddr.new($cilium_load_balancer_stop)
+    unless start_ip.ipv4? && stop_ip.ipv4? && start_ip.to_i <= stop_ip.to_i
+      raise ArgumentError
+    end
+
+    if $vm_network == "bridge"
+      node_subnet_ip = "#{$subnet}.#{$subnet_split4 + 1}"
+      node_netmask = $netmask
+      gateway_ip = $gateway
+      vm_subnet = $subnet
+    else
+      provider_network = get_provider_network_info($provider)
+      vm_subnet = provider_network[:subnet].split('.')[0..2].join('.')
+      node_subnet_ip = "#{vm_subnet}.#{$subnet_split4 + 1}"
+      node_netmask = provider_network[:netmask]
+      gateway_ip = nil
+    end
+
+    node_network = IPAddr.new("#{node_subnet_ip}/#{node_netmask}")
+    network_ip = node_network.to_range.first
+    broadcast_ip = node_network.to_range.last
+    unless node_network.include?(start_ip) && node_network.include?(stop_ip) &&
+           start_ip.to_i != network_ip.to_i && stop_ip.to_i != broadcast_ip.to_i
+      raise ArgumentError
+    end
+
+    vm_start_ip = IPAddr.new("#{vm_subnet}.#{$subnet_split4 + 1}")
+    vm_stop_ip = IPAddr.new("#{vm_subnet}.#{$subnet_split4 + $num_instances}")
+    if start_ip.to_i <= vm_stop_ip.to_i && stop_ip.to_i >= vm_start_ip.to_i
+      puts "ERROR: Cilium LoadBalancer range overlaps VM addresses #{vm_start_ip}-#{vm_stop_ip}"
+      exit 1
+    end
+
+    if gateway_ip
+      gateway = IPAddr.new(gateway_ip)
+      if start_ip.to_i <= gateway.to_i && stop_ip.to_i >= gateway.to_i
+        puts "ERROR: Cilium LoadBalancer range includes gateway #{gateway_ip}"
+        exit 1
+      end
+    end
+
+    if $vm_network == "nat" && $provider == "libvirt"
+      dhcp_start = IPAddr.new("192.168.200.2")
+      dhcp_stop = IPAddr.new("192.168.200.100")
+      if start_ip.to_i <= dhcp_stop.to_i && stop_ip.to_i >= dhcp_start.to_i
+        puts "ERROR: Cilium LoadBalancer range overlaps libvirt NAT DHCP addresses #{dhcp_start}-#{dhcp_stop}"
+        exit 1
+      end
+    end
+  rescue ArgumentError, IPAddr::InvalidAddressError
+    puts "ERROR: Invalid Cilium LoadBalancer range for the node subnet: #{$cilium_load_balancer_start}-#{$cilium_load_balancer_stop}"
+    exit 1
+  end
+
+  unless $cilium_l2_announcement_interface.match?(/\A[a-zA-Z0-9_.:-]+\z/)
+    puts "ERROR: Invalid Cilium L2 announcement interface: #{$cilium_l2_announcement_interface}"
+    exit 1
+  end
+end
+
+def build_cluster_extra_vars
+  vars = ($extra_vars || {}).dup
+  return vars unless $network_plugin == "cilium"
+
+  vars["kube_owner"] = "root"
+  vars["cilium_kube_proxy_replacement"] = $cilium_kube_proxy_replacement
+  vars["kube_proxy_remove"] = $cilium_kube_proxy_replacement
+  vars["cilium_dns_proxy_enable_transparent_mode"] = false if $cilium_kube_proxy_replacement
+
+  if $cilium_load_balancer_enabled
+    vars["cilium_l2announcements"] = true
+    vars["cilium_loadbalancer_ip_pools"] = [
+      {
+        "name" => $cilium_load_balancer_pool_name,
+        "ranges" => [
+          {
+            "start" => $cilium_load_balancer_start,
+            "stop" => $cilium_load_balancer_stop
+          }
+        ]
+      }
+    ]
+  end
+
+  vars
 end
 
 # Run configuration validation
 validate_configuration
+$extra_vars = build_cluster_extra_vars
 
 # Set the Vagrant box based on selected OS
 $box = SUPPORTED_OS[$os][:box]

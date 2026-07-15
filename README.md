@@ -1,11 +1,42 @@
-# Deploy a Production Ready Kubernetes Cluster
+# Kubespray UPM
+
+本项目 fork 自 [kubernetes-sigs/kubespray](https://github.com/kubernetes-sigs/kubespray)。除保留上游 Kubespray 能力外，本 fork 的主要改造集中在 [`vagrant_setup_scripts`](vagrant_setup_scripts/README.md)：面向一台 RHEL 系 Linux 主机，使用 libvirt/KVM、Vagrant 和 Kubespray 创建并管理本地多节点 Kubernetes 集群，并可选安装 OpenEBS LVM LocalPV、Prometheus 与 UPM 组件。
+
+> 项目自动化脚本会修改宿主机的虚拟化、网络、安全和用户环境配置。运行前请先阅读 [Libvirt 部署指南](vagrant_setup_scripts/README_libvirt.md)，特别是 firewalld/SELinux、桥接网络和附加磁盘相关警告。
+
+## 本项目快速入口
+
+```bash
+cd vagrant_setup_scripts
+
+# 查看实际支持的参数
+./libvirt_kubespray_setup.sh --help
+
+# NAT 模式，创建默认 5 节点集群
+./libvirt_kubespray_setup.sh -y
+
+# NAT + Cilium，并由 Cilium 替换 kube-proxy
+./libvirt_kubespray_setup.sh -y -p cilium \
+  --cilium-kube-proxy-replacement
+
+# 桥接模式；网络参数仍需交互输入
+./libvirt_kubespray_setup.sh -n bridge
+```
+
+- [自动化脚本总览与快速使用](vagrant_setup_scripts/README.md)
+- [Libvirt 完整部署、配置和运维指南](vagrant_setup_scripts/README_libvirt.md)
+- [上游 Kubespray 文档](https://kubespray.io/)
+
+以下章节介绍本仓库继承的上游 Kubespray 能力；其中通用 Vagrant 流程与本 fork 的 `vagrant_setup_scripts` 自动化流程相互独立。
+
+## Deploy a Production Ready Kubernetes Cluster
 
 ![Kubernetes Logo](https://raw.githubusercontent.com/kubernetes-sigs/kubespray/master/docs/img/kubernetes-logo.png)
 
 If you have questions, check the documentation at [kubespray.io](https://kubespray.io) and join us on the [kubernetes slack](https://kubernetes.slack.com), channel **\#kubespray**.
 You can get your invite [here](http://slack.k8s.io/)
 
-- Can be deployed on **[AWS](docs/cloud_providers/aws.md), GCE, [Azure](docs/cloud_providers/azure.md), [OpenStack](docs/cloud_controllers/openstack.md), [vSphere](docs/cloud_controllers/vsphere.md), [Equinix Metal](docs/cloud_providers/equinix-metal.md) (bare metal), Oracle Cloud Infrastructure (Experimental), or Baremetal**
+- Can be deployed on **[AWS](docs/cloud_providers/aws.md), GCE, [Azure](docs/cloud_providers/azure.md), [OpenStack](docs/cloud_controllers/openstack.md), [vSphere](docs/cloud_controllers/vsphere.md), Equinix Metal (bare metal), Oracle Cloud Infrastructure (Experimental), or Baremetal**
 - **Highly available** cluster
 - **Composable** (Choice of the network plugin for instance)
 - Supports most popular **Linux distributions**
@@ -31,13 +62,15 @@ ansible-playbook -i /inventory/inventory.ini --private-key /root/.ssh/id_rsa clu
 
 #### Usage
 
-See [Getting started](/docs/getting_started/getting-started.md)
+See [Getting started](docs/getting_started/getting-started.md)
 
 #### Collection
 
 See [here](docs/ansible/ansible_collection.md) if you wish to use this repository as an Ansible collection
 
-### Vagrant
+### Upstream Vagrant workflow
+
+This is the upstream generic Vagrant workflow. For this fork's Linux/libvirt automation, use [`vagrant_setup_scripts`](vagrant_setup_scripts/README.md) instead.
 
 For Vagrant we need to install Python dependencies for provisioning tasks.
 Check that ``Python`` and ``pip`` are installed:
@@ -48,7 +81,7 @@ python -V && pip -V
 
 If this returns the version of the software, you're good to go. If not, download and install Python from here <https://www.python.org/downloads/source/>
 
-Install Ansible according to [Ansible installation guide](/docs/ansible/ansible.md#installing-ansible)
+Install Ansible according to [Ansible installation guide](docs/ansible/ansible.md#installing-ansible)
 then run the following step:
 
 ```ShellSession
@@ -72,7 +105,7 @@ vagrant up
 - [Fedora CoreOS bootstrap](docs/operating_systems/fcos.md)
 - [openSUSE setup](docs/operating_systems/opensuse.md)
 - [Downloaded artifacts](docs/advanced/downloads.md)
-- [Equinix Metal](docs/cloud_providers/equinix-metal.md)
+- Equinix Metal
 - [OpenStack](docs/cloud_controllers/openstack.md)
 - [vSphere](docs/cloud_controllers/vsphere.md)
 - [Large deployments](docs/operations/large-deployments.md)
@@ -150,7 +183,7 @@ Note:
 ## Requirements
 
 - **Minimum required version of Kubernetes is v1.30**
-- **Ansible v2.14+, Jinja 2.11+ and python-netaddr is installed on the machine that will run Ansible commands**
+- **Install the repository-pinned Ansible dependencies from `requirements.txt`; the current compatibility range is ansible-core >=2.18,<2.19 with Python 3.11-3.13**
 - The target servers must have **access to the Internet** in order to pull docker images. Otherwise, additional configuration is required (See [Offline Environment](docs/operations/offline-environment.md))
 - The target servers are configured to allow **IPv4 forwarding**.
 - If using IPv6 for pods and services, the target servers are configured to allow **IPv6 forwarding**.
@@ -170,7 +203,7 @@ These limits are safeguarded by Kubespray. Actual requirements for your workload
 
 ## Network Plugins
 
-You can choose among ten network plugins. (default: `calico`, except Vagrant uses `flannel`)
+You can choose among ten network plugins. The upstream generic Vagrant workflow may use `flannel`; this fork's `vagrant_setup_scripts` automation supports Calico and Cilium, with Calico as the default.
 
 - [flannel](docs/CNI/flannel.md): gre/vxlan (layer 2) networking.
 
@@ -192,8 +225,8 @@ You can choose among ten network plugins. (default: `calico`, except Vagrant use
 
 - [multus](docs/CNI/multus.md): Multus is a meta CNI plugin that provides multiple network interface support to pods. For each interface Multus delegates CNI calls to secondary CNI plugins such as Calico, macvlan, etc.
 
-- [custom_cni](roles/network-plugin/custom_cni/) : You can specify some manifests that will be applied to the clusters to bring you own CNI and use non-supported ones by Kubespray.
-  See `tests/files/custom_cni/README.md` and `tests/files/custom_cni/values.yaml`for an example with a CNI provided by a Helm Chart.
+- `custom_cni`: You can specify manifests that will be applied to the cluster to bring your own CNI and use non-supported ones.
+  See `tests/files/custom_cni/README.md` and `tests/files/custom_cni/values.yaml` for an example with a CNI provided by a Helm Chart.
 
 The network plugin to use is defined by the variable `kube_network_plugin`. There is also an
 option to leverage built-in cloud provider networking instead.

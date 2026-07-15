@@ -1,809 +1,873 @@
-# Kubespray Libvirt 环境设置指南
+# Kubespray UPM Libvirt 部署与运维指南
 
-## 概述
+本文档按 `libvirt_kubespray_setup.sh`、`Vagrantfile`、网络模板和 `upm_setup.sh` 的当前实现编写。命令和限制均以代码实际行为为准。
 
-本文档详细介绍如何使用 `libvirt_kubespray_setup.sh` 脚本在 libvirt 虚拟化环境中快速部署 Kubespray Kubernetes 集群。该脚本专为 Red Hat 系列 Linux 系统（RHEL 8/9、Rocky Linux 8/9、AlmaLinux 8/9）设计，提供完整的自动化环境配置和 Kubernetes 集群部署。
+## 1. 能力边界
 
-### 脚本特性
+主脚本完成以下工作：
 
-- **版本**: v1.0
-- **专注 Kubernetes**: 专门用于部署基础 Kubernetes 集群环境
-- **智能系统检测**: 自动检测操作系统类型、硬件资源和虚拟化支持
-- **网络配置管理**: 支持 NAT 和桥接网络模式，自动配置网络参数
-- **虚拟机生命周期管理**: 提供完整的虚拟机创建、更新、销毁和状态管理功能
-- **交互式配置**: 提供详细的安装预览和确认机制
-- **错误处理**: 完善的错误处理和恢复机制
-- **安全特性**: 交互式确认、权限验证、RHEL订阅验证、网络安全检查
-- **Sudo 会话管理**: 自动管理长时间运行操作的 sudo 会话
+1. 检查 RHEL 系宿主机、CPU、内存、磁盘、虚拟化和网络。
+2. 修改宿主机安全配置，安装并启动 libvirt/QEMU。
+3. 安装 Vagrant、`vagrant-libvirt`、pyenv、Python 3.12.11 和 Kubespray Python 依赖。
+4. 在脚本目录下 clone/update 一个嵌套的 `kubespray-upm` 部署工作区。
+5. 从 NAT 或 Bridge 模板生成 `vagrant/config.rb`，并替换工作区根目录的 `Vagrantfile`。
+6. 执行 `vagrant up --provider=libvirt --no-parallel --provision`，由 Vagrant 调用 Kubespray。
+7. 将生成的 kubectl 和 kubeconfig 链接到宿主机 `$HOME/bin/kubectl` 与 `$HOME/.kube/config`。
 
-### ⚡ 一键命令
+主脚本没有实现独立的 start、stop、scale、snapshot 或 uninstall 子命令。部署后的生命周期管理使用 Vagrant、virsh、kubectl 和 Kubespray 原生命令。
 
-如果您希望快速体验，可以使用以下一键命令：
+## 2. 重要风险
 
-### 下载脚本并安装 Kubernetes 集群（NAT 模式）
+运行前必须理解以下宿主机级改动：
+
+- firewalld 会被停止并禁用。
+- SELinux 会执行 `setenforce 0`，并把 `/etc/selinux/config` 改为 disabled。
+- 当前用户会加入 `libvirt` 组。
+- shell 启动文件会加入 pyenv 配置。
+- 如果 `$HOME/.pyenv` 已存在但 `pyenv` 命令不可用，安装流程会删除该目录后重新安装。
+- 设置代理时会修改全局 Git proxy。
+- 两个脚本会把各自日志文件权限设置为 `0666`，日志中可能包含代理、地址和拓扑信息。
+- Bridge 模式会创建 `br0` 并把选定物理接口加入 bridge，可能导致当前 SSH 会话断开。
+- 默认附加磁盘初始化会在 guest 内扫描全部非根磁盘并执行 `pvcreate`/`vgcreate`/`vgextend`，不能用于包含重要数据的磁盘。
+- UPM Platform 安装会给 `upm-system/default` ServiceAccount 授予 `cluster-admin`。
+- `--config_nginx` 会备份后完整覆盖宿主机 `/etc/nginx/nginx.conf`。
+
+这套流程定位于专用实验、开发或验证宿主机，不应未经评审直接用于共享或生产宿主机。
+
+## 3. 宿主机准备
+
+### 3.1 操作系统和硬件
+
+实际检查条件：
+
+| 项目 | 当前实现 |
+| --- | --- |
+| 操作系统 | `/etc/os-release` 匹配 Red Hat、CentOS、Rocky 或 AlmaLinux；RHEL 仅允许 9 |
+| CPU | 至少 12 核，否则终止 |
+| 虚拟化 | `/proc/cpuinfo` 必须存在 `vmx` 或 `svm` |
+| 内存 | 建议至少 32 GiB；不足只警告 |
+| 磁盘 | 根分区至少 200 GiB 可用，否则终止 |
+| 架构 | 针对 x86_64；其他架构只警告，但 Vagrant box 和依赖未保证可用 |
+| 权限 | sudo |
+
+定制 Vagrantfile 当前识别的 guest OS key 为 `ubuntu2404`、`almalinux9`、`rockylinux9`、`opensuse`、`opensuse-tumbleweed` 和 `oraclelinux9`；自动化模板默认使用 `rockylinux9`。宿主机支持范围与 guest OS 列表不是同一个概念。
+
+默认 5 VM 配置实际需要的资源明显高于最低检查值。按模板计算约为 32 vCPU、56 GiB guest 内存，另有 4 块 200 GiB 附加盘；请为宿主系统、镜像和运行时保留额外余量。
+
+### 3.2 网络和仓库
+
+宿主机需要访问：
+
+- 系统 DNF/YUM 仓库；RHEL 需要有效订阅和 BaseOS、AppStream、CodeReady Builder。
+- HashiCorp RPM 仓库。
+- EPEL。
+- GitHub、raw.githubusercontent.com、PyPI、Vagrant Cloud。
+- Kubernetes/容器镜像仓库和所选 Helm 仓库。
+
+代理由以下环境变量读取：
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/upmio/kubespray-upm/refs/heads/master/vagrant_setup_scripts/libvirt_kubespray_setup.sh -o ./libvirt_kubespray_setup.sh && chmod +x ./libvirt_kubespray_setup.sh && bash ./libvirt_kubespray_setup.sh -y
+export HTTP_PROXY=http://proxy.example.com:8080
+export HTTPS_PROXY=http://proxy.example.com:8080
+export NO_PROXY=localhost,127.0.0.1,192.168.0.0/16,10.0.0.0/8
+export PIP_PROXY="$HTTP_PROXY"
+export GIT_PROXY="$HTTP_PROXY"
 ```
 
-**注意**: 该脚本专门用于部署 Kubernetes 集群。如需安装 UPM 相关组件（如 LVM LocalPV、Prometheus、UPM Engine、UPM Platform），请在集群部署完成后使用 `upm_setup.sh` 脚本。
+脚本会测试外部地址。代理口令可能出现在进程参数、环境或日志中，应使用专用低权限凭据。
 
-## 系统要求
-
-### 硬件要求
-
-| 组件 | 最低要求 | 推荐配置 | 说明 |
-|------|----------|----------|------|
-| **CPU** | 12 核心 | 24+ 核心 | 支持硬件虚拟化 (Intel VT-x/AMD-V) |
-| **内存** | 32 GB | 64 GB+ | 用于主机系统和虚拟机 |
-| **磁盘空间** | 200 GB | 500 GB+ | SSD 推荐，用于虚拟机镜像和数据 |
-| **网络** | 1 Gbps | 10 Gbps | 稳定的网络连接 |
-
-### 软件要求
-
-#### 支持的操作系统
-
-脚本会自动检测以下 RHEL 系发行版：
-
-- **Red Hat Enterprise Linux (RHEL)** 8.x/9.x
-- **Rocky Linux** 8.x/9.x
-- **AlmaLinux** 8.x/9.x
-- **CentOS Stream** 9.x
-
-#### 系统组件要求
-
-- **内核版本**: 5.14+ (支持 KVM 虚拟化)
-- **Python**: 3.9+ (系统自带)
-- **Bash**: 4.0+ (系统自带)
-- **硬件虚拟化**: CPU 支持 Intel VT-x 或 AMD-V
-- **嵌套虚拟化**: 如果在虚拟机中运行需要启用
-
-#### 网络要求
-
-- **互联网访问**: 用于下载软件包和容器镜像
-- **DNS 解析**: 正常的域名解析功能
-- **代理支持**: 支持 HTTP/HTTPS 代理环境（可选）
-- **防火墙**: 脚本会自动配置防火墙规则
-
-#### 用户权限要求
-
-- **sudo 权限**: 当前用户必须具有 sudo 权限
-- **用户组**: 脚本会自动将用户添加到 libvirt 和 kvm 组
-
-### 系统检查功能
-
-脚本内置以下自动检查功能：
-
-#### 操作系统检测
-
-- 自动检测 RHEL 系发行版类型和版本
-- 验证系统是否为 Linux（针对特定选项）
-- 检查系统架构兼容性
-
-#### 硬件资源检查
-
-- **CPU 核心数**: 最少 12 核心
-- **内存容量**: 最少 32GB
-- **磁盘空间**: 最少 200GB 可用空间
-- **虚拟化支持**: 检查 KVM 和硬件虚拟化功能
-
-### 磁盘空间分布建议
-
-| 目录 | 用途 | 最低要求 | 推荐配置 |
-|------|------|----------|----------|
-| `/` | 系统根目录 | 50 GB | 100 GB |
-| `/var` | 容器镜像和日志 | 100 GB | 200 GB |
-| `/home` | 用户数据和项目文件 | 50 GB | 100 GB |
-| `/tmp` | 临时文件 | 10 GB | 20 GB |
-
-### 基础系统要求
-
-#### 网络连接要求
-
-- **互联网连接**: 稳定的互联网连接，用于下载软件包和容器镜像
-- **DNS 解析**: 系统能够正常解析域名（如 github.com、registry.k8s.io）
-- **防火墙配置**: 允许出站 HTTP/HTTPS 连接（脚本会自动禁用 firewalld）
-- **代理支持**: 如在企业环境中，支持 HTTP/HTTPS 代理配置
-
-#### 软件仓库要求
-
-- **DNF/YUM 仓库**: 系统软件仓库必须可用且配置正确
-- **EPEL 仓库**: 脚本会自动安装和启用 EPEL 仓库
-- **PowerTools/CRB 仓库**: 脚本会自动启用 PowerTools（CentOS/Rocky/AlmaLinux）或 CodeReady Builder（RHEL）仓库
-- **仓库缓存**: 建议运行前执行 `sudo dnf makecache` 更新仓库缓存
-
-#### 虚拟化支持要求
-
-- **硬件虚拟化**: CPU 必须支持硬件虚拟化（Intel VT-x 或 AMD-V）
-- **BIOS/UEFI 设置**: 在 BIOS/UEFI 中启用虚拟化功能
-- **嵌套虚拟化**: 如在虚拟机中运行，需要启用嵌套虚拟化
-- **KVM 模块**: 系统内核必须支持 KVM 模块
-
-#### 系统服务要求
-
-- **NetworkManager**: 网络管理服务必须运行（用于桥接网络配置）
-- **systemd**: 系统必须使用 systemd 作为初始化系统
-- **时间同步**: 系统时间必须准确（建议启用 chronyd 或 ntpd）
-
-#### 用户和权限配置
-
-- **sudo 权限**: 当前用户必须具有 sudo 权限
-- **用户组**: 脚本会自动将用户添加到 libvirt 组
-- **文件权限**: 用户主目录必须可写（用于存储配置文件和密钥）
-
-#### 磁盘空间分布
-
-- **根分区 (/)**: 至少 50GB 可用空间（用于系统软件和工具）
-- **用户主目录**: 至少 20GB 可用空间（用于 kubespray 项目和配置）
-- **虚拟机存储**: 至少 200GB 可用空间（默认位置：/var/lib/libvirt/images）
-
-#### RHEL 系统额外配置要求
-
-对于 Red Hat Enterprise Linux (RHEL) 系统，脚本会自动进行以下检查和配置：
-
-**订阅管理要求**:
-
-- 系统必须已注册到 Red Hat 订阅管理服务
-- 需要有效的 RHEL 订阅许可证
-- `subscription-manager` 工具必须可用且配置正确
-
-**必需的软件仓库**:
-
-脚本会自动检查并启用以下 RHEL 仓库：
-
-- `rhel-{version}-for-{arch}-baseos-rpms` - 基础操作系统软件包
-- `rhel-{version}-for-{arch}-appstream-rpms` - 应用程序流软件包
-- `codeready-builder-for-rhel-{version}-{arch}-rpms` - 开发工具和库
-
-**注意事项**:
-
-- 如果系统未正确注册或订阅已过期，脚本会报错并停止执行
-- 确保在运行脚本前已完成 RHEL 系统的订阅注册
-- 脚本会跳过 CRB (CodeReady Builder) 仓库的通用配置，因为 RHEL 使用专门的 `codeready-builder-for-rhel` 仓库
-
-## 快速开始
-
-### 🚀 三步快速使用 Kubernetes 集群
-
-#### 第一步：下载脚本
+### 3.3 预检查
 
 ```bash
-# 下载安装脚本
-curl -sSL https://raw.githubusercontent.com/upmio/kubespray-upm/refs/heads/master/vagrant_setup_scripts/libvirt_kubespray_setup.sh -o "libvirt_kubespray_setup.sh" && chmod +x ./libvirt_kubespray_setup.sh
+grep -E 'Red Hat|CentOS|Rocky|AlmaLinux' /etc/os-release
+nproc
+free -h
+df -h /
+grep -E -m1 'vmx|svm' /proc/cpuinfo
+test -e /dev/kvm && echo /dev/kvm-ready
+sudo -v
 ```
 
-#### 第二步：运行脚本
+## 4. 获取代码和目录关系
 
 ```bash
-# NAT 模式自动配置网络，一键安装 Kubernetes 集群
-bash ./libvirt_kubespray_setup.sh -y
+git clone https://github.com/upmio/kubespray-upm.git
+cd kubespray-upm
+export REPO_ROOT="$PWD"
+cd "$REPO_ROOT/vagrant_setup_scripts"
 ```
 
-**安装过程说明**：
+后续命令统一使用 `REPO_ROOT`，避免在外层仓库和嵌套部署工作区之间进入错误目录。重新打开 shell 后需要再次设置该变量。
 
-- 脚本会自动检测系统环境并安装必要的依赖组件
-- **网络模式选择**：脚本会智能检测并提示选择网络模式
-  - 🌉 **桥接模式**：VM 直接连接物理网络，适合生产环境（需要配置网络接口）
-  - 🔒 **NAT 模式**：VM 通过 NAT 访问网络，适合开发测试（自动配置）
-- 整个安装过程约 15-25 分钟，需要稳定的网络连接
-- 支持企业环境的代理配置和私有镜像仓库设置
+运行后会形成嵌套工作区：
 
-> 💡 **网络配置详情**：如需了解网络模式的详细配置，请参考 [网络配置选项](#网络配置选项) 章节
-> 🏢 **企业环境配置**：如需配置容器镜像仓库转发，请参考 [容器镜像仓库配置](#容器镜像仓库配置) 章节
-
-#### 第三步：访问集群
-
-```bash
-# 脚本完成后，使用 kubectl 访问集群
-kubectl get nodes
-kubectl get pods --all-namespaces
+```text
+当前仓库/vagrant_setup_scripts/
+├── libvirt_kubespray_setup.sh
+└── kubespray-upm/                 # 实际 Vagrant/Kubespray 工作区
+    ├── Vagrantfile
+    ├── vagrant/config.rb
+    └── inventory/sample/artifacts/
 ```
 
-## 脚本参数说明
+如果嵌套目录已存在，脚本会在其中执行 `git pull`。外层仓库的未提交改动不会自动同步到这个工作区。
 
-### 基础选项
+## 5. NAT 网络
 
-| 参数 | 长选项 | 描述 |
-|------|--------|------|
-| `-h` | `--help` | 显示帮助信息 |
-| `-v` | `--version` | 显示详细版本信息 |
-| `-y` | | 自动确认所有是/否提示（网络桥接配置除外） |
-| `-n <network_type>` | | 设置网络类型（nat\|bridge，默认：nat）。设置为 'bridge' 时需要交互式配置 |
+### 5.1 当前地址规则
 
-### 功能说明
+libvirt NAT 模式固定使用：
 
-**主要功能**: 该脚本专门用于部署 Kubespray Kubernetes 集群环境，包括：
+- libvirt network：`nat-200-network`
+- 子网：`192.168.200.0/24`
+- 默认第一台 VM：`192.168.200.101`
+- 第 N 台 VM：`192.168.200.(100 + N)`
 
-- **libvirt 虚拟化环境配置**: 自动安装和配置 libvirt、QEMU/KVM
-- **Vagrant 环境设置**: 安装 Vagrant 和 vagrant-libvirt 插件
-- **Python 环境管理**: 使用 pyenv 管理 Python 版本和虚拟环境
-- **Kubespray 项目部署**: 下载并配置 Kubespray 项目
-- **Kubernetes 集群创建**: 部署完整的 Kubernetes 集群（默认 1 master + 4 worker 节点）
-- **网络配置**: 支持 NAT 和桥接网络模式
-- **基础组件**: 安装 Calico CNI、基础存储类等
+这些是 Vagrant 配置的静态地址，不是 DHCP 动态分配。
 
-**安装时间**: 约 15-20 分钟（取决于网络速度和硬件性能）
+### 5.2 `nat-200-network`
 
-**UPM 组件安装**: 如需安装 UPM 相关组件（LVM LocalPV、Prometheus、UPM Engine、UPM Platform），请在 Kubernetes 集群部署完成后使用 `upm_setup.sh` 脚本。
-
-### 虚拟机管理
-
-脚本部署完成后，您可以使用标准的 Vagrant 和 virsh 命令来管理虚拟机：
-
-#### Vagrant 命令
+主脚本的 `setup_libvirt()` 会自动创建、启动并设置 `nat-200-network` 开机自启。先检查：
 
 ```bash
-# 进入 kubespray 目录
-cd "$KUBESPRAY_DIR"
+sudo virsh net-info nat-200-network
+```
 
-# 查看虚拟机状态
+如果不通过主脚本运行，或需要手工修复，可创建一个与当前 Vagrantfile 匹配的网络：
+
+```bash
+tmpfile=$(mktemp)
+printf '%s\n' \
+  '<network>' \
+  '  <name>nat-200-network</name>' \
+  "  <forward mode='nat'/>" \
+  "  <bridge name='virbr200' stp='on' delay='0'/>" \
+  "  <ip address='192.168.200.1' netmask='255.255.255.0'>" \
+  '    <dhcp>' \
+  "      <range start='192.168.200.2' end='192.168.200.100'/>" \
+  '    </dhcp>' \
+  '  </ip>' \
+  '</network>' > "$tmpfile"
+
+sudo virsh net-define "$tmpfile"
+sudo virsh net-autostart nat-200-network
+sudo virsh net-start nat-200-network
+rm -f "$tmpfile"
+```
+
+验证：
+
+```bash
+sudo virsh net-info nat-200-network
+sudo virsh net-dumpxml nat-200-network
+ip addr show virbr200
+```
+
+如果宿主机已有 `192.168.200.0/24` 路由或同名 bridge，请先解决冲突。仅修改文档命令中的子网不够，还必须同步修改 `Vagrantfile` 中 libvirt NAT 地址规则及模板/预览逻辑。
+
+## 6. Bridge 网络
+
+启动方式：
+
+```bash
+./libvirt_kubespray_setup.sh -n bridge
+```
+
+即使同时使用 `-y`，以下内容仍需交互输入：
+
+- 物理网络接口。
+- VM 子网、掩码、网关、DNS。
+- 地址第四段的起始偏移。
+- 对已有宿主机地址和高风险操作的确认。
+
+当前实现会：
+
+1. 创建 NetworkManager bridge `br0`。
+2. 将 `br0` 的 IPv4/IPv6 method 设置为 disabled，并关闭 STP。
+3. 把所选物理接口加入 `br0`。
+4. 创建名为 `bridge-network` 的 libvirt 网络。
+5. VM 实际通过 `dev=br0,type=bridge` 直接连接 bridge。
+
+脚本不会自动把宿主机原有 IP、默认路由和 DNS 迁移到 `br0`。远程执行很可能断开连接，应使用物理控制台或带外管理，并提前准备 NetworkManager 回滚命令。
+
+地址算法只保留输入 IP 的前三段，并将第四段作为偏移。若输入 `192.168.29.100`，第一台 VM 实际为 `192.168.29.101`。请保证：
+
+```text
+起始第四段 + VM 数量 <= 254
+```
+
+当前算法不会正确跨越 `/24` 边界。Rocky/Alma guest 的路由配置还假设第二个连接名为 `System eth1`；其他连接命名需要修改 Vagrantfile。
+
+## 7. Kubernetes 网络方案
+
+虚拟机网络和 Kubernetes CNI 是两个不同层次：
+
+| 层次 | 可选方案 | 作用 |
+| --- | --- | --- |
+| libvirt/VM 网络 | NAT、Bridge | 决定宿主机、VM 和物理网络如何互通 |
+| Kubernetes CNI | Calico、Cilium | 提供 Pod 网络、NetworkPolicy 和 Service 数据面 |
+| Service LoadBalancer | Cilium LB IPAM + L2 Announcement | 为裸机/libvirt 集群的 `LoadBalancer` Service 分配并通告 IP |
+
+### 7.1 CNI 方案对比
+
+| 方案 | kube-proxy | LoadBalancer | 适用场景 |
+| --- | --- | --- | --- |
+| Calico | 保留 | 不由本自动化提供 | 默认方案、传统 Kubernetes 网络 |
+| Cilium 标准模式 | 保留 | 不启用 L2 LB | 需要 Cilium eBPF、策略或可观测能力 |
+| Cilium kube-proxy replacement | 不部署 | 可选 | 使用 Cilium eBPF 处理 Kubernetes Service |
+| Cilium + LoadBalancer | 必须替换 | LB IPAM + L2 | 从宿主机或物理二层网络访问 Service |
+
+Cilium 模式会向 Kubespray 传入 `kube_owner: root`。选择替换 kube-proxy 时会同时设置：
+
+```yaml
+cilium_kube_proxy_replacement: true
+kube_proxy_remove: true
+```
+
+### 7.2 命令示例
+
+```bash
+# Calico，保留 kube-proxy
+./libvirt_kubespray_setup.sh -y -p calico
+
+# Cilium，保留 kube-proxy
+./libvirt_kubespray_setup.sh -y -p cilium
+
+# Cilium 替换 kube-proxy
+./libvirt_kubespray_setup.sh -y -p cilium \
+  --cilium-kube-proxy-replacement
+
+# NAT + Cilium LoadBalancer
+./libvirt_kubespray_setup.sh -y -n nat -p cilium \
+  --cilium-load-balancer \
+  --cilium-lb-range 192.168.200.201-192.168.200.220 \
+  --cilium-lb-interface eth1
+```
+
+`--cilium-lb-range` 本身会启用 LoadBalancer。使用 `-y --cilium-load-balancer` 时必须同时提供地址范围；非自动确认模式会交互询问地址范围和 guest 网卡。
+
+Cilium L2 Announcement 依赖 kube-proxy replacement，因此启用 LoadBalancer 时脚本会自动将 `cilium_kube_proxy_replacement` 和 `kube_proxy_remove` 设置为 `true`，并关闭 Cilium transparent DNS proxy 模式以避免与 DNS 配置冲突。
+
+### 7.3 配置传递与手工 group_vars 对照
+
+使用 `libvirt_kubespray_setup.sh` 时，脚本先把选择写入生成的 `vagrant/config.rb`，随后由 Vagrantfile 通过 `ansible.extra_vars` 传递给 Kubespray。主脚本不会直接修改 inventory 中的 `group_vars`，extra vars 的优先级高于 group vars。
+
+Cilium replacement + LoadBalancer 最终等价于以下配置。
+
+`group_vars/k8s_cluster/k8s-cluster.yml`：
+
+```yaml
+kube_network_plugin: cilium
+kube_owner: root
+```
+
+`group_vars/all/all.yml`：
+
+```yaml
+kube_proxy_remove: true
+```
+
+`group_vars/k8s_cluster/k8s-net-cilium.yml`：
+
+```yaml
+cilium_kube_proxy_replacement: true
+cilium_dns_proxy_enable_transparent_mode: false
+cilium_l2announcements: true
+
+cilium_loadbalancer_ip_pools:
+  - name: default-lb-pool
+    ranges:
+      - start: "192.168.25.20"
+        stop: "192.168.25.49"
+```
+
+地址只是示例，必须按实际 VM 网段规划。YAML 中不能保留 diff 标记、错误缩进或中文标点。
+
+如果直接运行 `ansible-playbook cluster.yml` 而不经过主脚本，Kubespray只会创建 `CiliumLoadBalancerIPPool`，不会执行本项目部署后的 Policy 创建函数，因此仍需手工应用 `CiliumL2AnnouncementPolicy`。
+
+### 7.4 Kubernetes API Server endpoint
+
+Cilium kube-proxy replacement 在启动阶段必须能访问真实 Kubernetes API Server。当前项目没有把业务 Service LoadBalancer 用作 API endpoint，而是保留 Kubespray 默认行为：
+
+```yaml
+loadbalancer_apiserver_localhost: true
+```
+
+在该模式下，Kubespray会在非 control-plane 节点部署本地 nginx/haproxy API proxy，自动推导：
+
+```yaml
+kube_apiserver_global_endpoint: "https://localhost:6443"
+```
+
+Cilium Helm values 的 `k8sServiceHost` 和 `k8sServicePort` 来自这个派生 endpoint。即使设置了 `kube_proxy_remove: true`，本地 API proxy 的部署逻辑仍然保留。
+
+如果明确不使用本地 API proxy，可以设置：
+
+```yaml
+loadbalancer_apiserver_localhost: false
+```
+
+此时 Kubespray会自动使用第一个 control-plane 节点的访问地址，通常不需要直接覆盖 `kube_apiserver_global_endpoint`。普通 worker 节点没有监听 kube-apiserver 6443，不能作为 global endpoint。
+
+如果存在真正的外部负载均衡器或稳定 VIP，应配置源变量：
+
+```yaml
+loadbalancer_apiserver:
+  address: 192.168.25.50
+  port: 6443
+```
+
+不要写 Markdown 链接格式：
+
+```yaml
+# 错误
+kube_apiserver_global_endpoint: "[https://192.168.25.51:6443](https://192.168.25.51:6443)"
+```
+
+如果确实需要覆盖，必须是普通 URL：
+
+```yaml
+kube_apiserver_global_endpoint: "https://192.168.25.51:6443"
+```
+
+但直接覆盖派生变量可能使 Cilium、kubeadm discovery、kubeconfig 和证书 SAN 使用不同 endpoint，不推荐作为常规方案。Cilium Service LoadBalancer 在 Cilium 启动后才可用，不能承担 Cilium 启动前的 API Server bootstrap endpoint。
+
+### 7.5 Cilium LoadBalancer 工作方式
+
+Kubespray 根据 `cilium_loadbalancer_ip_pools` 创建 `CiliumLoadBalancerIPPool`，但上游逻辑不会创建 `CiliumL2AnnouncementPolicy`。本项目在 Kubernetes 部署完成后补充以下步骤：
+
+1. 等待 Cilium LoadBalancer 和 L2 Announcement CRD Ready。
+2. 确认 Kubespray 已创建指定 IPPool。
+3. 通过 Vagrant SSH 验证每个节点的 InternalIP 位于所选 guest 网卡。
+4. 创建允许 LoadBalancer IP 的 `CiliumL2AnnouncementPolicy`。
+5. 重新读取 IPPool 和 Policy 作为配置证明。
+
+直接运行 Kubespray 时可手工应用：
+
+```yaml
+apiVersion: cilium.io/v2alpha1
+kind: CiliumL2AnnouncementPolicy
+metadata:
+  name: default-l2-announcement-policy
+spec:
+  serviceSelector: {}
+  nodeSelector: {}
+  interfaces:
+    - "^eth1$"
+  externalIPs: false
+  loadBalancerIPs: true
+```
+
+如果 guest 网卡不是默认的 `eth1`，部署前先根据 box/网络配置确定名称并使用 `--cilium-lb-interface`。接口选错时可能出现 Service 已获得 `EXTERNAL-IP`，但集群外访问超时。
+
+脚本中的创建逻辑位于 `configure_cilium_load_balancer()`。它只在 CNI 为 Cilium 且启用 LoadBalancer 时执行，并在 `vagrant up` 或 `vagrant provision` 成功、宿主机 kubectl 配置完成后运行。
+
+### 7.6 地址规划
+
+LoadBalancer 地址范围必须：
+
+- 与 Kubernetes 节点位于同一二层网段。
+- 避开网关、VM 静态地址和 DHCP 地址池。
+- 不与 Pod CIDR、Service CIDR、其他 Cilium IPPool 或物理设备地址重叠。
+- 起始地址不大于结束地址，并避开网络地址和广播地址。
+
+`--cilium-lb-range` 使用 `START_IP-STOP_IP`，不需要再提供独立掩码：范围本身写入 `CiliumLoadBalancerIPPool`，掩码用于判断地址是否属于节点二层子网。NAT 固定使用 `255.255.255.0`；Bridge 使用前面输入 VM 起始地址时解析出的 CIDR/netmask。因此 Bridge 为 `/20`、`/25` 等配置时，校验也按对应掩码计算网络地址和广播地址，而不是固定比较 IPv4 的前三段。
+
+NAT 模式下，LB 地址通常只对宿主机及 libvirt 网络可达。需要物理局域网客户端直接访问时，应使用 Bridge，并从物理网段中预留未使用地址。
+
+不要直接通过 `vagrant provision` 在已有集群上切换 Calico/Cilium或启用 kube-proxy replacement。CNI 数据面属于安装级配置，建议销毁旧集群后重新部署。
+
+### 7.7 网络测试矩阵
+
+| 场景 | 关键预期 |
+| --- | --- |
+| Calico | `calico-node` 和 kube-proxy DaemonSet Ready |
+| Cilium 标准模式 | Cilium Ready，kube-proxy 仍存在 |
+| Cilium replacement | Cilium Ready，kube-proxy 不存在，Cilium 状态显示 replacement 已启用 |
+| Cilium + LoadBalancer | 自动启用 replacement，IPPool、L2 Policy 存在，测试 Service 获得池内地址 |
+| Cilium replacement + LoadBalancer | kube-proxy-free、LB IPAM、L2 通告同时正常 |
+| 非法 CNI 或 Calico + Cilium 参数 | 脚本在创建 VM 前拒绝 |
+| LB 地址与 VM/网关重叠 | 脚本在创建 VM 前拒绝 |
+| L2 接口错误 | 部署后接口校验失败，并输出 `ip -br addr` 排查命令 |
+
+LoadBalancer 场景必须创建临时 `LoadBalancer` Service，依次确认集群内部、宿主机，以及 Bridge 模式下物理局域网客户端都能访问。只看到 `EXTERNAL-IP` 不算通过。
+
+## 8. 执行部署
+
+### 8.1 参数
+
+```text
+./libvirt_kubespray_setup.sh [OPTIONS]
+
+-h, --help          帮助
+-v, --version       版本
+-y                  自动确认普通 yes/no 提示
+-c <3-50>           VM 总数
+-n nat|bridge       网络模式，默认 nat
+-p calico|cilium    Kubernetes CNI，默认 calico
+--cilium-kube-proxy-replacement
+--cilium-load-balancer
+--cilium-lb-range START_IP-STOP_IP
+--cilium-lb-interface INTERFACE
+```
+
+`-c` 只覆盖 `$num_instances`。它不会自动调整 etcd、control-plane、UPM 节点数、CPU、内存或磁盘大小。
+
+### 8.2 NAT 示例
+
+```bash
+cd "$REPO_ROOT/vagrant_setup_scripts"
+sudo virsh net-info nat-200-network
+./libvirt_kubespray_setup.sh -y
+```
+
+### 8.3 Bridge 示例
+
+```bash
+cd "$REPO_ROOT/vagrant_setup_scripts"
+./libvirt_kubespray_setup.sh -n bridge
+```
+
+### 8.4 安装流程
+
+脚本依次执行：
+
+```text
+参数、VM 网络和 Kubernetes CNI 选择
+  -> 宿主机资源与 RHEL 仓库检查
+  -> chrony/NTP 检查
+  -> 禁用 firewalld 和 SELinux
+  -> 安装 libvirt/QEMU
+  -> 安装 Vagrant 和 vagrant-libvirt
+  -> 安装 pyenv/Python 3.12.11/依赖
+  -> clone 或 pull 嵌套工作区
+  -> 生成 vagrant/config.rb 并替换 Vagrantfile
+  -> 可选覆盖 containerd.yml
+  -> 检查已有 VM
+  -> vagrant up + Kubespray
+  -> 配置宿主机 kubectl/kubeconfig
+  -> Cilium LB 模式下校验网卡并创建 L2 Announcement Policy
+```
+
+已有 VM 数量与配置一致时，脚本会要求选择继续 `vagrant up --provision`、仅 provision、删除重建或取消；数量不一致时只能删除全部匹配 VM 或取消。该菜单不受 `-y` 控制。未显式传入 CNI 参数时，脚本会继承已有 `config.rb` 的 Calico/Cilium、replacement 和 LoadBalancer 配置；检测到已有 Vagrant/libvirt VM 后，不允许直接切换 CNI、kube-proxy replacement、LoadBalancer 地址池或 L2 接口，必须删除并重建集群。
+
+## 9. 默认拓扑和配置
+
+### 9.1 节点与 Ansible 组
+
+| 节点 | 资源档位 | Ansible/Kubernetes 用途 |
+| --- | --- | --- |
+| `k8s-1` | control-plane：4 CPU/4 GiB | etcd、`kube_control_plane`、`kube_node` |
+| `k8s-2` | UPM：4 CPU/4 GiB | `kube_node`；后续脚本的 UPM/OpenEBS/Prometheus 标签节点 |
+| `k8s-3` 至 `k8s-5` | worker：8 CPU/16 GiB | `kube_node` |
+
+所有节点都属于 `kube_node`。所谓 UPM control 是资源和标签约定，Vagrantfile 没有创建名为 `upm_control` 的 Ansible group。
+
+### 9.2 软件
+
+| 项目 | 模板值 |
+| --- | --- |
+| Kubernetes | 1.36.1 |
+| OS | Rocky Linux 9 / `bento/rockylinux-9.6` |
+| CNI | Calico（默认），可选 Cilium |
+| cert-manager | True |
+| local-path-provisioner | False |
+| 时区 | Asia/Shanghai |
+
+### 9.3 附加磁盘
+
+默认对索引大于 control-plane/etcd 边界的 VM 添加一块 200 GiB 磁盘，因此默认是 `k8s-2` 到 `k8s-5`。guest provisioning 会尝试建立 `local_vg_dev`。
+
+当前 libvirt 分支没有使用模板中的 `$kube_node_instances_with_disk_dir`，不要依赖该变量决定宿主机磁盘文件位置。更重要的是，guest 内的初始化逻辑会枚举全部非根磁盘；如 VM 中还挂载了其他数据盘，应先禁用：
+
+```ruby
+$kube_node_instances_with_disks = false
+$kube_node_instances_create_vg = false
+```
+
+生成的 `vagrant/config.rb` 会在主脚本每次运行时被模板覆盖。要持续变更默认配置，应修改模板并确保运行脚本 clone 到的代码包含这些变更；一次性变更则在生成 config 后手工运行 Vagrant，不要再次执行主脚本。
+
+## 10. containerd 镜像仓库
+
+创建 `containerd.yml` 才会触发覆盖：
+
+```bash
+cd "$REPO_ROOT/vagrant_setup_scripts"
+cp containerd-example.yml containerd.yml
+$EDITOR containerd.yml
+./libvirt_kubespray_setup.sh -y
+```
+
+目标文件是嵌套工作区的：
+
+```text
+kubespray-upm/inventory/sample/group_vars/all/containerd.yml
+```
+
+若目标是符号链接，脚本会先删除链接；若是普通文件，会把备份放在外层 `vagrant_setup_scripts` 中。请检查差异并避免在配置中提交明文凭据。
+
+## 11. kubectl 配置
+
+Kubespray 通过 Vagrant host vars 生成：
+
+```text
+inventory/sample/artifacts/kubectl
+inventory/sample/artifacts/admin.conf
+```
+
+主脚本随后：
+
+- 将已有 `$HOME/bin/kubectl` 和 `$HOME/.kube/config` 重命名为带时间戳的备份。
+- 创建指向上述 artifacts 的符号链接。
+- 最多测试 4 次 `cluster-info`；连接测试最终失败只产生警告。
+
+部署后必须自行验证：
+
+```bash
+readlink -f "$HOME/bin/kubectl"
+readlink -f "$HOME/.kube/config"
+kubectl cluster-info
+kubectl get nodes -o wide
+kubectl get pods -A
+```
+
+## 12. VM 和集群生命周期
+
+进入实际工作区：
+
+```bash
+cd "$REPO_ROOT/vagrant_setup_scripts/kubespray-upm"
+```
+
+常用命令：
+
+```bash
 vagrant status
-
-# SSH 连接到节点
 vagrant ssh k8s-1
 vagrant ssh k8s-2
-
-# 停止虚拟机
 vagrant halt
-
-# 启动虚拟机
-vagrant up --provider=libvirt --no-parallel
-
-# 销毁虚拟机
+vagrant up --provider=libvirt --no-parallel --provision
+vagrant provision --provision-with ansible
 vagrant destroy -f
 ```
 
-#### virsh 命令
+virsh 中的 domain 名带有 `kubespray` 前缀，先以实际输出为准：
 
 ```bash
-# 查看所有虚拟机
 sudo virsh list --all
+sudo virsh dominfo <domain-name>
+```
 
-# 查看网络配置
+强制删除会同时删除存储，执行前确认数据：
+
+```bash
+sudo virsh destroy <domain-name>
+sudo virsh undefine <domain-name> --remove-all-storage
+```
+
+修改节点总数后直接运行 `vagrant up` 并不等于完成安全的 Kubernetes 扩缩容。已有节点的下线、etcd/control-plane 变更和 inventory 调整应遵循 Kubespray 的节点运维流程。
+
+## 13. 扩展组件
+
+### 13.1 正确脚本位置
+
+使用嵌套工作区内的脚本：
+
+```bash
+cd "$REPO_ROOT/vagrant_setup_scripts/kubespray-upm"
+./vagrant_setup_scripts/upm_setup.sh --help
+```
+
+该脚本在解析 `--help`/`--version` 之前就检查 `kubectl`，因此没有 kubectl 的机器上帮助命令也会失败。
+
+外层仓库中的 `upm_setup.sh` 查找的是外层 `vagrant/config.rb`，通常不存在；混用会导致无法获得正确节点拓扑和 VG 名称。
+
+### 13.2 参数约束
+
+```text
+-h, --help
+-v, --version
+-y
+--lvmlocalpv
+--prometheus
+--upm-engine
+--upm-platform
+--config_nginx
+--all
+```
+
+解析器要求恰好一个安装选项。以下命令无效：
+
+```bash
+# 无效：指定了两个安装选项
+./vagrant_setup_scripts/upm_setup.sh --lvmlocalpv --prometheus
+```
+
+分步安装应逐条执行，或者使用 `--all`。
+
+### 13.3 组件顺序
+
+```bash
+# 推荐的一次性顺序；不包含 Nginx
+./vagrant_setup_scripts/upm_setup.sh -y --all
+
+# 如需宿主机 Nginx 入口，再单独执行
+./vagrant_setup_scripts/upm_setup.sh -y --config_nginx
+```
+
+`--all` 的实际顺序：
+
+```text
+LVM LocalPV -> Prometheus -> UPM Engine -> UPM Platform
+```
+
+### 13.4 OpenEBS LVM LocalPV
+
+- Helm chart：`openebs-lvmlocalpv/lvm-localpv`
+- chart version：1.9.1，可由 `LVM_LOCALPV_CHART_VERSION` 覆盖
+- namespace：`openebs`
+- StorageClass：`lvm-localpv`
+- VolumeGroup：从 `vagrant/config.rb` 读取，默认 `local_vg_dev`
+- volume binding：`WaitForFirstConsumer`
+
+```bash
+./vagrant_setup_scripts/upm_setup.sh -y --lvmlocalpv
+kubectl get pods -n openebs
+kubectl get storageclass lvm-localpv -o yaml
+kubectl get nodes --show-labels
+```
+
+### 13.5 Prometheus
+
+- Helm chart：`prometheus-community/kube-prometheus-stack`
+- chart version：87.10.1，可由 `PROMETHEUS_CHART_VERSION` 覆盖
+- namespace：`prometheus`
+- Prometheus PVC：30 GiB，StorageClass 固定为 `lvm-localpv`
+- Operator、Prometheus、Alertmanager、Grafana 和 kube-state-metrics 被调度到带 `prometheus.node=true` 的 UPM 节点
+
+脚本没有在安装前显式检查 StorageClass，所以单独安装 Prometheus 前应先确认：
+
+```bash
+kubectl get storageclass lvm-localpv
+./vagrant_setup_scripts/upm_setup.sh -y --prometheus
+kubectl get pods -n prometheus
+helm list -n prometheus
+```
+
+访问方式：
+
+```bash
+kubectl port-forward -n prometheus svc/prometheus-kube-prometheus-prometheus 9090:9090
+kubectl port-forward -n prometheus svc/prometheus-grafana 3000:80
+```
+
+具体 service 名应以 `kubectl get svc -n prometheus` 为准。Grafana 默认凭据由 chart 决定，当前脚本提示为 `admin/prom-operator`。
+
+### 13.6 UPM Engine
+
+```bash
+./vagrant_setup_scripts/upm_setup.sh -y --upm-engine
+kubectl get pods -n upm-system
+helm list -n upm-system
+```
+
+chart version 默认为 1.2.4，可由 `UPM_CHART_VERSION` 覆盖。代码会给 UPM 节点添加 `upm.engine.node=enable`，但当前实现不检查 LVM LocalPV。
+
+### 13.7 UPM Platform
+
+UPM Platform 会检查 `openebs` 中的 LVM LocalPV release 和 `lvm-localpv` StorageClass。
+
+建议先设置密码：
+
+```bash
+export UPM_PWD='replace-with-a-strong-password'
+./vagrant_setup_scripts/upm_setup.sh -y --upm-platform
+```
+
+默认访问地址：
+
+```text
+http://<UPM节点IP>:32010/upm-ui/#/login
+```
+
+默认用户是 `super_root`；未设置 `UPM_PWD` 时默认口令为 `Upm@2024!`。安装后检查：
+
+```bash
+kubectl get pods -n upm-system
+kubectl get svc -n upm-system
+kubectl get clusterrolebinding upm-system-admin-default-account
+```
+
+当前脚本会创建以下高权限绑定：
+
+```text
+upm-system/default -> cluster-admin
+```
+
+实验完成后应根据实际控制器权限需求改为最小权限。
+
+### 13.8 Nginx 入口
+
+`--config_nginx` 会：
+
+- 把 `upm-platform-gateway` 改为 NodePort 31404。
+- 把 `upm-platform-ui` 改为 NodePort 31405。
+- 在宿主机用 DNF 安装 Nginx。
+- 备份并完整覆盖 `/etc/nginx/nginx.conf`。
+- 在宿主机监听 80，并代理 `/upm-ui/` 与 `/api/`。
+
+```bash
+./vagrant_setup_scripts/upm_setup.sh -y --config_nginx
+sudo nginx -t
+systemctl status nginx
+curl -I http://localhost/upm-ui/
+```
+
+该操作不在 `--all` 中，且不适合已经承载其他 Nginx 配置的宿主机。
+
+## 14. 故障处理
+
+### 14.1 查看日志
+
+```bash
+tail -f "$REPO_ROOT/vagrant_setup_scripts/libvirt_kubespray_setup.log"
+tail -f "$REPO_ROOT/vagrant_setup_scripts/kubespray-upm/vagrant_setup_scripts/upm_setup.log"
+```
+
+如果当前目录不同，请使用绝对路径确认读取的是外层主脚本日志还是嵌套工作区组件日志。
+
+### 14.2 NAT network not found
+
+```bash
 sudo virsh net-list --all
-
-# 强制删除虚拟机（如果 vagrant destroy 失败）
-sudo virsh destroy <vm_name>
-sudo virsh undefine <vm_name> --remove-all-storage
+sudo virsh net-info nat-200-network
 ```
 
-### Kubernetes 集群安装详情
-
-#### 功能描述
-
-该脚本专门用于部署完整的 Kubespray Kubernetes 集群环境，包括：
-
-- **libvirt 虚拟化环境配置**: 自动安装和配置 libvirt、QEMU/KVM、相关工具
-- **Vagrant 环境设置**: 安装 Vagrant 和 vagrant-libvirt 插件
-- **Python 环境管理**: 使用 pyenv 管理 Python 版本和虚拟环境
-- **Kubespray 项目部署**: 下载并配置 Kubespray 项目
-- **Kubernetes 集群创建**: 部署完整的 Kubernetes 集群
-- **网络配置**: 支持 NAT 和桥接网络模式
-- **基础组件**: 安装 Calico CNI、基础存储类等
-
-#### 基础系统需求
-
-- **硬件要求**: 12+ CPU 核心，32+ GB 内存，200+ GB 磁盘空间
-- **操作系统**: RHEL/Rocky/AlmaLinux 8.x/9.x，CentOS Stream 9.x
-- **网络要求**: 稳定的互联网连接，支持代理配置
-- **权限要求**: 用户具有 sudo 权限
-- **虚拟化支持**: CPU 支持硬件虚拟化（Intel VT-x/AMD-V）
-
-#### 安装内容
-
-- **虚拟化环境**: libvirt、QEMU/KVM、virt-manager
-- **开发工具**: Development Tools、Python 开发环境
-- **容器运行时**: Vagrant 和 vagrant-libvirt 插件
-- **Python 环境**: pyenv、Python 3.12.11、虚拟环境
-- **Kubespray 项目**: 完整的 Kubespray 部署环境
-- **Kubernetes 集群**: 1 master + 4 worker 节点（默认配置）
-- **网络组件**: Calico CNI、网络策略支持
-- **存储组件**: 基础存储类、持久卷支持
-
-#### 集群配置
-
-- **节点配置**: 1 个控制平面节点 + 4 个工作节点
-- **资源分配**: 每个节点 2 CPU 核心，4 GB 内存
-- **网络模式**: NAT（默认）或桥接模式
-- **CNI 插件**: Calico
-- **容器运行时**: containerd
-- **Kubernetes 版本**: 由 Kubespray 项目决定（通常是稳定版本）
-
-## 网络配置选项
-
-脚本支持两种网络配置模式，通过 `-n` 参数指定网络类型：
-
-### NAT 网络模式（默认）
+按本文第 5 节创建并启动网络，然后重新执行：
 
 ```bash
-bash ./libvirt_kubespray_setup.sh -n nat
+cd "$REPO_ROOT/vagrant_setup_scripts/kubespray-upm"
+vagrant up --provider=libvirt --no-parallel
 ```
 
-- **隔离安全**: 虚拟机网络与宿主机网络隔离
-- **自动配置**: 无需手动配置网络参数
-- **适用场景**: 开发测试环境、安全隔离环境
+### 14.3 Bridge 后宿主机断网
 
-### 桥接网络模式
+优先使用本地控制台检查：
 
 ```bash
-bash ./libvirt_kubespray_setup.sh -n bridge
+nmcli connection show
+ip addr
+ip route
 ```
 
-- **直接访问**: 虚拟机获得真实网络IP，可被外部直接访问
-- **交互配置**: 需要手动配置网络参数
-- **适用场景**: 生产环境、需要外部访问的场景
-- **⚠️ 警告**: 配置过程可能导致SSH连接中断，建议本地执行
+当前 bridge 实现不会迁移宿主 IP。恢复方式依赖运行前的 NetworkManager 配置，不能使用一套通用命令盲目覆盖；必要时删除 `bridge-slave-*`/`br0` 连接并重新启用原连接。
 
-## 使用方法
-
-### 命令行示例
+### 14.4 Vagrant/libvirt
 
 ```bash
-# 下载脚本
-curl -sSL https://raw.githubusercontent.com/upmio/kubespray-upm/refs/heads/master/vagrant_setup_scripts/libvirt_kubespray_setup.sh -o "libvirt_kubespray_setup.sh"
-chmod +x ./libvirt_kubespray_setup.sh
-
-# 查看帮助和版本信息
-bash ./libvirt_kubespray_setup.sh -h
-bash ./libvirt_kubespray_setup.sh --version
-
-# 基础安装（Kubernetes 集群）
-bash ./libvirt_kubespray_setup.sh
-
-# 自动确认模式（非交互）
-bash ./libvirt_kubespray_setup.sh -y
-
-# 设置网络类型
-bash ./libvirt_kubespray_setup.sh -n nat            # NAT 模式（默认）
-bash ./libvirt_kubespray_setup.sh -n bridge         # 桥接模式
-
-# 组合使用
-bash ./libvirt_kubespray_setup.sh -y -n nat         # 自动确认 + NAT 模式
-bash ./libvirt_kubespray_setup.sh -y -n bridge      # 自动确认 + 桥接模式
-
-
-### 安装组件说明
-
-脚本会自动安装和配置以下组件：
-
-#### 系统基础组件
-
-- **系统依赖**: Development Tools、Git、curl、wget、vim 等基础工具
-- **虚拟化组件**: libvirt、qemu-kvm、virt-manager、libguestfs-tools
-- **开发环境**: Vagrant、vagrant-libvirt、pyenv、Python 3.12.11
-- **虚拟机管理**: 智能虚拟机检测、生命周期管理、状态监控和交互式处理
-
-#### Kubernetes 集群
-
-- **Kubernetes 集群**: 基于 Kubespray 的生产级 Kubernetes 集群部署
-- **网络插件**: Calico CNI 网络插件
-- **容器运行时**: containerd
-- **集群配置**: 高可用配置，支持多节点部署
-
-### 环境配置（可选）
-
-#### 代理配置
-
-如果在企业网络环境中，可以设置代理：
-
-```bash
-export HTTP_PROXY="http://proxy.company.com:8080"
-export HTTPS_PROXY="http://proxy.company.com:8080"
-export NO_PROXY="localhost,127.0.0.1,10.0.0.0/8,192.168.0.0/16"
-```
-
-#### 桥接网络准备
-
-如果选择桥接网络模式，建议提前准备以下信息：
-
-- **当前网络接口的 IP 地址**: 用于安全确认
-- **VM 起始 IP 地址（带 CIDR）**: 例如 `192.168.1.10/24`
-- **网关 IP 地址**: 例如 `192.168.1.1`
-- **DNS 服务器 IP**: 例如 `8.8.8.8`
-
-## 容器镜像仓库配置
-
-### 镜像仓库配置说明
-
-在企业环境中，通常需要配置容器镜像仓库转发以提高镜像拉取速度或使用私有镜像仓库。本脚本支持通过 containerd 配置文件自定义镜像仓库设置。
-
-### 配置文件说明
-
-脚本提供了 `containerd-example.yml` 样例文件，展示了如何配置 containerd 镜像仓库转发。该文件位于：
-
-```bash
-vagrant_setup_scripts/containerd-example.yml
-```
-
-####### 配置步骤
-
-#### 1. 准备配置文件
-
-```bash
-# 基于样例文件创建配置文件（脚本会自动检测并使用）
-cp vagrant_setup_scripts/containerd-example.yml containerd.yml
-```
-
-> **注意**: 脚本会自动检测脚本目录下的 `containerd.yml` 文件，如果存在则自动应用配置。无需手动复制到 kubespray 目录。
-
-#### 2. 编辑配置文件
-
-根据您的环境需求编辑 `containerd.yml` 文件：
-
-```yaml
-# 启用镜像仓库转发配置
-containerd_registries_mirrors:
-  # 配置 Docker Hub 转发
-  - prefix: docker.io
-    mirrors:
-    - host: http://your-harbor.company.com  # 替换为您的私有仓库地址
-      capabilities: ["pull", "resolve"]
-      skip_verify: true  # true: 跳过TLS验证, false: 启用TLS验证
-      header:
-        # 如果需要认证，配置Authorization头
-        Authorization: "Basic <base64-encoded-credentials>"
-  
-  # 配置 Quay.io 转发
-  - prefix: quay.io
-    mirrors:
-    - host: http://your-harbor.company.com
-      capabilities: ["pull", "resolve"]
-      skip_verify: true
-      header:
-        Authorization: "Basic <base64-encoded-credentials>"
-  
-  # 配置 Kubernetes 镜像仓库转发
-  - prefix: registry.k8s.io
-    mirrors:
-    - host: http://your-harbor.company.com
-      capabilities: ["pull", "resolve"]
-      skip_verify: true
-```
-
-#### 3. 认证配置
-
-如果您的私有仓库需要认证，需要生成 Base64 编码的认证信息：
-
-```bash
-# 生成 Base64 编码的用户名:密码
-echo -n "username:password" | base64
-# 输出示例: dXNlcm5hbWU6cGFzc3dvcmQ=
-
-# 在配置文件中使用
-Authorization: "Basic dXNlcm5hbWU6cGFzc3dvcmQ="
-```
-
-#### 4. 常见配置示例
-
-**Harbor 私有仓库配置**：
-
-```yaml
-containerd_registries_mirrors:
-  - prefix: docker.io
-    mirrors:
-    - host: https://harbor.company.com
-      capabilities: ["pull", "resolve"]
-      skip_verify: false  # 如果使用有效SSL证书
-      header:
-        Authorization: "Basic YWRtaW46SGFyYm9yMTIzNDU="  # admin:Harbor12345
-```
-
-**阿里云镜像加速器配置**：
-
-```yaml
-containerd_registries_mirrors:
-  - prefix: docker.io
-    mirrors:
-    - host: https://your-id.mirror.aliyuncs.com
-      capabilities: ["pull", "resolve"]
-      skip_verify: false
-```
-
-**腾讯云镜像加速器配置**：
-
-```yaml
-containerd_registries_mirrors:
-  - prefix: docker.io
-    mirrors:
-    - host: https://mirror.ccs.tencentyun.com
-      capabilities: ["pull", "resolve"]
-      skip_verify: false
-```
-
-### 部署应用配置
-
-配置完成后，脚本会在部署过程中自动检测并应用 `containerd.yml` 配置：
-
-```bash
-# 运行部署脚本（脚本会自动应用 containerd 配置）
-bash ./libvirt_kubespray_setup.sh
-
-# 如果已经部署了集群，需要重新部署以应用新配置
-# 1. 销毁现有集群（使用 Vagrant 命令）
-cd $KUBESPRAY_DIR && vagrant destroy -f
-
-# 2. 重新部署集群
-bash ./libvirt_kubespray_setup.sh
-```
-
-> **自动化说明**: 脚本在部署前会自动检测脚本目录下的 `containerd.yml` 文件，如果存在则自动备份原配置并应用新配置。
-
-### 验证配置
-
-部署完成后，可以验证镜像仓库配置是否生效：
-
-```bash
-# SSH 到集群节点（使用脚本提供的 SSH 命令）
-bash ./libvirt_kubespray_setup.sh --ssh k8s-1
-
-# 或者直接使用 vagrant ssh（需要在 kubespray-upm 目录下）
-cd kubespray-upm
-vagrant ssh k8s-1
-
-# 检查 containerd 配置
-sudo cat /etc/containerd/config.toml | grep -A 10 "mirrors"
-
-# 测试镜像拉取
-sudo crictl pull nginx:latest
-
-# 查看镜像拉取日志
-sudo journalctl -u containerd -f
-
-# 验证配置是否已应用
-sudo crictl info | grep -A 20 "registry"
-```
-
-### 重要注意事项
-
-1. **TLS 验证**: 生产环境建议启用 TLS 验证（`skip_verify: false`）
-2. **认证安全**: 避免在配置文件中明文存储密码，使用 Base64 编码
-3. **网络连通性**: 确保集群节点能够访问配置的镜像仓库地址
-4. **配置备份**: 建议备份自定义的 containerd 配置文件
-5. **版本兼容性**: 确保镜像仓库支持所需的 containerd API 版本
-
-## 集群访问和管理
-
-### kubectl 本地访问
-
-脚本会自动配置 kubectl 本地访问，无需手动设置：
-
-```bash
-# kubectl 二进制文件位置
-~/bin/kubectl
-
-# kubeconfig 文件位置
-~/.kube/config
-
-# 基本命令
-kubectl get nodes
-kubectl get pods --all-namespaces
-kubectl get services --all-namespaces
-
-# 查看集群信息
-kubectl cluster-info
-kubectl get nodes -o wide
-kubectl top nodes  # 查看资源使用情况
-```
-
-### 基础组件管理命令
-
-```bash
-# 查看系统 Pod 状态
-kubectl get pods -n kube-system
-kubectl get pods -n kube-system -o wide
-
-# 查看服务状态
-kubectl get services --all-namespaces
-
-# 查看存储类和持久卷
-kubectl get storageclass
-kubectl get pv,pvc --all-namespaces
-
-# 查看网络策略
-kubectl get networkpolicies --all-namespaces
-```
-
-### 扩展组件安装
-
-如需安装额外的 Kubernetes 生态组件（如存储、数据库、监控等），请使用专门的 `upm_setup.sh` 脚本：
-
-```bash
-# 下载 UPM 安装脚本
-curl -sSL https://raw.githubusercontent.com/upmio/kubespray-upm/refs/heads/master/vagrant_setup_scripts/upm_setup.sh -o "upm_setup.sh"
-chmod +x ./upm_setup.sh
-
-# 查看可用组件
-bash ./upm_setup.sh -h
-
-# 安装示例
-bash ./upm_setup.sh --lvmlocalpv     # LVM LocalPV 存储
-bash ./upm_setup.sh --prometheus     # Prometheus 监控
-bash ./upm_setup.sh --upm-engine     # UPM Engine
-bash ./upm_setup.sh --upm-platform   # UPM Platform
-```
-
-### SSH 访问集群节点
-
-#### 基本访问命令
-
-```bash
-# 进入项目目录
-cd $KUBESPRAY_DIR
-
-# SSH 连接到主节点（控制平面）
-vagrant ssh k8s-1
-
-# 访问工作节点
-vagrant ssh k8s-2
-vagrant ssh k8s-3
-
-# 查看所有节点状态
+systemctl status libvirtd
+vagrant plugin list
+sudo virsh list --all
+sudo virsh net-list --all
+cd "$REPO_ROOT/vagrant_setup_scripts/kubespray-upm"
 vagrant status
+vagrant up --provider=libvirt --no-parallel
 ```
 
-#### 节点管理操作
+### 14.5 Helm 看不到已存在的 CRD
+
+如果 `kubectl get crd` 能看到 CRD，但 Helm 报 RESTMapper 或 `no matches for kind`，先用独立 discovery cache 验证：
 
 ```bash
-# 在节点上查看容器运行时状态
-vagrant ssh k8s-1 -c "sudo crictl ps"
-vagrant ssh k8s-1 -c "sudo crictl images"
-
-# 查看节点系统资源
-vagrant ssh k8s-1 -c "free -h && df -h"
-
-# 查看节点网络配置
-vagrant ssh k8s-1 -c "ip addr show"
-
-# 在节点内查看集群状态
-vagrant ssh k8s-1 -c "sudo kubectl get nodes"
+KUBECACHEDIR=$(mktemp -d) kubectl api-resources
+KUBECACHEDIR=$(mktemp -d) ./vagrant_setup_scripts/upm_setup.sh -y --prometheus
 ```
 
-### 集群管理命令
+不要在未确认目标 kubeconfig 的情况下删除整个 `$HOME/.kube/cache`。
+
+### 14.6 Pod 未 Ready
 
 ```bash
-# 进入工作目录
-cd $KUBESPRAY_DIR
-
-# 基本操作
-vagrant status          # 查看状态
-vagrant up             # 启动集群
-vagrant halt           # 停止集群
-vagrant destroy -f     # 销毁集群
-vagrant ssh k8s-1      # SSH连接主节点
+kubectl get pods -A -o wide
+kubectl describe pod -n <namespace> <pod>
+kubectl get events -n <namespace> --sort-by=.lastTimestamp | tail -50
+helm list -A
+kubectl get pvc -A
+kubectl get storageclass
 ```
 
-## 故障排除
-
-### 常见问题
-
-#### 1. 网络连接失败
+Prometheus 和 UPM Platform 依赖 `lvm-localpv`；同时检查节点标签、VG 和附加磁盘：
 
 ```bash
-# 检查网络和代理
-curl -I https://github.com
-echo $HTTP_PROXY
-
-# 配置代理（如需要）
-export HTTP_PROXY="http://proxy.company.com:8080"
-export HTTPS_PROXY="http://proxy.company.com:8080"
+kubectl get nodes --show-labels
+vagrant ssh k8s-2 -c 'sudo vgs; sudo pvs; lsblk'
 ```
 
-#### 2. libvirt 服务问题
+### 14.7 Cilium 和 LoadBalancer
 
 ```bash
-# 检查和启动服务
-sudo systemctl status libvirtd
-sudo systemctl start libvirtd
-sudo systemctl enable libvirtd
-
-# 启动默认网络
-sudo virsh net-start default
+kubectl -n kube-system get ds cilium
+kubectl -n kube-system get ds kube-proxy
+kubectl get ciliumloadbalancerippool
+kubectl get ciliuml2announcementpolicy
+kubectl -n kube-system exec ds/cilium -c cilium-agent -- \
+  cilium status --verbose
 ```
 
-#### 3. Vagrant 插件安装失败
+Cilium 标准模式应同时存在 Cilium 和 kube-proxy；replacement 模式下不应存在 kube-proxy DaemonSet。LoadBalancer 模式必须同时存在 IPPool 和 L2 Policy。
+
+如 Service 已分配 `EXTERNAL-IP` 但无法访问：
 
 ```bash
-# 安装开发依赖
-sudo dnf groupinstall "Development Tools" -y
-sudo dnf install libvirt-devel ruby-devel -y
-
-# 重新安装插件
-vagrant plugin uninstall vagrant-libvirt
-vagrant plugin install vagrant-libvirt
+cd "$REPO_ROOT/vagrant_setup_scripts/kubespray-upm"
+vagrant ssh k8s-1 -c 'ip -br addr'
+kubectl describe ciliumloadbalancerippool
+kubectl describe ciliuml2announcementpolicy
 ```
 
-#### 4. 桥接网络配置失败
+重点确认 Policy 的接口正则匹配节点 InternalIP 所在网卡，并检查 IPPool 是否出现 `PoolConflict`。只有从宿主机或 Bridge 局域网客户端实际访问成功，才能认为 LoadBalancer 可用。
+
+## 15. 完成验收
+
+Kubernetes 部署至少应满足：
 
 ```bash
-# 检查网络状态
-ip link show
-nmcli device status
-
-# 重启网络服务
-sudo systemctl restart NetworkManager
-sudo firewall-cmd --add-service=libvirt --permanent
-sudo firewall-cmd --reload
-
-# 重启libvirt网络
-sudo virsh net-destroy default
-sudo virsh net-start default
+cd "$REPO_ROOT/vagrant_setup_scripts/kubespray-upm"
+vagrant status
+kubectl get nodes -o wide
+kubectl get pods -A
+kubectl cluster-info
 ```
 
-#### 5. RHEL 系统特定问题
+根据所选 CNI 继续检查：
 
 ```bash
-# 检查订阅状态
-subscription-manager status
+# Calico
+kubectl -n kube-system get ds calico-node
+kubectl -n kube-system get ds kube-proxy
 
-# 重新注册和附加订阅
-sudo subscription-manager register --username=<用户名> --password=<密码>
-sudo subscription-manager attach --auto
+# Cilium
+kubectl -n kube-system get ds cilium
+kubectl -n kube-system exec ds/cilium -c cilium-agent -- \
+  cilium status --verbose
 
-# 启用必需仓库
-sudo subscription-manager repos --enable=rhel-9-for-x86_64-baseos-rpms
-sudo subscription-manager repos --enable=rhel-9-for-x86_64-appstream-rpms
-sudo subscription-manager repos --enable=codeready-builder-for-rhel-9-x86_64-rpms
-
-# 清理缓存
-sudo dnf clean all && sudo dnf makecache
+# Cilium LoadBalancer
+kubectl get ciliumloadbalancerippool
+kubectl get ciliuml2announcementpolicy
+kubectl get svc -A
 ```
 
-### 调试和日志
+如果安装扩展组件，还应检查：
 
 ```bash
-# 启用调试模式
-bash -x ./libvirt_kubespray_setup.sh
-
-# 查看日志
-tail -f /tmp/libvirt_kubespray_setup.log
-sudo journalctl -u libvirtd -f
-
-# 检查虚拟机状态
-cd $KUBESPRAY_DIR && vagrant status
-virsh list --all
-virsh net-list --all
+helm list -A
+kubectl get storageclass
+kubectl get pvc -A
+kubectl get pods -n openebs
+kubectl get pods -n prometheus
+kubectl get pods -n upm-system
+kubectl get svc -n prometheus
+kubectl get svc -n upm-system
 ```
 
-## 注意事项
-
-### 重要警告
-
-- **桥接网络风险**: 配置桥接网络可能导致SSH连接中断，建议本地执行
-- **资源要求**: CPU 12+核心，内存 32GB+，磁盘 200GB+
-- **RHEL 订阅**: RHEL 系统需要有效订阅和启用必需仓库
-- **权限要求**: 需要sudo权限，添加用户组后需重新登录
-- **安全配置**: 脚本会禁用防火墙和SELinux，生产环境需重新配置
-
-## 支持的配置
-
-### 默认集群配置
-
-- **Kubernetes**: v1.33.2
-- **操作系统**: Rocky Linux 9
-- **网络插件**: Calico
-- **节点配置**: 1个Master + 1个UPM Control + 3个Worker
-- **总资源**: 40 CPU核心, 74GB 内存
-- **配置文件**: `$KUBESPRAY_DIR/config.rb`
-
-## 相关文档
-
-### 基础组件
-
-- [Kubespray 官方文档](https://kubespray.io/)
-- [Vagrant 文档](https://www.vagrantup.com/docs)
-- [libvirt 文档](https://libvirt.org/docs.html)
-- [Rocky Linux 文档](https://docs.rockylinux.org/)
-- [脚本源码](https://github.com/upmio/kubespray-upm/blob/master/vagrant_setup_scripts/libvirt_kubespray_setup.sh)
-
-### 工具和实用程序
-
-- [kubectl 参考文档](https://kubernetes.io/docs/reference/kubectl/)
-- [NetworkManager 文档](https://networkmanager.dev/docs/)
-- [RHEL 订阅管理](https://access.redhat.com/documentation/en-us/red_hat_subscription_management/)
-- [containerd 配置文档](https://github.com/containerd/containerd/blob/main/docs/cri/config.md)
-
-### 扩展组件文档
-
-如需了解更多扩展组件（存储、数据库、监控等），请参考：
-
-- [UPM Setup 脚本文档](https://github.com/upmio/kubespray-upm/blob/master/vagrant_setup_scripts/README.md)
+只有 VM、Kubernetes 节点、系统 Pod、Helm release、存储和访问路径都通过验证，才能认为相应功能部署完成。

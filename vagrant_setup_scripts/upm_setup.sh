@@ -1660,13 +1660,13 @@ show_help() {
     echo -e "${WHITE}INSTALL OPTIONS:${NC}"
     echo "    --lvmlocalpv            Install OpenEBS LVM LocalPV for persistent storage"
     echo "    --prometheus            Install Prometheus monitoring stack"
-    echo "    --upm-engine            Install UPM Engine (requires LVM LocalPV)"
+    echo "    --upm-engine            Install UPM Engine"
     echo "    --upm-platform          Install UPM Platform (requires LVM LocalPV)"
     echo "    --config_nginx          Configure Nginx for UPM Platform access"
-    echo "    --all                   Install all components"
+    echo "    --all                   Install LVM LocalPV, Prometheus, UPM Engine and UPM Platform"
     echo
     echo -e "${WHITE}PREREQUISITES:${NC}"
-    echo "    • Kubernetes cluster (v1.28+) with kubectl configured"
+    echo "    • Reachable Kubernetes cluster with kubectl configured"
     echo "    • Root/sudo privileges for system operations"
     echo "    • Internet connectivity for downloads"
     echo "    • Minimum: 8+ CPU cores, 16GB+ RAM, 100GB+ storage"
@@ -1677,16 +1677,17 @@ show_help() {
     echo
     echo -e "${WHITE}COMPONENTS:${NC}"
     echo -e "    ${YELLOW}LVM LocalPV:${NC}     Persistent storage using LVM (namespace: openebs)"
-    echo -e "    ${YELLOW}Prometheus:${NC}      Monitoring stack (ports: 30090, 30091)"
+    echo -e "    ${YELLOW}Prometheus:${NC}      Monitoring stack (access with kubectl port-forward)"
     echo -e "    ${YELLOW}UPM Engine:${NC}      Core management engine (namespace: upm-system)"
     echo -e "    ${YELLOW}UPM Platform:${NC}    Web interface (port: 32010, user: super_root/Upm@2024!)"
     echo -e "    ${YELLOW}Nginx:${NC}           Reverse proxy configuration"
     echo
     echo -e "${WHITE}EXAMPLES:${NC}"
-    echo "    $0 --all                                    # Install all components"
-    echo "    $0 --lvmlocalpv --prometheus                # Storage + monitoring"
-    echo "    $0 -y --lvmlocalpv --upm-platform          # Platform (non-interactive)"
-    echo "    $0 --config_nginx                           # Configure Nginx only"
+    echo "    $0 --all                                    # Install the four Helm components"
+    echo "    $0 --lvmlocalpv                             # Install storage first"
+    echo "    $0 -y --prometheus                          # Install monitoring non-interactively"
+    echo "    $0 --config_nginx                           # Configure Nginx separately"
+    echo "    Note: exactly one install option is accepted; --all does not include Nginx."
     echo
 }
 

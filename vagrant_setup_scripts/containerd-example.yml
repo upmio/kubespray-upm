@@ -53,7 +53,7 @@
 #       header:
          # Example: Authorization: "Basic dXNlcm5hbWU6cGFzc3dvcmQ="
          # Explanation: "Basic" is the authentication type, "dXNlcm5hbWU6cGFzc3dvcmQ=" is Base64 encoded "admin:Harbor12345"
-#         Authorization: "Basic dXNlcm5hbWU6cGFzc3dvcmQ=" 
+#         Authorization: "Basic dXNlcm5hbWU6cGFzc3dvcmQ="
 
 #   - prefix: docker.io
 #     mirrors:
