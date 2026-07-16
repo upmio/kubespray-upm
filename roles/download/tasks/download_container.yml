@@ -76,6 +76,7 @@
       register: container_save_status
       run_once: true
       become: "{{ user_can_become_root | default(false) or not download_localhost }}"
+      environment: "{{ proxy_env if container_manager == 'containerd' else omit }}"
       when:
         - not image_is_cached
         - download_run_once
