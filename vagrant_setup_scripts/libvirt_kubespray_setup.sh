@@ -7,7 +7,7 @@
 #   on RHEL-based distributions (RHEL/Rocky/AlmaLinux 8/9).
 #
 # Requirements:
-#   - Hardware: CPU 12+ cores, Memory 32GB+, Storage 200GB+
+#   - Hardware: CPU 12+ cores, default 5-VM plan needs about 40GiB MemAvailable, Storage 200GB+
 #   - Access: sudo privileges, Internet connectivity
 #   - Virtualization: Intel VT-x/AMD-V enabled
 #
@@ -52,7 +52,7 @@ trap cleanup EXIT INT TERM
 #######################################
 
 # Script metadata
-readonly SCRIPT_VERSION="1.0"
+readonly SCRIPT_VERSION="1.1"
 readonly SCRIPT_NAME="Kubespray Libvirt Environment Setup Script"
 readonly SCRIPT_AUTHOR="Kubespray UPM Team"
 readonly SCRIPT_LICENSE="Apache License 2.0"
@@ -83,10 +83,12 @@ readonly PYENV_DEPENDENCIES="gcc make patch zlib-devel bzip2 bzip2-devel readlin
 declare HTTP_PROXY="${HTTP_PROXY:-${http_proxy:-""}}"
 declare HTTPS_PROXY="${HTTPS_PROXY:-${https_proxy:-$HTTP_PROXY}}"
 declare NO_PROXY="${NO_PROXY:-${no_proxy:-"localhost,127.0.0.1,192.168.0.0/16,10.0.0.0/8"}}"
-declare PIP_PROXY="${PIP_PROXY:-${HTTP_PROXY:-""}}"
-declare GIT_PROXY="${GIT_PROXY:-${HTTP_PROXY:-""}}"
+declare PIP_PROXY="${PIP_PROXY:-${HTTP_PROXY:-${HTTPS_PROXY:-""}}}"
+declare GIT_PROXY="${GIT_PROXY:-${HTTP_PROXY:-${HTTPS_PROXY:-""}}}"
 declare BRIDGE_INTERFACE=""
-declare NETWORK_TYPE="nat"
+declare BRIDGE_CONFIGURATION_REUSED=false
+declare NETWORK_TYPE=""
+declare NETWORK_TYPE_EXPLICIT=false
 
 # Kubernetes network configuration
 declare K8S_NETWORK_PLUGIN="calico"
@@ -103,9 +105,12 @@ declare CILIUM_L2_ANNOUNCEMENT_INTERFACE="eth1"
 declare CILIUM_L2_INTERFACE_EXPLICIT=false
 declare EXISTING_CLUSTER_CONFIGURATION_LOCKED=false
 readonly CILIUM_L2_ANNOUNCEMENT_POLICY_NAME="default-l2-announcement-policy"
+readonly KUBE_SERVICE_CIDR="10.233.0.0/18"
+readonly KUBE_POD_CIDR="10.233.64.0/18"
 
 # Global variable for prompt function results
 declare PROMPT_RESULT=""
+declare ALLOW_NON_TTY_INPUT="${LIBVIRT_KUBESPRAY_ALLOW_NON_TTY_INPUT:-false}"
 
 # Global variable for auto-confirm mode (-y parameter)
 declare AUTO_CONFIRM=false
@@ -121,12 +126,13 @@ declare G_VM_CPUS="6"
 declare G_VM_MEMORY="8192"
 declare G_KUBE_MASTER_VM_CPUS="4"
 declare G_KUBE_MASTER_VM_MEMORY="4096"
-declare G_UPM_CONTROL_PLANE_VM_CPUS="12"
-declare G_UPM_CONTROL_PLANE_VM_MEMORY="24576"
+declare G_UPM_CONTROL_PLANE_VM_CPUS="4"
+declare G_UPM_CONTROL_PLANE_VM_MEMORY="4096"
 declare G_KUBE_VERSION
 declare G_OS
 declare G_NETWORK_PLUGIN
 declare G_INSTANCE_NAME_PREFIX="k8s"
+declare NUM_INSTANCES_EXPLICIT=false
 declare G_WORKER_NODES
 declare G_SUBNET_SPLIT4="100"
 declare G_SUBNET
@@ -135,6 +141,8 @@ declare G_GATEWAY
 declare G_DNS_SERVER
 declare SYS_MEMORY_MB
 declare SYS_CPU_CORES
+declare PLANNED_TOTAL_CPUS="0"
+declare PLANNED_TOTAL_MEMORY_MB="0"
 
 # Log file configuration
 LOG_FILE="${SCRIPT_DIR}/libvirt_kubespray_setup.log"
@@ -295,6 +303,13 @@ prompt_yes_no() {
     done
 }
 
+require_interactive_input() {
+    local context="$1"
+    if [[ $ALLOW_NON_TTY_INPUT != "true" && ! -t 0 ]]; then
+        error_exit "$context requires an interactive terminal; rerun with a TTY or preselect all supported options"
+    fi
+}
+
 # Unified IP address validation function
 # Usage: validate_ip_address "ip_address"
 # Returns: 0 if valid, 1 if invalid
@@ -311,8 +326,9 @@ validate_ip_address() {
 
     local octet
     for octet in "${octets[@]}"; do
-        # Validate octet range (0-255) and ensure no leading zeros (except for "0")
-        if [[ $octet -lt 0 || $octet -gt 255 ]] || [[ $octet =~ ^0[0-9] ]]; then
+        # Validate the string before arithmetic so Bash never interprets values
+        # such as 008 as invalid octal numbers.
+        if [[ ! $octet =~ ^(0|[1-9][0-9]{0,2})$ ]] || ((10#$octet > 255)); then
             return 1
         fi
     done
@@ -483,6 +499,89 @@ ipv4_to_integer() {
     printf '%u\n' "$((octets[0] * 16777216 + octets[1] * 65536 + octets[2] * 256 + octets[3]))"
 }
 
+ipv4_cidr_bounds() {
+    local cidr="$1"
+    local address="${cidr%/*}"
+    local prefix="${cidr#*/}"
+    validate_ip_address "$address" || return 1
+    [[ $prefix =~ ^([0-9]|[12][0-9]|3[0-2])$ ]] || return 1
+
+    local address_value
+    local netmask_value
+    local network_value
+    local broadcast_value
+    address_value=$(ipv4_to_integer "$address")
+    if [[ $prefix -eq 0 ]]; then
+        netmask_value=0
+    else
+        netmask_value=$(((0xFFFFFFFF << (32 - prefix)) & 0xFFFFFFFF))
+    fi
+    network_value=$((address_value & netmask_value))
+    broadcast_value=$((network_value | (0xFFFFFFFF ^ netmask_value)))
+    printf '%u %u\n' "$network_value" "$broadcast_value"
+}
+
+ipv4_range_overlaps_cidr() {
+    local start_value="$1"
+    local stop_value="$2"
+    local cidr="$3"
+    local cidr_start
+    local cidr_stop
+    read -r cidr_start cidr_stop < <(ipv4_cidr_bounds "$cidr") || return 1
+    [[ $start_value -le $cidr_stop && $stop_value -ge $cidr_start ]]
+}
+
+validate_bridge_vm_allocation() {
+    local allocation_base="$1"
+    local netmask="$2"
+    local base_value
+    local netmask_value
+    local network_value
+    local broadcast_value
+    local first_vm_value
+    local last_vm_value
+    base_value=$(ipv4_to_integer "$allocation_base")
+    netmask_value=$(ipv4_to_integer "$netmask")
+    network_value=$((base_value & netmask_value))
+    broadcast_value=$((network_value | (0xFFFFFFFF ^ netmask_value)))
+    first_vm_value=$((base_value + 1))
+    last_vm_value=$((base_value + G_NUM_INSTANCES))
+
+    if [[ $first_vm_value -le $network_value || $last_vm_value -ge $broadcast_value ]]; then
+        log_error "VM address allocation crosses the selected subnet or uses its network/broadcast address"
+        return 1
+    fi
+}
+
+validate_bridge_gateway() {
+    local gateway="$1"
+    local allocation_base="$2"
+    local netmask="$3"
+    local gateway_value
+    local base_value
+    local netmask_value
+    local network_value
+    local broadcast_value
+    local first_vm_value
+    local last_vm_value
+    gateway_value=$(ipv4_to_integer "$gateway")
+    base_value=$(ipv4_to_integer "$allocation_base")
+    netmask_value=$(ipv4_to_integer "$netmask")
+    network_value=$((base_value & netmask_value))
+    broadcast_value=$((network_value | (0xFFFFFFFF ^ netmask_value)))
+    first_vm_value=$((base_value + 1))
+    last_vm_value=$((base_value + G_NUM_INSTANCES))
+
+    if [[ $gateway_value -le $network_value || $gateway_value -ge $broadcast_value ]]; then
+        log_error "Gateway must be a host address in the same subnet as the VM allocation"
+        return 1
+    fi
+    if [[ $gateway_value -ge $first_vm_value && $gateway_value -le $last_vm_value ]]; then
+        log_error "Gateway overlaps the VM address range"
+        return 1
+    fi
+}
+
 # Load the persisted CNI settings before regenerating config.rb. This prevents a
 # routine rerun (especially with -y) from silently changing an existing Cilium
 # cluster back to the default Calico configuration.
@@ -496,19 +595,96 @@ find_existing_libvirt_cluster_vms() {
     printf '%s\n' "$vm_names" | grep -F "kubespray" | grep -F "$instance_name_prefix" | grep -E '[0-9]+$'
 }
 
+networkmanager_bridge_connection_matches() {
+    command -v nmcli >/dev/null 2>&1 || return 1
+    nmcli connection show "$BRIDGE_NAME" >/dev/null 2>&1 || return 1
+
+    local bridge_type
+    local bridge_profile_interface
+    local ipv4_method
+    local ipv6_method
+    bridge_type=$(nmcli -g connection.type connection show "$BRIDGE_NAME" 2>/dev/null)
+    bridge_profile_interface=$(nmcli -g connection.interface-name connection show "$BRIDGE_NAME" 2>/dev/null)
+    ipv4_method=$(nmcli -g ipv4.method connection show "$BRIDGE_NAME" 2>/dev/null)
+    ipv6_method=$(nmcli -g ipv6.method connection show "$BRIDGE_NAME" 2>/dev/null)
+
+    [[ $bridge_type == "bridge" ]] || return 1
+    [[ $bridge_profile_interface == "$BRIDGE_NAME" ]] || return 1
+    [[ $ipv4_method == "disabled" ]] || return 1
+    [[ $ipv6_method == "disabled" ]]
+}
+
+networkmanager_bridge_profile_matches() {
+    local interface_name="$1"
+    command -v nmcli >/dev/null 2>&1 || return 1
+
+    local slave_connection="bridge-slave-$interface_name"
+    nmcli connection show "$slave_connection" >/dev/null 2>&1 || return 1
+    networkmanager_bridge_connection_matches || return 1
+
+    local profile_interface
+    local profile_master
+    local profile_slave_type
+    local bridge_profile_uuid
+    profile_interface=$(nmcli -g connection.interface-name connection show "$slave_connection" 2>/dev/null)
+    profile_master=$(nmcli -g connection.master connection show "$slave_connection" 2>/dev/null)
+    profile_slave_type=$(nmcli -g connection.slave-type connection show "$slave_connection" 2>/dev/null)
+    bridge_profile_uuid=$(nmcli -g connection.uuid connection show "$BRIDGE_NAME" 2>/dev/null)
+
+    [[ $profile_interface == "$interface_name" ]] || return 1
+    [[ $profile_master == "$BRIDGE_NAME" || $profile_master == "$bridge_profile_uuid" ]] || return 1
+    [[ $profile_slave_type == "bridge" ]]
+}
+
+detect_active_bridge_host_interface() {
+    ip link show "$BRIDGE_NAME" 2>/dev/null | grep -q "state UP" || return 1
+
+    local live_interfaces
+    live_interfaces=$(ip -o link show master "$BRIDGE_NAME" 2>/dev/null |
+        awk -F': ' '{print $2}' | cut -d'@' -f1)
+
+    local candidates=""
+    local interface_name
+    while IFS= read -r interface_name; do
+        [[ -n $interface_name ]] || continue
+        if networkmanager_bridge_profile_matches "$interface_name"; then
+            candidates+="${interface_name}"$'\n'
+        fi
+    done <<<"$live_interfaces"
+
+    [[ $(grep -c . <<<"$candidates") -eq 1 ]] || return 1
+    head -1 <<<"$candidates"
+}
+
+bridge_interface_matches_active_configuration() {
+    local interface_name="$1"
+    local active_interface
+    active_interface=$(detect_active_bridge_host_interface) || return 1
+    [[ $active_interface == "$interface_name" ]]
+}
+
+persist_bridge_host_interface_migration() {
+    local interface_name="$1"
+    local temp_file
+    temp_file=$(mktemp "${VAGRANT_CONF_FILE}.migration.XXXXXX") || return 1
+
+    if ! cp -p "$VAGRANT_CONF_FILE" "$temp_file" ||
+        ! printf '\n$bridge_host_interface = "%s"\n' "$interface_name" >>"$temp_file" ||
+        ! mv "$temp_file" "$VAGRANT_CONF_FILE"; then
+        rm -f "$temp_file"
+        return 1
+    fi
+}
+
 load_existing_kubernetes_network_configuration() {
     local persisted_instance_name_prefix=""
     if [[ -f $VAGRANT_CONF_FILE ]]; then
         persisted_instance_name_prefix=$(sed -nE 's/^\$instance_name_prefix[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' "$VAGRANT_CONF_FILE" | head -1)
     fi
 
-    local machines_dir="${KUBESPRAY_DIR}/.vagrant/machines"
     local has_existing_vagrant_machines=false
     local existing_libvirt_vms=""
     local libvirt_scan_status=0
-    if [[ -d $machines_dir && -n $(find "$machines_dir" -mindepth 1 -maxdepth 1 -type d -print -quit 2>/dev/null) ]]; then
-        has_existing_vagrant_machines=true
-    fi
     if existing_libvirt_vms=$(find_existing_libvirt_cluster_vms "$persisted_instance_name_prefix"); then
         log_info "Detected existing libvirt VMs before configuration update: $(tr '\n' ' ' <<<"$existing_libvirt_vms")"
         has_existing_vagrant_machines=true
@@ -529,17 +705,140 @@ load_existing_kubernetes_network_configuration() {
         return 0
     fi
 
-    local existing_network_plugin
-    existing_network_plugin=$(sed -nE 's/^\$network_plugin[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' "$VAGRANT_CONF_FILE" | head -1)
-    if [[ $existing_network_plugin != "calico" && $existing_network_plugin != "cilium" ]]; then
-        if [[ $EXISTING_CLUSTER_CONFIGURATION_LOCKED == "true" ]]; then
-            error_exit "Existing libvirt VMs were found but config.rb has no supported CNI setting; refuse to overwrite unknown cluster networking"
-        fi
+    # A config.rb without matching libvirt domains is treated as a stale or
+    # incomplete deployment. It must not silently pre-fill a new guided run.
+    if [[ $EXISTING_CLUSTER_CONFIGURATION_LOCKED != "true" ]]; then
+        log_info "Ignoring persisted network choices because no matching libvirt VMs were found"
         return 0
     fi
 
-    if [[ $NETWORK_PLUGIN_EXPLICIT == "true" && $K8S_NETWORK_PLUGIN != "$existing_network_plugin" &&
-        $has_existing_vagrant_machines == "true" ]]; then
+    local existing_num_instances
+    existing_num_instances=$(sed -nE 's/^\$num_instances[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' "$VAGRANT_CONF_FILE" | head -1)
+    [[ $existing_num_instances =~ ^[0-9]+$ ]] || error_exit "Existing cluster config.rb has no valid VM count"
+    if [[ $NUM_INSTANCES_EXPLICIT == "true" && $G_NUM_INSTANCES != "$existing_num_instances" ]]; then
+        error_exit "Changing an existing cluster VM count from $existing_num_instances to $G_NUM_INSTANCES is unsupported by this workflow"
+    fi
+    if [[ $NUM_INSTANCES_EXPLICIT != "true" ]]; then
+        G_NUM_INSTANCES="$existing_num_instances"
+        log_info "Reusing VM count from existing config.rb: $G_NUM_INSTANCES"
+    fi
+
+    local existing_kube_master_instances
+    local existing_upm_ctl_instances
+    local existing_vm_cpus
+    local existing_vm_memory
+    local existing_kube_master_vm_cpus
+    local existing_kube_master_vm_memory
+    local existing_upm_vm_cpus
+    local existing_upm_vm_memory
+    existing_kube_master_instances=$(sed -nE 's/^\$kube_master_instances[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' "$VAGRANT_CONF_FILE" | head -1)
+    existing_upm_ctl_instances=$(sed -nE 's/^\$upm_ctl_instances[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' "$VAGRANT_CONF_FILE" | head -1)
+    existing_vm_cpus=$(sed -nE 's/^\$vm_cpus[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' "$VAGRANT_CONF_FILE" | head -1)
+    existing_vm_memory=$(sed -nE 's/^\$vm_memory[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' "$VAGRANT_CONF_FILE" | head -1)
+    existing_kube_master_vm_cpus=$(sed -nE 's/^\$kube_master_vm_cpus[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' "$VAGRANT_CONF_FILE" | head -1)
+    existing_kube_master_vm_memory=$(sed -nE 's/^\$kube_master_vm_memory[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' "$VAGRANT_CONF_FILE" | head -1)
+    existing_upm_vm_cpus=$(sed -nE 's/^\$upm_control_plane_vm_cpus[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' "$VAGRANT_CONF_FILE" | head -1)
+    existing_upm_vm_memory=$(sed -nE 's/^\$upm_control_plane_vm_memory[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' "$VAGRANT_CONF_FILE" | head -1)
+
+    local existing_resource_value
+    for existing_resource_value in \
+        "$existing_kube_master_instances" "$existing_upm_ctl_instances" \
+        "$existing_vm_cpus" "$existing_vm_memory" \
+        "$existing_kube_master_vm_cpus" "$existing_kube_master_vm_memory" \
+        "$existing_upm_vm_cpus" "$existing_upm_vm_memory"; do
+        [[ $existing_resource_value =~ ^[1-9][0-9]*$ ]] ||
+            error_exit "Existing cluster config.rb has missing or invalid VM resource settings"
+    done
+
+    G_KUBE_MASTER_INSTANCES="$existing_kube_master_instances"
+    G_UPM_CTL_INSTANCES="$existing_upm_ctl_instances"
+    G_VM_CPUS="$existing_vm_cpus"
+    G_VM_MEMORY="$existing_vm_memory"
+    G_KUBE_MASTER_VM_CPUS="$existing_kube_master_vm_cpus"
+    G_KUBE_MASTER_VM_MEMORY="$existing_kube_master_vm_memory"
+    G_UPM_CONTROL_PLANE_VM_CPUS="$existing_upm_vm_cpus"
+    G_UPM_CONTROL_PLANE_VM_MEMORY="$existing_upm_vm_memory"
+    log_info "Reusing installation-time VM resources from existing config.rb"
+
+    local existing_vm_network
+    existing_vm_network=$(sed -nE 's/^\$vm_network[[:space:]]*=[[:space:]]*"(nat|bridge)".*/\1/p' "$VAGRANT_CONF_FILE" | head -1)
+    if [[ $existing_vm_network != "nat" && $existing_vm_network != "bridge" ]]; then
+        error_exit "Existing libvirt VMs were found but config.rb has no supported VM network mode; refuse to overwrite unknown networking"
+    else
+        if [[ $NETWORK_TYPE_EXPLICIT == "true" && $NETWORK_TYPE != "$existing_vm_network" ]]; then
+            error_exit "Changing an existing cluster VM network from $existing_vm_network to $NETWORK_TYPE is unsupported; destroy and rebuild the cluster"
+        fi
+
+        if [[ $NETWORK_TYPE_EXPLICIT != "true" ]]; then
+            NETWORK_TYPE="$existing_vm_network"
+            NETWORK_TYPE_EXPLICIT=true
+            log_info "Reusing VM network mode from existing config.rb: $NETWORK_TYPE"
+        fi
+    fi
+
+    if [[ $existing_vm_network == "bridge" ]]; then
+        local existing_bridge_host_interface
+        local existing_subnet
+        local existing_netmask
+        local existing_gateway
+        local existing_dns_server
+        local existing_subnet_split4
+        local bridge_host_interface_migration_required=false
+        existing_bridge_host_interface=$(sed -nE 's/^\$bridge_host_interface[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' "$VAGRANT_CONF_FILE" | head -1)
+        existing_subnet=$(sed -nE 's/^\$subnet[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' "$VAGRANT_CONF_FILE" | head -1)
+        existing_netmask=$(sed -nE 's/^\$netmask[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' "$VAGRANT_CONF_FILE" | head -1)
+        existing_gateway=$(sed -nE 's/^\$gateway[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' "$VAGRANT_CONF_FILE" | head -1)
+        existing_dns_server=$(sed -nE 's/^\$dns_server[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' "$VAGRANT_CONF_FILE" | head -1)
+        existing_subnet_split4=$(sed -nE 's/^\$subnet_split4[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' "$VAGRANT_CONF_FILE" | head -1)
+
+        if [[ -z $existing_bridge_host_interface ]]; then
+            existing_bridge_host_interface=$(detect_active_bridge_host_interface) ||
+                error_exit "Cannot uniquely determine the active host interface attached to $BRIDGE_NAME; refuse to modify an existing Bridge cluster"
+            bridge_host_interface_migration_required=true
+            log_info "Detected host interface for legacy Bridge configuration: $existing_bridge_host_interface"
+        fi
+
+        if [[ -z $existing_subnet || -z $existing_netmask || -z $existing_gateway ||
+            -z $existing_dns_server || -z $existing_subnet_split4 ]]; then
+            error_exit "Existing Bridge cluster has incomplete network settings in config.rb; refuse to overwrite unknown networking"
+        fi
+        if ! bridge_interface_matches_active_configuration "$existing_bridge_host_interface"; then
+            error_exit "Existing Bridge configuration does not match the active $BRIDGE_NAME interface; repair the host bridge before rerunning"
+        fi
+        if [[ $bridge_host_interface_migration_required == "true" ]]; then
+            persist_bridge_host_interface_migration "$existing_bridge_host_interface" ||
+                error_exit "Failed to persist detected Bridge host interface in $VAGRANT_CONF_FILE"
+            log_info "Migrated existing Bridge configuration with host interface: $existing_bridge_host_interface"
+        fi
+
+        BRIDGE_INTERFACE="$existing_bridge_host_interface"
+        G_SUBNET="$existing_subnet"
+        G_NETMASK="$existing_netmask"
+        G_GATEWAY="$existing_gateway"
+        G_DNS_SERVER="$existing_dns_server"
+        G_SUBNET_SPLIT4="$existing_subnet_split4"
+        BRIDGE_NETWORK_CONFIG="$BRIDGE_INTERFACE|$G_SUBNET|$G_NETMASK|$G_GATEWAY|$G_DNS_SERVER|$G_SUBNET_SPLIT4"
+        BRIDGE_CONFIGURATION_REUSED=true
+        log_info "Reusing locked bridge configuration from existing config.rb: $BRIDGE_NETWORK_CONFIG"
+    elif [[ $existing_vm_network == "nat" ]]; then
+        local existing_nat_dns_server
+        existing_nat_dns_server=$(sed -nE 's/^\$dns_server[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' "$VAGRANT_CONF_FILE" | head -1)
+        if validate_ip_address "$existing_nat_dns_server"; then
+            DNS_SERVER="$existing_nat_dns_server"
+            G_DNS_SERVER="$existing_nat_dns_server"
+            log_info "Reusing locked NAT DNS configuration from existing config.rb: $DNS_SERVER"
+        else
+            error_exit "Existing NAT cluster has no valid DNS server in config.rb; refuse to overwrite unknown networking"
+        fi
+    fi
+
+    local existing_network_plugin
+    existing_network_plugin=$(sed -nE 's/^\$network_plugin[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' "$VAGRANT_CONF_FILE" | head -1)
+    if [[ $existing_network_plugin != "calico" && $existing_network_plugin != "cilium" ]]; then
+        error_exit "Existing libvirt VMs were found but config.rb has no supported CNI setting; refuse to overwrite unknown cluster networking"
+    fi
+
+    if [[ $NETWORK_PLUGIN_EXPLICIT == "true" && $K8S_NETWORK_PLUGIN != "$existing_network_plugin" ]]; then
         error_exit "Changing an existing cluster CNI from $existing_network_plugin to $K8S_NETWORK_PLUGIN is unsupported; destroy and rebuild the cluster"
     fi
 
@@ -607,6 +906,50 @@ load_existing_kubernetes_network_configuration() {
     if [[ $CILIUM_L2_INTERFACE_EXPLICIT != "true" ]]; then
         CILIUM_L2_ANNOUNCEMENT_INTERFACE="$existing_l2_interface"
     fi
+}
+
+configure_vm_networking_interactive() {
+    if [[ -n $NETWORK_TYPE ]]; then
+        log_info "VM network mode selected: $NETWORK_TYPE"
+        return 0
+    fi
+
+    if [[ $AUTO_CONFIRM == "true" ]]; then
+        NETWORK_TYPE="nat"
+        log_info "No VM network mode was preselected; using safe automatic default: nat"
+        return 0
+    fi
+
+    require_interactive_input "VM network selection"
+
+    echo -e "\n${YELLOW}🌐 VM Network Selection${NC}"
+    echo -e "   ${GREEN}1.${NC} NAT ${CYAN}(recommended for local testing)${NC}"
+    echo -e "      Uses the isolated 192.168.200.0/24 libvirt network."
+    echo -e "      Cilium LoadBalancer addresses are normally reachable only from the host/libvirt network."
+    echo -e "   ${GREEN}2.${NC} Bridge ${YELLOW}(physical Layer-2 access)${NC}"
+    echo -e "      Places VM addresses on a physical network and is suitable for LAN-accessible LoadBalancer services."
+    echo -e "      This can change host networking; use a console or out-of-band access when possible."
+
+    local choice
+    while true; do
+        read -r -p "Select VM network mode [1]: " choice
+        choice="${choice:-1}"
+        case "$choice" in
+        1)
+            NETWORK_TYPE="nat"
+            break
+            ;;
+        2)
+            NETWORK_TYPE="bridge"
+            break
+            ;;
+        *)
+            echo -e "${RED}❌ Please select 1 or 2${NC}"
+            ;;
+        esac
+    done
+
+    log_info "VM network mode selected interactively: $NETWORK_TYPE"
 }
 
 parse_cilium_load_balancer_range() {
@@ -684,11 +1027,26 @@ validate_cilium_load_balancer_configuration() {
         return 1
     fi
 
-    local vm_start_ip="${G_SUBNET}.$((G_SUBNET_SPLIT4 + 1))"
-    local vm_stop_ip="${G_SUBNET}.$((G_SUBNET_SPLIT4 + G_NUM_INSTANCES))"
+    if ipv4_range_overlaps_cidr "$start_value" "$stop_value" "$KUBE_SERVICE_CIDR"; then
+        log_error "Cilium LoadBalancer range overlaps the Kubernetes Service CIDR $KUBE_SERVICE_CIDR"
+        return 1
+    fi
+    if ipv4_range_overlaps_cidr "$start_value" "$stop_value" "$KUBE_POD_CIDR"; then
+        log_error "Cilium LoadBalancer range overlaps the Kubernetes Pod CIDR $KUBE_POD_CIDR"
+        return 1
+    fi
+
+    local vm_start_ip
+    local vm_stop_ip
+    local gateway_ip
     if [[ $NETWORK_TYPE == "nat" ]]; then
         vm_start_ip="192.168.200.$((G_SUBNET_SPLIT4 + 1))"
         vm_stop_ip="192.168.200.$((G_SUBNET_SPLIT4 + G_NUM_INSTANCES))"
+        gateway_ip="192.168.200.1"
+    else
+        vm_start_ip="${G_SUBNET}.$((G_SUBNET_SPLIT4 + 1))"
+        vm_stop_ip="${G_SUBNET}.$((G_SUBNET_SPLIT4 + G_NUM_INSTANCES))"
+        gateway_ip="$G_GATEWAY"
     fi
     local vm_start_value
     local vm_stop_value
@@ -699,10 +1057,6 @@ validate_cilium_load_balancer_configuration() {
         return 1
     fi
 
-    local gateway_ip="$G_GATEWAY"
-    if [[ $NETWORK_TYPE == "nat" ]]; then
-        gateway_ip="192.168.200.1"
-    fi
     if [[ -n $gateway_ip ]]; then
         local gateway_value
         gateway_value=$(ipv4_to_integer "$gateway_ip")
@@ -722,9 +1076,12 @@ validate_cilium_load_balancer_configuration() {
 
 configure_kubernetes_networking_interactive() {
     if [[ $NETWORK_PLUGIN_EXPLICIT != "true" && $AUTO_CONFIRM != "true" ]]; then
+        require_interactive_input "Kubernetes CNI selection"
         echo -e "\n${YELLOW}☸️  Kubernetes CNI Selection${NC}"
-        echo -e "   ${GREEN}1.${NC} Calico (default)"
-        echo -e "   ${GREEN}2.${NC} Cilium"
+        echo -e "   ${GREEN}1.${NC} Calico ${CYAN}(default, keeps kube-proxy)${NC}"
+        echo -e "      Recommended when you want the conventional Kubespray networking model."
+        echo -e "   ${GREEN}2.${NC} Cilium ${CYAN}(eBPF networking and optional LoadBalancer)${NC}"
+        echo -e "      Can keep kube-proxy or replace it, and can provide LB IPAM with L2 announcements."
         local choice
         while true; do
             read -r -p "Select Kubernetes network plugin [1]: " choice
@@ -743,6 +1100,9 @@ configure_kubernetes_networking_interactive() {
                 ;;
             esac
         done
+    elif [[ $NETWORK_PLUGIN_EXPLICIT != "true" ]]; then
+        K8S_NETWORK_PLUGIN="calico"
+        log_info "No Kubernetes CNI was preselected; using safe automatic default: calico"
     fi
 
     if [[ $K8S_NETWORK_PLUGIN == "calico" ]]; then
@@ -767,12 +1127,20 @@ configure_kubernetes_networking_interactive() {
     fi
 
     if [[ $CILIUM_KUBE_PROXY_REPLACEMENT_EXPLICIT != "true" && $AUTO_CONFIRM != "true" ]]; then
+        require_interactive_input "Cilium kube-proxy replacement selection"
+        echo -e "\n${WHITE}Cilium service forwarding mode:${NC}"
+        echo -e "   Replacing kube-proxy uses Cilium eBPF for Kubernetes Service handling."
+        echo -e "   Keep the default 'no' unless kube-proxy-free operation is an installation requirement."
         if prompt_yes_no "Use Cilium to replace kube-proxy?" "no"; then
             CILIUM_KUBE_PROXY_REPLACEMENT=true
         fi
     fi
 
     if [[ $CILIUM_LOAD_BALANCER_EXPLICIT != "true" && $AUTO_CONFIRM != "true" ]]; then
+        require_interactive_input "Cilium LoadBalancer selection"
+        echo -e "\n${WHITE}Service LoadBalancer mode:${NC}"
+        echo -e "   Cilium LB IPAM assigns addresses to LoadBalancer Services."
+        echo -e "   L2 announcements require addresses reserved from the node Layer-2 subnet."
         if prompt_yes_no "Enable Cilium LoadBalancer IPAM and L2 announcements?" "no"; then
             CILIUM_LOAD_BALANCER_ENABLED=true
         fi
@@ -796,7 +1164,10 @@ configure_kubernetes_networking_interactive() {
                 error_exit "--cilium-load-balancer with -y requires --cilium-lb-range START_IP-STOP_IP"
             fi
 
+            require_interactive_input "Cilium LoadBalancer address range"
             local range_input
+            echo -e "${CYAN}ℹ️  The pool must be in the node subnet and must not overlap VM addresses, the gateway,"
+            echo -e "   DHCP ranges, Pod/Service CIDRs, or addresses already used by other devices.${NC}"
             while true; do
                 if [[ -n $default_range ]]; then
                     read -r -p "Cilium LoadBalancer IP range [$default_range]: " range_input
@@ -811,12 +1182,15 @@ configure_kubernetes_networking_interactive() {
         fi
 
         if [[ $CILIUM_L2_INTERFACE_EXPLICIT != "true" && $AUTO_CONFIRM != "true" ]]; then
+            require_interactive_input "Cilium LoadBalancer L2 interface"
             local interface_input
             read -r -p "Guest interface used for LoadBalancer L2 announcements [eth1]: " interface_input
             CILIUM_L2_ANNOUNCEMENT_INTERFACE="${interface_input:-eth1}"
         fi
 
         validate_cilium_load_balancer_configuration || error_exit "Invalid Cilium LoadBalancer configuration"
+    elif [[ $CILIUM_L2_INTERFACE_EXPLICIT == "true" ]]; then
+        error_exit "--cilium-lb-interface is only valid when Cilium LoadBalancer is enabled"
     fi
 
     log_info "Kubernetes network plugin selected: Cilium"
@@ -936,6 +1310,7 @@ select_network_interface() {
 # Bridge network configuration structure
 # Returns: "bridge_interface|subnet|netmask|gateway|dns_server|subnet_split4"
 configure_bridge_network_interactive() {
+    require_interactive_input "Bridge network configuration"
     log_info "Starting interactive bridge network configuration..."
     echo
     echo -e "${YELLOW}🌐 Bridge Network Configuration${NC}"
@@ -987,6 +1362,7 @@ configure_bridge_network_interactive() {
     local starting_ip_cidr
     local starting_ip
     local cidr_prefix
+    local netmask
 
     while true; do
         read -r -p "$(echo -e "${WHITE}Enter starting IP for VM allocation with CIDR (e.g., 192.168.1.90/24): ${NC}")" starting_ip_cidr
@@ -1000,7 +1376,20 @@ configure_bridge_network_interactive() {
             if validate_vm_ip_range "$starting_ip"; then
                 # Validate CIDR prefix (8-30 for practical use)
                 if [[ $cidr_prefix -ge 8 && $cidr_prefix -le 30 ]]; then
-                    break
+                    local netmasks=(
+                        [8]="255.0.0.0" [9]="255.128.0.0" [10]="255.192.0.0" [11]="255.224.0.0"
+                        [12]="255.240.0.0" [13]="255.248.0.0" [14]="255.252.0.0" [15]="255.254.0.0"
+                        [16]="255.255.0.0" [17]="255.255.128.0" [18]="255.255.192.0" [19]="255.255.224.0"
+                        [20]="255.255.240.0" [21]="255.255.248.0" [22]="255.255.252.0" [23]="255.255.254.0"
+                        [24]="255.255.255.0" [25]="255.255.255.128" [26]="255.255.255.192" [27]="255.255.255.224"
+                        [28]="255.255.255.240" [29]="255.255.255.248" [30]="255.255.255.252"
+                    )
+                    netmask="${netmasks[$cidr_prefix]}"
+                    if validate_bridge_vm_allocation "$starting_ip" "$netmask"; then
+                        break
+                    fi
+                    echo -e "${RED}The resulting $G_NUM_INSTANCES VM addresses do not fit in $starting_ip_cidr.${NC}"
+                    echo -e "${YELLOW}Choose a larger subnet or move the allocation base away from the broadcast address.${NC}"
                 else
                     echo -e "${RED}Invalid CIDR prefix. Please use a value between 8 and 30.${NC}"
                 fi
@@ -1018,32 +1407,24 @@ configure_bridge_network_interactive() {
     local subnet="${octets[0]}.${octets[1]}.${octets[2]}"
     local subnet_split4="${octets[3]}"
 
-    # Convert CIDR prefix to netmask using lookup table
-    local netmask
-    if [[ $cidr_prefix -ge 8 && $cidr_prefix -le 30 ]]; then
-        local netmasks=(
-            [8]="255.0.0.0" [9]="255.128.0.0" [10]="255.192.0.0" [11]="255.224.0.0"
-            [12]="255.240.0.0" [13]="255.248.0.0" [14]="255.252.0.0" [15]="255.254.0.0"
-            [16]="255.255.0.0" [17]="255.255.128.0" [18]="255.255.192.0" [19]="255.255.224.0"
-            [20]="255.255.240.0" [21]="255.255.248.0" [22]="255.255.252.0" [23]="255.255.254.0"
-            [24]="255.255.255.0" [25]="255.255.255.128" [26]="255.255.255.192" [27]="255.255.255.224"
-            [28]="255.255.255.240" [29]="255.255.255.248" [30]="255.255.255.252"
-        )
-        netmask="${netmasks[$cidr_prefix]}"
-    else
-        log_error "Invalid CIDR prefix: $cidr_prefix. Must be between /8 and /30."
-        return 1
-    fi
-
-    echo -e "${GREEN}✅ Parsed network configuration:${NC}"
-    echo -e "   ${GREEN}•${NC} Starting IP: ${CYAN}$starting_ip${NC}"
-    echo -e "   ${GREEN}•${NC} Subnet: ${CYAN}$subnet.0${NC}"
+    local first_vm_ip="${subnet}.$((subnet_split4 + 1))"
+    local last_vm_ip="${subnet}.$((subnet_split4 + G_NUM_INSTANCES))"
+    echo -e "${GREEN}✅ Parsed VM address allocation:${NC}"
+    echo -e "   ${GREEN}•${NC} Allocation base: ${CYAN}$starting_ip/$cidr_prefix${NC}"
+    echo -e "   ${GREEN}•${NC} Actual VM range: ${CYAN}$first_vm_ip - $last_vm_ip${NC}"
     echo -e "   ${GREEN}•${NC} Netmask: ${CYAN}$netmask${NC}"
     echo -e "   ${GREEN}•${NC} CIDR: ${CYAN}/$cidr_prefix${NC}\n"
 
     # Step 3: Get gateway using unified function
-    prompt_ip_input "Enter gateway IP (e.g., $subnet.1)"
-    local gateway="$PROMPT_RESULT"
+    local gateway
+    while true; do
+        prompt_ip_input "Enter gateway IP (e.g., $subnet.1)"
+        gateway="$PROMPT_RESULT"
+        if validate_bridge_gateway "$gateway" "$starting_ip" "$netmask"; then
+            break
+        fi
+        echo -e "${RED}Gateway must be in the VM subnet and outside $first_vm_ip - $last_vm_ip.${NC}"
+    done
 
     # Step 4: Get DNS server using unified function
     prompt_ip_input "Enter DNS server IP (e.g., 8.8.8.8 or $gateway)"
@@ -1388,11 +1769,11 @@ check_system_requirements() {
         log_info "Disk space check passed: $((available_disk / 1024 / 1024))GB available"
     fi
 
-    # Check available memory (at least 32GB recommended)
+    # Check available memory for the default 5-VM plan (32GiB guests plus 20% host reserve)
     SYS_MEMORY_MB=$(free -m | awk 'NR==2{print $7}')
-    local required_memory=32768 # 32GB in MB
+    local required_memory=40960 # 40GiB MemAvailable in MiB
     if [ "$SYS_MEMORY_MB" -lt "$required_memory" ]; then
-        log_warn "Insufficient memory. At least 32GB recommended, but only ${SYS_MEMORY_MB}MB available. Performance may be affected."
+        log_warn "Low available memory. The default 5-VM plan needs about 40GiB MemAvailable, but only ${SYS_MEMORY_MB}MiB is available. The cluster resource capacity check may reject this plan."
     else
         log_info "Memory check passed: ${SYS_MEMORY_MB}MB available"
     fi
@@ -1573,6 +1954,8 @@ validate_network_and_proxy() {
         local proxy_set=""
         if [ -n "$HTTP_PROXY" ]; then
             proxy_set="$HTTP_PROXY"
+        elif [ -n "$HTTPS_PROXY" ]; then
+            proxy_set="$HTTPS_PROXY"
         fi
 
         for url in "${test_urls[@]}"; do
@@ -1584,7 +1967,7 @@ validate_network_and_proxy() {
         done
     fi
 
-    if [ -n "$HTTP_PROXY" ]; then
+    if [[ -n $HTTP_PROXY || -n $HTTPS_PROXY ]]; then
         export http_proxy="$HTTP_PROXY"
         export https_proxy="$HTTPS_PROXY"
         export no_proxy="$NO_PROXY"
@@ -1692,6 +2075,8 @@ create_bridge_connections() {
             error_exit "Failed to disable IP on bridge $BRIDGE_NAME"
         safe_sudo nmcli con mod "$BRIDGE_NAME" bridge.stp no ||
             log_warn "Failed to disable STP on bridge $BRIDGE_NAME"
+    elif ! networkmanager_bridge_connection_matches; then
+        error_exit "Existing NetworkManager connection '$BRIDGE_NAME' is not the required IP-disabled bridge; refuse to activate it"
     fi
 
     # Create bridge slave connection if it doesn't exist
@@ -1699,6 +2084,8 @@ create_bridge_connections() {
         log_info "Adding $BRIDGE_INTERFACE to bridge $BRIDGE_NAME..."
         safe_sudo nmcli con add type bridge-slave ifname "$BRIDGE_INTERFACE" master "$BRIDGE_NAME" con-name "$slave_name" ||
             error_exit "Failed to add $BRIDGE_INTERFACE to bridge $BRIDGE_NAME"
+    elif ! networkmanager_bridge_profile_matches "$BRIDGE_INTERFACE"; then
+        error_exit "Existing NetworkManager connection '$slave_name' does not attach $BRIDGE_INTERFACE to $BRIDGE_NAME; refuse to activate it"
     fi
 
     # Activate connections
@@ -1722,7 +2109,8 @@ setup_libvirt() {
     # Add current user to libvirt group
     add_user_to_group "$USER" "libvirt"
 
-    if [[ -n ${BRIDGE_INTERFACE:-} ]]; then
+    if [[ $NETWORK_TYPE == "bridge" ]]; then
+        [[ -n ${BRIDGE_INTERFACE:-} ]] || error_exit "Bridge network mode requires a selected host interface"
         log_info "Setting up Libvirt with bridge networking..."
         echo -e "${GREEN}🚀 Starting bridge configuration...${NC}"
         local network_name="bridge-network"
@@ -1733,6 +2121,12 @@ setup_libvirt() {
         create_bridge_connections
 
         if safe_sudo virsh net-list --all | grep -q "$network_name"; then
+            local network_xml
+            network_xml=$(safe_sudo virsh net-dumpxml "$network_name")
+            if ! grep -Eq "<forward mode=['\"]bridge['\"]" <<<"$network_xml" ||
+                ! grep -Eq "<bridge name=['\"]${BRIDGE_NAME}['\"]" <<<"$network_xml"; then
+                error_exit "Existing libvirt network '$network_name' is not attached to bridge $BRIDGE_NAME"
+            fi
             # Ensure existing network is active and set to autostart
             safe_sudo virsh net-list | grep -q "$network_name.*active" ||
                 safe_sudo virsh net-start "$network_name" 2>/dev/null
@@ -1759,7 +2153,7 @@ EOF
             rm -f "$xml_file"
             log_info "Bridge network '$network_name' created and configured"
         fi
-    else
+    elif [[ $NETWORK_TYPE == "nat" ]]; then
         local network_name="nat-200-network"
         local xml_file="/tmp/$network_name.xml"
         log_info "Ensuring libvirt NAT network '$network_name' exists..."
@@ -1796,6 +2190,8 @@ EOF
             rm -f "$xml_file"
         fi
         log_info "Libvirt NAT network '$network_name' is active and configured"
+    else
+        error_exit "Unsupported VM network mode: $NETWORK_TYPE"
     fi
 
     log_info "Libvirt setup completed"
@@ -2090,10 +2486,63 @@ setup_virtual_environment() {
     log_info "Virtual environment setup completed"
 }
 
+# Calculate the fixed, tested VM resource plan for the requested topology.
+calculate_cluster_resource_requirements() {
+    local worker_nodes=$((G_NUM_INSTANCES - G_KUBE_MASTER_INSTANCES - G_UPM_CTL_INSTANCES))
+    if [[ $worker_nodes -lt 0 ]]; then
+        error_exit "VM count is smaller than the fixed control-plane and UPM node count"
+    fi
+
+    G_WORKER_NODES="$worker_nodes"
+    PLANNED_TOTAL_CPUS=$((
+        worker_nodes * G_VM_CPUS +
+            G_KUBE_MASTER_INSTANCES * G_KUBE_MASTER_VM_CPUS +
+            G_UPM_CTL_INSTANCES * G_UPM_CONTROL_PLANE_VM_CPUS
+    ))
+    PLANNED_TOTAL_MEMORY_MB=$((
+        worker_nodes * G_VM_MEMORY +
+            G_KUBE_MASTER_INSTANCES * G_KUBE_MASTER_VM_MEMORY +
+            G_UPM_CTL_INSTANCES * G_UPM_CONTROL_PLANE_VM_MEMORY
+    ))
+}
+
+# Refuse a new deployment that would consume nearly all available memory or use
+# excessive CPU overcommit. Existing clusters reuse their installation-time
+# resources because MemAvailable already reflects the running guests.
+validate_cluster_resource_capacity() {
+    if [[ $EXISTING_CLUSTER_CONFIGURATION_LOCKED == "true" ]]; then
+        log_info "Existing cluster detected; preserving installation-time VM resources"
+        return 0
+    fi
+
+    calculate_cluster_resource_requirements
+
+    local memory_limit_mb=$((SYS_MEMORY_MB * 80 / 100))
+    local cpu_limit=$((SYS_CPU_CORES * 3))
+    if [[ $PLANNED_TOTAL_MEMORY_MB -gt $memory_limit_mb ]]; then
+        local required_available_mb=$(((PLANNED_TOTAL_MEMORY_MB * 100 + 79) / 80))
+        error_exit "Insufficient available memory for $G_NUM_INSTANCES VMs: plan requires ${PLANNED_TOTAL_MEMORY_MB}MB guest memory and at least ${required_available_mb}MB MemAvailable (20% host reserve), but ${SYS_MEMORY_MB}MB is available"
+        return 1
+    fi
+    if [[ $PLANNED_TOTAL_CPUS -gt $cpu_limit ]]; then
+        error_exit "Excessive CPU overcommit for $G_NUM_INSTANCES VMs: plan requires $PLANNED_TOTAL_CPUS vCPUs, limit is $cpu_limit (3x $SYS_CPU_CORES host CPUs)"
+        return 1
+    fi
+
+    log_info "Cluster resource plan passed: ${PLANNED_TOTAL_CPUS} vCPUs, ${PLANNED_TOTAL_MEMORY_MB}MB guest memory"
+}
+
 # Function to configure bridge network settings interactively
 
 configure_vagrant_config() {
     log_info "Configuring Vagrant config.rb ..."
+
+    if [[ $EXISTING_CLUSTER_CONFIGURATION_LOCKED == "true" ]]; then
+        [[ -f $VAGRANT_CONF_FILE ]] || error_exit "Existing cluster config file not found: $VAGRANT_CONF_FILE"
+        log_info "Preserving existing cluster config.rb, including installation-time VM resources"
+        return 0
+    fi
+
     # Create vagrant directory if it doesn't exist
     if [ ! -d "$VAGRANT_CONF_DIR" ]; then
         log_info "Creating vagrant directory: $VAGRANT_CONF_DIR"
@@ -2141,6 +2590,7 @@ configure_vagrant_config() {
                 -v dns_server="$dns_server" \
                 -v subnet_split4="$subnet_split4" \
                 -v bridge_name="$BRIDGE_NAME" \
+                -v bridge_host_interface="$bridge_interface" \
                 '{
                 if ($0 ~ /^\$subnet = /) {
                     print "$subnet = \"" subnet "\""
@@ -2154,6 +2604,8 @@ configure_vagrant_config() {
                     print "$subnet_split4 = " subnet_split4
                 } else if ($0 ~ /^\$bridge_nic = /) {
                     print "$bridge_nic = \"" bridge_name "\""
+                } else if ($0 ~ /^\$bridge_host_interface = /) {
+                    print "$bridge_host_interface = \"" bridge_host_interface "\""
                 } else {
                     print $0
                 }
@@ -2189,8 +2641,8 @@ configure_vagrant_config() {
         fi
     fi
 
-    # Configure proxy settings if HTTP_PROXY is set
-    if [ -n "$HTTP_PROXY" ]; then
+    # Configure proxy settings when either proxy variable is set.
+    if [[ -n $HTTP_PROXY || -n $HTTPS_PROXY ]]; then
         log_info "Configuring proxy settings in config.rb"
 
         # Use awk for safer text replacement
@@ -2224,7 +2676,7 @@ configure_vagrant_config() {
         log_info "  NO_PROXY: $NO_PROXY"
         log_info "  ADDITIONAL_NO_PROXY: $NO_PROXY"
     else
-        log_info "No HTTP_PROXY set, keeping proxy settings commented out"
+        log_info "No HTTP_PROXY or HTTPS_PROXY set, keeping proxy settings commented out"
     fi
 
     # Configure Kubernetes networking. VM networking (NAT/bridge) and the Kubernetes
@@ -2262,51 +2714,46 @@ configure_vagrant_config() {
         error_exit "Failed to update Kubernetes network configuration"
     fi
 
-    # Configure VM resources based on system capacity
-    log_info "Configuring VM resources based on system capacity..."
-    # Set vm_cpus based on system CPU count
-    if [[ $SYS_CPU_CORES -le 12 ]]; then
-        G_VM_CPUS=6
-    elif [[ $SYS_CPU_CORES -le 16 ]]; then
-        G_VM_CPUS=8
-    elif [[ $SYS_CPU_CORES -le 24 ]]; then
-        G_VM_CPUS=12
-    elif [[ $SYS_CPU_CORES -le 32 ]]; then
-        G_VM_CPUS=16
-    else
-        G_VM_CPUS=24 # Default for systems with more than 32 CPUs
-    fi
-
-    # Set vm_memory based on system memory
-    if [[ $SYS_MEMORY_MB -le 32768 ]]; then
-        G_VM_MEMORY=8192 # 8GB
-    elif [[ $SYS_MEMORY_MB -le 65536 ]]; then
-        G_VM_MEMORY=16384 # 16GB
-    elif [[ $SYS_MEMORY_MB -le 131072 ]]; then
-        G_VM_MEMORY=32768 # 32GB
-    else
-        G_VM_MEMORY=49152 # 48GB
-    fi
-
-    # Add VM resource and instance count configuration to config.rb
-    awk -v vm_cpus="$G_VM_CPUS" \
+    # Write the fixed, validated resource profile and instance count.
+    log_info "Writing validated VM resource profile to config.rb..."
+    if ! awk -v vm_cpus="$G_VM_CPUS" \
         -v vm_memory="$G_VM_MEMORY" \
         -v num_instances="$G_NUM_INSTANCES" \
         '{
-        if ($0 ~ /^# \$vm_cpus = ""/) {
+        if ($0 ~ /^[[:space:]]*#?[[:space:]]*\$vm_cpus[[:space:]]*=/) {
             print "$vm_cpus = " vm_cpus
-        } else if ($0 ~ /^# \$vm_memory = ""/) {
+            vm_cpus_written = 1
+        } else if ($0 ~ /^[[:space:]]*#?[[:space:]]*\$vm_memory[[:space:]]*=/) {
             print "$vm_memory = " vm_memory
-        } else if ($0 ~ /^\$num_instances = /) {
+            vm_memory_written = 1
+        } else if ($0 ~ /^[[:space:]]*\$num_instances[[:space:]]*=/) {
             print "$num_instances = " num_instances
+            num_instances_written = 1
         } else {
             print $0
         }
-    }' "$VAGRANT_CONF_FILE" >"$temp_file"
+        }
+        END {
+            if (!vm_cpus_written || !vm_memory_written || !num_instances_written) {
+                exit 1
+            }
+        }' "$VAGRANT_CONF_FILE" >"$temp_file"; then
+        rm -f "$temp_file"
+        error_exit "VM resource keys are missing from $VAGRANT_CONF_FILE"
+    fi
 
     # Replace the original file
     if mv "$temp_file" "$VAGRANT_CONF_FILE"; then
-        log_info "VM configuration added to config.rb: Instances=$G_NUM_INSTANCES, CPUs=$G_VM_CPUS, Memory=${G_VM_MEMORY}MB"
+        local written_instances
+        local written_cpus
+        local written_memory
+        written_instances=$(sed -nE 's/^\$num_instances[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' "$VAGRANT_CONF_FILE" | head -1)
+        written_cpus=$(sed -nE 's/^\$vm_cpus[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' "$VAGRANT_CONF_FILE" | head -1)
+        written_memory=$(sed -nE 's/^\$vm_memory[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' "$VAGRANT_CONF_FILE" | head -1)
+        if [[ $written_instances != "$G_NUM_INSTANCES" || $written_cpus != "$G_VM_CPUS" || $written_memory != "$G_VM_MEMORY" ]]; then
+            error_exit "Generated VM resources do not match the validated plan"
+        fi
+        log_info "VM configuration written to config.rb: Instances=$G_NUM_INSTANCES, CPUs=$G_VM_CPUS, Memory=${G_VM_MEMORY}MB"
         log_info "Vagrant config.rb configuration completed: $VAGRANT_CONF_FILE"
     else
         log_error "Failed to update VM configuration in $VAGRANT_CONF_FILE"
@@ -2379,6 +2826,8 @@ extract_vagrant_config_variables() {
     G_NUM_INSTANCES=$(grep "^\$num_instances\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/')
     G_KUBE_MASTER_INSTANCES=$(grep "^\$kube_master_instances\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/')
     G_UPM_CTL_INSTANCES=$(grep "^\$upm_ctl_instances\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/')
+    G_VM_CPUS=$(grep "^\$vm_cpus\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/')
+    G_VM_MEMORY=$(grep "^\$vm_memory\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/')
     G_KUBE_MASTER_VM_CPUS=$(grep "^\$kube_master_vm_cpus\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/')
     G_KUBE_MASTER_VM_MEMORY=$(grep "^\$kube_master_vm_memory\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/')
     G_UPM_CONTROL_PLANE_VM_CPUS=$(grep "^\$upm_control_plane_vm_cpus\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/')
@@ -2389,6 +2838,15 @@ extract_vagrant_config_variables() {
     G_INSTANCE_NAME_PREFIX=$(grep "^\$instance_name_prefix\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/')
     G_SUBNET_SPLIT4=$(grep "^\$subnet_split4\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*([0-9]+).*/\1/')
     G_DNS_SERVER=$(grep "^\$dns_server\s*=" "$VAGRANT_CONF_FILE" | sed -E 's/.*[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/')
+
+    local resource_value
+    for resource_value in \
+        "$G_NUM_INSTANCES" "$G_KUBE_MASTER_INSTANCES" "$G_UPM_CTL_INSTANCES" \
+        "$G_VM_CPUS" "$G_VM_MEMORY" "$G_KUBE_MASTER_VM_CPUS" \
+        "$G_KUBE_MASTER_VM_MEMORY" "$G_UPM_CONTROL_PLANE_VM_CPUS" \
+        "$G_UPM_CONTROL_PLANE_VM_MEMORY"; do
+        [[ $resource_value =~ ^[1-9][0-9]*$ ]] || error_exit "Invalid or missing VM resource value in $VAGRANT_CONF_FILE"
+    done
 
     # Extract network-specific variables based on network type
     if [[ $NETWORK_TYPE == "bridge" ]]; then
@@ -2526,9 +2984,11 @@ show_setup_confirmation() {
     fi
 
     # Proxy Configuration
-    if [[ -n ${HTTP_PROXY:-} ]]; then
-        echo -e "   ${GREEN}•${NC} Proxy: ${CYAN}${HTTP_PROXY}${NC}"
-        if [[ -n ${HTTPS_PROXY:-} && ${HTTPS_PROXY} != "${HTTP_PROXY}" ]]; then
+    if [[ -n ${HTTP_PROXY:-} || -n ${HTTPS_PROXY:-} ]]; then
+        if [[ -n ${HTTP_PROXY:-} ]]; then
+            echo -e "   ${GREEN}•${NC} HTTP Proxy: ${CYAN}${HTTP_PROXY}${NC}"
+        fi
+        if [[ -n ${HTTPS_PROXY:-} && ${HTTPS_PROXY} != "${HTTP_PROXY:-}" ]]; then
             echo -e "   ${GREEN}•${NC} HTTPS Proxy: ${CYAN}${HTTPS_PROXY}${NC}"
         fi
         if [[ -n ${NO_PROXY:-} ]]; then
@@ -2676,6 +3136,33 @@ EOF
     "$KUBECTL" get ciliumloadbalancerippool "$CILIUM_LOAD_BALANCER_POOL_NAME"
     "$KUBECTL" get ciliuml2announcementpolicy "$CILIUM_L2_ANNOUNCEMENT_POLICY_NAME"
     log_info "Cilium LoadBalancer IPAM and L2 announcement policy configured successfully"
+}
+
+destroy_existing_vagrant_environment() {
+    log_info "Destroying the existing Vagrant environment..."
+
+    if [[ -d .vagrant ]] && ! vagrant destroy -f; then
+        log_warn "vagrant destroy did not remove every VM; using libvirt cleanup for residual domains"
+    fi
+
+    local residual_vms
+    residual_vms=$(find_existing_libvirt_cluster_vms "$G_INSTANCE_NAME_PREFIX" || true)
+    local vm_name
+    while IFS= read -r vm_name; do
+        [[ -n $vm_name ]] || continue
+        log_warn "Removing residual libvirt domain: $vm_name"
+        safe_sudo virsh -c qemu:///system destroy "$vm_name" >/dev/null 2>&1 || true
+        safe_sudo virsh -c qemu:///system undefine "$vm_name" --remove-all-storage >/dev/null 2>&1 ||
+            error_exit "Failed to remove residual libvirt domain $vm_name"
+    done <<<"$residual_vms"
+
+    rm -rf .vagrant/machines
+    vagrant global-status --prune >/dev/null 2>&1 || true
+
+    if find_existing_libvirt_cluster_vms "$G_INSTANCE_NAME_PREFIX" >/dev/null 2>&1; then
+        error_exit "Kubespray libvirt domains remain after cleanup"
+    fi
+    log_info "Existing Vagrant environment removed successfully"
 }
 
 #######################################
@@ -2839,40 +3326,9 @@ vagrant_and_run_kubespray() {
                         ;;
                     3)
                         echo -e "${RED}🗑️  Deleting existing VMs...${NC}"
-                        # Extract VM names and delete them
-                        local vm_names
-                        vm_names=$(echo "$vm_status" | awk '{print $2}' | grep -E "kubespray.*${G_INSTANCE_NAME_PREFIX}.*[0-9]+")
-
-                        local cleanup_success=true
-                        while IFS= read -r vm_name; do
-                            if [[ -n $vm_name ]]; then
-                                echo -e "${YELLOW}  Destroying VM: $vm_name${NC}"
-
-                                # First try to destroy (shutdown) the VM if it's running
-                                if sudo virsh destroy "$vm_name" 2>/dev/null; then
-                                    echo -e "${GREEN}    ✓ VM $vm_name destroyed${NC}"
-                                else
-                                    echo -e "${YELLOW}    ⚠ VM $vm_name was not running${NC}"
-                                fi
-
-                                # Then undefine (remove) the VM completely
-                                if sudo virsh undefine "$vm_name" --remove-all-storage 2>/dev/null; then
-                                    echo -e "${GREEN}    ✓ VM $vm_name undefined and storage removed${NC}"
-                                else
-                                    echo -e "${RED}    ✗ Failed to undefine VM $vm_name${NC}"
-                                    cleanup_success=false
-                                fi
-                            fi
-                        done <<<"$vm_names"
-
-                        if $cleanup_success; then
-                            echo -e "${GREEN}✅ VMs cleaned up successfully${NC}"
-                            break
-                        else
-                            echo -e "${RED}❌ Failed to clean up some VMs automatically${NC}"
-                            echo -e "${YELLOW}Please clean up manually and run the script again${NC}"
-                            return 1
-                        fi
+                        destroy_existing_vagrant_environment
+                        echo -e "${GREEN}✅ VMs and Vagrant metadata cleaned up successfully${NC}"
+                        break
                         ;;
                     4)
                         echo -e "${YELLOW}⏸️  Deployment cancelled by user${NC}"
@@ -2896,40 +3352,9 @@ vagrant_and_run_kubespray() {
                     case $choice in
                     1)
                         echo -e "${RED}🗑️  Deleting existing VMs...${NC}"
-                        # Extract VM names and delete them
-                        local vm_names
-                        vm_names=$(echo "$vm_status" | awk '{print $2}' | grep -E "kubespray.*${G_INSTANCE_NAME_PREFIX}.*[0-9]+")
-
-                        local cleanup_success=true
-                        while IFS= read -r vm_name; do
-                            if [[ -n $vm_name ]]; then
-                                echo -e "${YELLOW}  Destroying VM: $vm_name${NC}"
-
-                                # First try to destroy (shutdown) the VM if it's running
-                                if sudo virsh destroy "$vm_name" 2>/dev/null; then
-                                    echo -e "${GREEN}    ✓ VM $vm_name destroyed${NC}"
-                                else
-                                    echo -e "${YELLOW}    ⚠ VM $vm_name was not running${NC}"
-                                fi
-
-                                # Then undefine (remove) the VM completely
-                                if sudo virsh undefine "$vm_name" --remove-all-storage 2>/dev/null; then
-                                    echo -e "${GREEN}    ✓ VM $vm_name undefined and storage removed${NC}"
-                                else
-                                    echo -e "${RED}    ✗ Failed to undefine VM $vm_name${NC}"
-                                    cleanup_success=false
-                                fi
-                            fi
-                        done <<<"$vm_names"
-
-                        if $cleanup_success; then
-                            echo -e "${GREEN}✅ VMs cleaned up successfully${NC}"
-                            break
-                        else
-                            echo -e "${RED}❌ Failed to clean up some VMs automatically${NC}"
-                            echo -e "${YELLOW}Please clean up manually and run the script again${NC}"
-                            return 1
-                        fi
+                        destroy_existing_vagrant_environment
+                        echo -e "${GREEN}✅ VMs and Vagrant metadata cleaned up successfully${NC}"
+                        break
                         ;;
                     2)
                         echo -e "${YELLOW}⏸️  Deployment cancelled by user${NC}"
@@ -3012,7 +3437,7 @@ configure_kubectl_access() {
     # Configure kubectl binary with backup and symlink
     if [[ -f $kubectl_binary ]]; then
         local kubectl_target="$LOCAL_BIN_DIR/kubectl"
-        
+
         # Backup existing kubectl if it exists
         if [[ -f $kubectl_target ]]; then
             local backup_name="${kubectl_target}.backup.$(date +%Y%m%d_%H%M%S)"
@@ -3023,7 +3448,7 @@ configure_kubectl_access() {
                 return 1
             fi
         fi
-        
+
         # Create symlink to kubectl binary
         if ln -s "$kubectl_binary" "$kubectl_target"; then
             ((success_count++))
@@ -3047,7 +3472,7 @@ configure_kubectl_access() {
                 return 1
             fi
         fi
-        
+
         # Create symlink to kubeconfig file
         if ln -s "$kubeconfig_file" "$KUBECONFIG"; then
             ((success_count++))
@@ -3178,11 +3603,15 @@ Usage: $0 [OPTIONS]
 OPTIONS:
   -h, --help                    Show this help message
   -v, --version                 Show version information
-  -y                            Auto-confirm all yes/no prompts (except network bridge configuration)
+  -y                            Use safe defaults for unspecified choices (NAT + Calico)
+                                and auto-confirm ordinary yes/no prompts. Bridge host
+                                networking and existing-VM decisions remain interactive.
   -c <count>                    Set number of virtual machines (default: 5)
-  -n <network_type>             Set network type (nat|bridge, default: nat)
-                                When set to 'bridge', interactive configuration will be required
-  -p, --network-plugin <cni>    Kubernetes CNI: calico|cilium (default: calico)
+  -n <network_type>             Preselect VM networking: nat|bridge
+                                If omitted, the guided workflow asks. Bridge always asks
+                                for the host interface, VM CIDR, gateway, and DNS.
+  -p, --network-plugin <cni>    Preselect Kubernetes CNI: calico|cilium
+                                If omitted, the guided workflow asks.
   --cilium-kube-proxy-replacement
                                 Use Cilium eBPF instead of kube-proxy
   --cilium-load-balancer        Enable Cilium LB IPAM/L2 (also enables kube-proxy replacement)
@@ -3196,17 +3625,31 @@ DESCRIPTION:
   configuration of all necessary components including libvirt, Vagrant, Python environment,
   and Kubespray project setup.
 
-  VM networking (nat/bridge) and Kubernetes CNI networking (calico/cilium)
-  are independent choices. Cilium LoadBalancer mode configures LB IPAM and
-  creates a CiliumL2AnnouncementPolicy after Kubernetes becomes available.
+  The default user experience is a guided network workflow. It explains and collects
+  VM networking (NAT/Bridge), Kubernetes CNI (Calico/Cilium), kube-proxy replacement,
+  and Cilium LoadBalancer settings before making host changes. CLI network options are
+  optional presets for automation and skip only the corresponding questions.
+
+  VM networking and Kubernetes CNI networking are independent choices. Cilium
+  LoadBalancer mode configures LB IPAM and creates a CiliumL2AnnouncementPolicy
+  after Kubernetes becomes available.
 
 REQUIREMENTS:
   - Operating System: RHEL 9 or a supported RHEL-family distribution
-  - Hardware: CPU 12+ cores, 32GB+ memory recommended, 200GB+ root disk available
+  - Hardware: CPU 12+ cores, 200GB+ root disk available
+  - Memory: Calculated from the VM plan; the default 5-VM plan needs about 40GiB MemAvailable, with 64GiB+ recommended
   - Access: sudo privileges required, Internet connectivity essential
   - Network: Virtualization support (Intel VT-x/AMD-V) enabled in BIOS
 
 EXAMPLES:
+  # Recommended: guided deployment
+  $0
+  $0 -c 8
+
+  # Safe automatic defaults: NAT + Calico
+  $0 -y
+
+  # Optional presets for repeatable automation
   $0 -y -p calico
   $0 -y -p cilium --cilium-kube-proxy-replacement
   $0 -y -p cilium --cilium-load-balancer \\
@@ -3241,8 +3684,9 @@ parse_arguments() {
                 show_help
                 exit 1
             }
-            if [[ $2 -ge 3 ]] && [[ $2 -le 50 ]]; then
-                G_NUM_INSTANCES="$2"
+            if [[ $2 =~ ^[0-9]+$ ]] && ((10#$2 >= 3 && 10#$2 <= 50)); then
+                G_NUM_INSTANCES="$((10#$2))"
+                NUM_INSTANCES_EXPLICIT=true
                 log_info "Virtual machine count set to: $G_NUM_INSTANCES"
                 shift 2
             else
@@ -3259,6 +3703,7 @@ parse_arguments() {
             case "$2" in
             nat | bridge)
                 NETWORK_TYPE="$2"
+                NETWORK_TYPE_EXPLICIT=true
                 log_info "Network type set to: $NETWORK_TYPE"
                 shift 2
                 ;;
@@ -3315,6 +3760,7 @@ parse_arguments() {
                 NETWORK_PLUGIN_EXPLICIT=true
             fi
             parse_cilium_load_balancer_range "$2" || exit 1
+            CILIUM_LOAD_BALANCER_ENABLED=true
             CILIUM_LOAD_BALANCER_EXPLICIT=true
             CILIUM_LB_RANGE_EXPLICIT=true
             shift 2
@@ -3365,34 +3811,50 @@ main() {
     # Network and proxy validation
     validate_network_and_proxy
 
-    [[ -n $NETWORK_TYPE ]] || error_exit "NETWORK_TYPE is not set. Please use -n option to set it."
+    # Load and lock installation-time networking before asking any questions.
+    # This prevents reruns from silently replacing an existing cluster network.
+    load_existing_kubernetes_network_configuration
+    if [[ $EXISTING_CLUSTER_CONFIGURATION_LOCKED == "true" ]]; then
+        require_interactive_input "Existing VM action selection"
+    fi
+
+    # CLI values are optional presets. Missing VM networking choices are
+    # collected by the guided workflow (or use NAT as the safe -y default).
+    configure_vm_networking_interactive
 
     # Configure bridge network if needed
     if [[ $NETWORK_TYPE == "bridge" ]]; then
-        log_info "Configuring bridge network settings..."
-        # Execute interactive function directly in main shell
-        # The function displays interaction to user and sets BRIDGE_NETWORK_CONFIG global variable
-        if ! configure_bridge_network_interactive || [[ -z $BRIDGE_NETWORK_CONFIG ]]; then
-            error_exit "Failed to configure bridge network settings"
+        if [[ $BRIDGE_CONFIGURATION_REUSED == "true" ]]; then
+            log_info "Using the persisted bridge network configuration for the existing cluster"
+        else
+            log_info "Configuring bridge network settings..."
+            # The physical interface and addressing are intentionally collected
+            # interactively because they must match the current host network.
+            if ! configure_bridge_network_interactive || [[ -z $BRIDGE_NETWORK_CONFIG ]]; then
+                error_exit "Failed to configure bridge network settings"
+            fi
         fi
         log_info "Bridge network configuration captured: $BRIDGE_NETWORK_CONFIG"
     elif [[ $NETWORK_TYPE == "nat" ]]; then
         log_info "Configuring NAT network settings..."
-        DNS_SERVER=$(grep nameserver /etc/resolv.conf | awk '{print $2}' | head -1)
-        if [[ -z $DNS_SERVER ]]; then
-            log_warn "No DNS server detected from system configuration. Using default: 8.8.8.8"
-            DNS_SERVER="8.8.8.8"
+        if [[ $EXISTING_CLUSTER_CONFIGURATION_LOCKED == "true" && -n ${DNS_SERVER:-} ]]; then
+            log_info "Using persisted DNS server for the existing NAT cluster: $DNS_SERVER"
+        else
+            DNS_SERVER=$(grep nameserver /etc/resolv.conf | awk '{print $2}' | head -1)
+            if [[ -z $DNS_SERVER ]]; then
+                log_warn "No DNS server detected from system configuration. Using default: 8.8.8.8"
+                DNS_SERVER="8.8.8.8"
+            fi
+            log_info "Detected DNS server: $DNS_SERVER"
         fi
-        log_info "Detected DNS server: $DNS_SERVER"
     fi
-
-    load_existing_kubernetes_network_configuration
 
     # Select and validate the Kubernetes CNI independently from the VM network mode.
     configure_kubernetes_networking_interactive
 
     # System validation
     check_system_requirements
+    validate_cluster_resource_capacity
     check_ntp_synchronization
     # Pre-installation confirmation
     show_setup_confirmation

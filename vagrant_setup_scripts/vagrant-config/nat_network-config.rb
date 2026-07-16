@@ -41,8 +41,8 @@
 $instance_name_prefix = "k8s"
 
 # Default CPU and memory settings for worker nodes
-$vm_cpus = 8                    # Number of CPU cores per worker node
-$vm_memory = 16384              # Memory in MB per worker node (16GB)
+$vm_cpus = 6                    # Number of CPU cores per worker node
+$vm_memory = 8192               # Memory in MB per worker node (8GB)
 
 # Master/Control plane node resources
 $kube_master_vm_cpus = 4        # CPU cores for Kubernetes master nodes
@@ -50,7 +50,7 @@ $kube_master_vm_memory = 4096   # Memory in MB for Kubernetes master nodes (4GB)
 
 # UPM Control plane node resources (if using UPM)
 $upm_control_plane_vm_cpus = 4      # CPU cores for UPM control plane
-$upm_control_plane_vm_memory = 4096 # Memory in MB for UPM control plane (24GB)
+$upm_control_plane_vm_memory = 4096 # Memory in MB for UPM control plane (4GB)
 
 # =============================================================================
 # STORAGE CONFIGURATION
@@ -101,12 +101,12 @@ $upm_ctl_instances = 1
 # 1. Command line --provider argument (highest priority)
 # 2. VAGRANT_DEFAULT_PROVIDER environment variable
 # 3. Auto-detection of installed providers (libvirt only)
-# 
+#
 # Supported options: "libvirt"
-# 
+#
 # Provider recommendations:
 # - libvirt: Good for Linux production environments (KVM-based)
-# 
+#
 # Leave commented for auto-detection, or uncomment and set to force libvirt provider
 # $provider = "libvirt"
 
@@ -160,6 +160,9 @@ $dns_server = "8.8.8.8"           # DNS server
 # Bridge network interface (required when using "bridge")
 # Example: On linux, libvirt bridge interface name: br0
 # $bridge_nic = "br0"
+
+# Reserved for libvirt_kubespray_setup.sh when bridge mode is selected.
+$bridge_host_interface = ""
 
 # =============================================================================
 # KUBERNETES CONFIGURATION
