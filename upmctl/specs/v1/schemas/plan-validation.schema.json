@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://upm.io/schemas/upmctl/v1alpha1/plan-validation.schema.json",
+  "title": "upmctl local plan validation",
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "kind",
+    "planId",
+    "checkedAt",
+    "artifactStatus",
+    "freshnessStatus",
+    "environmentBinding",
+    "configBinding",
+    "managedStateBinding",
+    "observedStateBinding",
+    "executionAvailable",
+    "blockers"
+  ],
+  "properties": {
+    "apiVersion": { "const": "upmctl.upm.io/v1alpha1" },
+    "kind": { "const": "PlanValidation" },
+    "planId": {
+      "type": "string",
+      "pattern": "^plan-[0-9a-f]{64}$"
+    },
+    "checkedAt": { "type": "string", "format": "date-time" },
+    "artifactStatus": { "const": "VALID" },
+    "freshnessStatus": { "enum": ["CURRENT", "EXPIRED", "INVALID"] },
+    "environmentBinding": { "enum": ["MATCH", "MISMATCH", "UNKNOWN"] },
+    "configBinding": { "enum": ["MATCH", "MISMATCH", "INVALID", "UNKNOWN"] },
+    "managedStateBinding": { "enum": ["MATCH", "MISMATCH", "INVALID", "UNKNOWN"] },
+    "observedStateBinding": { "const": "NOT_CHECKED" },
+    "executionAvailable": { "const": false },
+    "blockers": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512
+      }
+    }
+  },
+  "additionalProperties": false
+}

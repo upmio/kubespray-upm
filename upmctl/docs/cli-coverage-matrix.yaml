@@ -1,0 +1,570 @@
+schemaVersion: upmctl.test-coverage/v1
+metadata:
+  phase: phase-2b2a-human-approval
+  auditedAt: "2026-07-17"
+  scope: "CLI command tree, help, capabilities, output formats, exit codes, runtime logging, and live-test safety"
+  authority:
+    - upmctl/specs/v1/cli-contract.md
+    - upmctl/specs/v1/acceptance.md
+    - upmctl/internal/cli/cli.go
+    - upmctl/internal/cli/help.go
+    - upmctl/internal/app/app.go
+    - upmctl/internal/app/approval.go
+    - upmctl/scripts/validate-test-environment.sh
+
+exitCodes:
+  0: SUCCEEDED_NOOP_OR_ACTION_REQUIRED
+  2: USAGE
+  3: BLOCKED_OR_CAPABILITY_UNAVAILABLE
+  4: EXTERNAL_DEPENDENCY_FAILURE
+  5: RESERVED_PARTIAL
+  6: INTERRUPTED_CANCELLED_OR_TIMEOUT
+  70: INTERNAL_OUTPUT_OR_CONTROL_STATE_FAILURE
+
+executionClasses:
+  OFFLINE:
+    targetMutation: false
+    description: "Does not require or inspect a deployment environment."
+  PASSIVE_LOCAL:
+    targetMutation: false
+    description: "Reads repository or workspace files without executing workspace code."
+  READ_ONLY_EXTERNAL:
+    targetMutation: false
+    description: "May execute digest-bound Vagrant, virsh, or kubectl observation commands."
+  CONTROL_STATE_WRITE:
+    targetMutation: false
+    description: "Writes only immutable .upmctl control-plane artifacts."
+  HUMAN_CONTROL_STATE_WRITE:
+    targetMutation: false
+    description: "Writes immutable .upmctl state and requires a real human controlling TTY."
+  TARGET_MUTATION_CLOSED:
+    targetMutation: false
+    description: "Current release must fail closed without invoking an executor or legacy script."
+
+stories:
+  - id: US-CLI-01
+    title: "确认安装、版本和当前能力边界"
+  - id: US-ENV-01
+    title: "发现并校验现有 Kubespray UPM 工作区"
+  - id: US-ENV-02
+    title: "由管理员接管一个可信 legacy libvirt 工作区"
+  - id: US-OBS-01
+    title: "查看环境、VM、libvirt 与 Kubernetes 节点关联状态"
+  - id: US-PLAN-01
+    title: "为停止的 VM 创建不可执行启动 Plan，并检查漂移和前置条件"
+  - id: US-APR-01
+    title: "由管理员批准、查询并撤销 Plan 审批证据"
+  - id: US-AUTO-01
+    title: "自动化以稳定 JSON、requestId、退出码和 JSONL 日志消费 CLI"
+  - id: US-SAFE-01
+    title: "所有未开放变更命令必须失败关闭且不调用底层变更工具"
+  - id: US-RESET-01
+    title: "在隔离测试工作区中可重复清理并重跑完整验收"
+
+commands:
+  - id: CMD-HELP-ROOT
+    command: "upmctl help | upmctl --help | upmctl -h"
+    support: IMPLEMENTED
+    executionClass: OFFLINE
+    actor: ANY
+    successKind: PLAIN_TEXT
+    successExit: [0]
+    liveSafe: true
+    currentAutomatedEvidence: UNIT_ONLY
+    requiredLiveCoverage: true
+
+  - id: CMD-HELP-GROUP
+    command: "upmctl help environment|vm|plan|approval"
+    support: IMPLEMENTED
+    executionClass: OFFLINE
+    actor: ANY
+    successKind: PLAIN_TEXT
+    successExit: [0]
+    liveSafe: true
+    currentAutomatedEvidence: UNIT_ONLY
+    requiredLiveCoverage: true
+
+  - id: CMD-VERSION
+    command: "upmctl version"
+    support: IMPLEMENTED
+    executionClass: OFFLINE
+    actor: ANY
+    successKind: Version
+    successExit: [0]
+    liveSafe: true
+    currentAutomatedEvidence: UNIT_AND_VALIDATION_SCRIPT
+    requiredLiveCoverage: true
+
+  - id: CMD-CAPABILITIES
+    command: "upmctl capabilities"
+    support: IMPLEMENTED
+    executionClass: OFFLINE
+    actor: ANY
+    successKind: Capabilities
+    successExit: [0]
+    liveSafe: true
+    currentAutomatedEvidence: UNIT_AND_VALIDATION_SCRIPT
+    requiredLiveCoverage: true
+
+  - id: CMD-ENV-ADOPT
+    command: "upmctl environment adopt --environment-id ENV_ID --workspace PATH"
+    support: IMPLEMENTED
+    executionClass: HUMAN_CONTROL_STATE_WRITE
+    actor: HUMAN_TTY_ONLY
+    successKind: ManagedEnvironment
+    successExit: [0]
+    writes:
+      - .upmctl/state.json
+    liveSafe: true
+    liveSafetyCondition: "Use a disposable or explicitly designated clean legacy workspace; a human must review digests and type the challenge."
+    currentAutomatedEvidence: FIXTURE_TTY_ONLY
+    requiredLiveCoverage: true
+
+  - id: CMD-CONTEXT-DISCOVER
+    command: "upmctl context discover"
+    support: IMPLEMENTED
+    executionClass: PASSIVE_LOCAL
+    actor: ANY
+    successKind: DeploymentContext
+    successExit: [0]
+    blockedExit: [3]
+    liveSafe: true
+    currentAutomatedEvidence: UNIT_AND_VALIDATION_SCRIPT
+    requiredLiveCoverage: true
+
+  - id: CMD-CONFIG-VALIDATE
+    command: "upmctl config validate"
+    support: IMPLEMENTED
+    executionClass: PASSIVE_LOCAL
+    actor: ANY
+    successKind: ConfigValidation
+    successExit: [0]
+    blockedExit: [3]
+    liveSafe: true
+    currentAutomatedEvidence: UNIT_AND_VALIDATION_SCRIPT
+    requiredLiveCoverage: true
+
+  - id: CMD-STATUS
+    command: "upmctl status"
+    support: IMPLEMENTED
+    executionClass: READ_ONLY_EXTERNAL
+    actor: ANY
+    successKind: EnvironmentStatus
+    successExit: [0]
+    errorExit: [3, 4, 6]
+    liveSafe: true
+    currentAutomatedEvidence: UNIT_LEGACY_AND_VALIDATION_SCRIPT
+    requiredLiveCoverage: true
+
+  - id: CMD-VM-LIST
+    command: "upmctl vm list"
+    support: IMPLEMENTED
+    executionClass: READ_ONLY_EXTERNAL
+    actor: ANY
+    successKind: VMList
+    successExit: [0]
+    errorExit: [3, 4, 6]
+    liveSafe: true
+    currentAutomatedEvidence: VALIDATION_SCRIPT
+    requiredLiveCoverage: true
+
+  - id: CMD-VM-STATUS-ALL
+    command: "upmctl vm status"
+    support: IMPLEMENTED
+    executionClass: READ_ONLY_EXTERNAL
+    actor: ANY
+    successKind: VMList
+    successExit: [0]
+    errorExit: [3, 4, 6]
+    liveSafe: true
+    currentAutomatedEvidence: NONE_AT_CLI_LEVEL
+    requiredLiveCoverage: true
+
+  - id: CMD-VM-STATUS-NODE
+    command: "upmctl vm status NODE"
+    support: IMPLEMENTED
+    executionClass: READ_ONLY_EXTERNAL
+    actor: ANY
+    successKind: VMStatus
+    successExit: [0]
+    errorExit: [3, 4, 6]
+    liveSafe: true
+    currentAutomatedEvidence: NONE_AT_CLI_LEVEL
+    requiredLiveCoverage: true
+
+  - id: CMD-VM-INSPECT
+    command: "upmctl vm inspect NODE"
+    support: IMPLEMENTED
+    executionClass: READ_ONLY_EXTERNAL
+    actor: ANY
+    successKind: VMInspection
+    successExit: [0]
+    errorExit: [3, 4, 6]
+    liveSafe: true
+    currentAutomatedEvidence: VALIDATION_SCRIPT
+    requiredLiveCoverage: true
+
+  - id: CMD-PLAN-VM-START
+    command: "upmctl plan vm start --node NODE"
+    support: IMPLEMENTED
+    executionClass: CONTROL_STATE_WRITE
+    actor: ANY
+    successKind: Plan
+    successExit: [0]
+    dispositions: [NOOP, BLOCKED, ACTION_REQUIRED]
+    writes:
+      - ".upmctl/plans/<planId>.json only for ACTION_REQUIRED"
+    liveSafe: true
+    liveSafetyCondition: "A stopped isolated worker is required for ACTION_REQUIRED; an all-running cluster only proves NOOP."
+    currentAutomatedEvidence: UNIT_AND_CONDITIONAL_VALIDATION_SCRIPT
+    requiredLiveCoverage: true
+
+  - id: CMD-PLAN-GET
+    command: "upmctl plan get PLAN_ID"
+    support: IMPLEMENTED
+    executionClass: PASSIVE_LOCAL
+    actor: ANY
+    successKind: PlanInspection
+    successExit: [0]
+    blockedExit: [3]
+    liveSafe: true
+    currentAutomatedEvidence: UNIT_AND_CONDITIONAL_VALIDATION_SCRIPT
+    requiredLiveCoverage: true
+
+  - id: CMD-PLAN-VALIDATE
+    command: "upmctl plan validate PLAN_ID"
+    support: IMPLEMENTED
+    executionClass: PASSIVE_LOCAL
+    actor: ANY
+    successKind: PlanValidation
+    successExit: [0]
+    blockedExit: [3]
+    liveSafe: true
+    currentAutomatedEvidence: UNIT_AND_CONDITIONAL_VALIDATION_SCRIPT
+    requiredLiveCoverage: true
+
+  - id: CMD-PREFLIGHT
+    command: "upmctl preflight --plan-id PLAN_ID"
+    support: IMPLEMENTED
+    executionClass: READ_ONLY_EXTERNAL
+    actor: ANY
+    successKind: PreflightResult
+    policyExit: [3]
+    errorExit: [3, 4, 6, 70]
+    liveSafe: true
+    specialAssertion: "A PASSED PreflightResult still has applyDecision=BLOCKED and executionAvailable=false and exits 3."
+    currentAutomatedEvidence: UNIT_AND_CONDITIONAL_VALIDATION_SCRIPT
+    requiredLiveCoverage: true
+
+  - id: CMD-APPROVAL-GRANT
+    command: "upmctl approval grant --plan-id PLAN_ID"
+    support: IMPLEMENTED
+    executionClass: HUMAN_CONTROL_STATE_WRITE
+    actor: HUMAN_TTY_ONLY
+    successKind: Approval
+    successExit: [0]
+    writes:
+      - ".upmctl/approvals/by-plan/<planId>.json"
+    liveSafe: true
+    liveSafetyCondition: "Requires an unexpired ACTION_REQUIRED Plan with PASSED preflight and an on-console human."
+    currentAutomatedEvidence: FIXTURE_TTY_ONLY
+    requiredLiveCoverage: true
+
+  - id: CMD-APPROVAL-GET
+    command: "upmctl approval get APPROVAL_ID"
+    support: IMPLEMENTED
+    executionClass: PASSIVE_LOCAL
+    actor: ANY
+    successKind: ApprovalInspection
+    successExit: [0]
+    blockedExit: [3]
+    liveSafe: true
+    currentAutomatedEvidence: UNIT_ONLY
+    requiredLiveCoverage: true
+
+  - id: CMD-APPROVAL-LIST
+    command: "upmctl approval list [--plan-id PLAN_ID]"
+    support: IMPLEMENTED
+    executionClass: PASSIVE_LOCAL
+    actor: ANY
+    successKind: ApprovalInspectionList
+    successExit: [0]
+    blockedExit: [3]
+    liveSafe: true
+    currentAutomatedEvidence: UNIT_FILTERED_ONLY
+    requiredLiveCoverage: true
+
+  - id: CMD-APPROVAL-REVOKE
+    command: "upmctl approval revoke APPROVAL_ID"
+    support: IMPLEMENTED
+    executionClass: HUMAN_CONTROL_STATE_WRITE
+    actor: HUMAN_TTY_ONLY
+    successKind: ApprovalRevocation
+    successExit: [0]
+    writes:
+      - ".upmctl/admissions/<planId>.json"
+    liveSafe: true
+    liveSafetyCondition: "Requires a non-expired APPROVED Approval and an on-console human."
+    currentAutomatedEvidence: FIXTURE_TTY_ONLY
+    requiredLiveCoverage: true
+
+  - id: CMD-APPLY
+    command: "upmctl apply --plan-id PLAN_ID"
+    support: UNAVAILABLE_CURRENT_PHASE
+    executionClass: TARGET_MUTATION_CLOSED
+    actor: NONE
+    expectedError: UPMCTL_NOT_IMPLEMENTED
+    expectedExit: [3]
+    liveSafe: true
+    currentAutomatedEvidence: UNIT_ONLY
+    requiredLiveCoverage: true
+
+  - id: CMD-UNSUPPORTED-VM
+    command: "upmctl vm start|stop|restart|ssh ..."
+    support: UNAVAILABLE_CURRENT_PHASE
+    executionClass: TARGET_MUTATION_CLOSED
+    actor: NONE
+    expectedError: UPMCTL_NOT_IMPLEMENTED
+    expectedExit: [3]
+    liveSafe: true
+    currentAutomatedEvidence: PARTIAL_UNIT_ONLY
+    requiredLiveCoverage: true
+
+  - id: CMD-UNSUPPORTED-PLAN
+    command: "upmctl plan vm stop|restart; plan cluster ...; plan node add|remove; plan addon install"
+    support: UNAVAILABLE_CURRENT_PHASE
+    executionClass: TARGET_MUTATION_CLOSED
+    actor: NONE
+    expectedError: UPMCTL_NOT_IMPLEMENTED
+    expectedExit: [3]
+    liveSafe: true
+    currentAutomatedEvidence: PARTIAL_UNIT_ONLY
+    requiredLiveCoverage: true
+
+  - id: CMD-UNSUPPORTED-OTHER
+    command: "upmctl node ...; operation ...; verify; report generate"
+    support: UNAVAILABLE_CURRENT_PHASE
+    executionClass: TARGET_MUTATION_CLOSED
+    actor: NONE
+    expectedError: UPMCTL_NOT_IMPLEMENTED
+    expectedExit: [3]
+    liveSafe: true
+    currentAutomatedEvidence: PARTIAL_UNIT_ONLY
+    requiredLiveCoverage: true
+
+globalOptionTests:
+  - id: OPT-OUTPUT-TEXT
+    option: "--output text"
+    expected: "Human-readable stdout; errors on stderr."
+    currentCoverage: INSUFFICIENT
+  - id: OPT-OUTPUT-JSON
+    option: "--output json"
+    expected: "One indented JSON envelope."
+    currentCoverage: STRONGEST_CURRENT_PATH
+  - id: OPT-OUTPUT-JSONL
+    option: "--output jsonl"
+    expected: "One compact JSON line, not an event stream."
+    currentCoverage: OUTPUT_PACKAGE_ONLY
+  - id: OPT-WORKSPACE
+    option: "--workspace PATH"
+    expected: "Explicit workspace is bound to command evidence."
+    currentCoverage: PARTIAL
+  - id: OPT-REQUEST-ID
+    option: "--request-id ID"
+    expected: "Same ID appears in output/error envelope and optional runtime log."
+    currentCoverage: PARTIAL
+  - id: OPT-TIMEOUT
+    option: "--timeout DURATION"
+    expected: "Positive duration; observed commands return exit 6 on deadline."
+    currentCoverage: UNIT_ONLY
+  - id: OPT-LOG-FILE
+    option: "--log-file PATH"
+    expected: "0600 non-symlink JSONL; start and terminal event; no business arguments."
+    currentCoverage: UNIT_AND_VALIDATION_SCRIPT
+  - id: OPT-NO-COLOR
+    option: "--no-color"
+    expected: "Accepted; current text output is always color-free."
+    currentCoverage: NONE
+
+requiredTestCases:
+  - id: TC-CLI-001
+    story: US-CLI-01
+    command: "upmctl version --output json"
+    setup: "No workspace and no cluster dependencies."
+    expectedExit: 0
+    assertions: ["kind=Version", "platform matches host", "version/commit/buildDate/apiVersion present"]
+    liveSafety: SAFE
+
+  - id: TC-CLI-002
+    story: US-CLI-01
+    command: "upmctl capabilities --output json"
+    setup: "No workspace and no cluster dependencies."
+    expectedExit: 0
+    assertions: ["phase=phase-2b2a-human-approval", "implemented and unavailable capabilities match command tree"]
+    liveSafety: SAFE
+
+  - id: TC-CLI-003
+    story: US-CLI-01
+    command: "All root and group help forms"
+    setup: "Run from a directory with no repository."
+    expectedExit: 0
+    assertions: ["plain text only", "no .upmctl writes", "no Vagrant/virsh/kubectl calls"]
+    liveSafety: SAFE
+
+  - id: TC-CLI-004
+    story: US-AUTO-01
+    command: "Representative success command in text, json, and jsonl"
+    expectedExit: 0
+    assertions: ["all formats are syntactically valid", "JSON and JSONL have the same semantic data", "stdout contains one result"]
+    liveSafety: SAFE
+
+  - id: TC-CLI-005
+    story: US-AUTO-01
+    command: "Every command with a unique --request-id and shared --log-file"
+    assertions: ["output and log requestId match", "runtime log has start and exactly one terminal event", "log does not contain workspace, IDs, reason, challenge, or external output"]
+    liveSafety: SAFE
+
+  - id: TC-CLI-006
+    story: US-AUTO-01
+    command: "Unknown flags, duplicate global flags, trailing arguments, empty values, invalid output, invalid timeout"
+    expectedExit: 2
+    assertions: ["kind=Error", "error.code=UPMCTL_USAGE", "no environment access or control-state writes"]
+    liveSafety: SAFE
+
+  - id: TC-ENV-001
+    story: US-ENV-01
+    command: "context discover; config validate"
+    setup: "Exact legacy workspace."
+    assertions: ["canonical workspace and config path match", "safe/valid/complete are true", "no external commands"]
+    liveSafety: SAFE
+
+  - id: TC-ENV-002
+    story: US-ENV-02
+    command: "environment adopt"
+    setup: "Disposable clean legacy workspace with complete libvirt metadata."
+    expectedExit: 0
+    assertions: ["human reason and exact challenge required", "only .upmctl/state.json is added", "directory=0700 and file=0600", "readback is MANAGED_VALID", "no target mutation"]
+    liveSafety: HUMAN_TTY
+
+  - id: TC-ENV-003
+    story: US-ENV-02
+    command: "environment adopt without controlling TTY"
+    expectedExit: 3
+    assertions: ["error.code=UPMCTL_HUMAN_TTY_REQUIRED", "no workspace observation or writes"]
+    liveSafety: SAFE
+
+  - id: TC-ENV-004
+    story: US-ENV-02
+    command: "environment adopt against existing .upmctl state"
+    expectedExit: 3
+    assertions: ["error.code=UPMCTL_ENVIRONMENT_ALREADY_CONTROLLED", "existing artifacts unchanged"]
+    liveSafety: SAFE_ON_DISPOSABLE_COPY
+
+  - id: TC-OBS-001
+    story: US-OBS-01
+    command: "status; vm list; vm status; vm status NODE; vm inspect NODE"
+    setup: "MANAGED_VALID workspace and healthy dependencies."
+    expectedExit: 0
+    assertions: ["all expected nodes returned", "Vagrant UUID equals managed binding", "libvirt domain identity correlates", "Kubernetes node and InternalIP correlate", "health/findings are explainable"]
+    liveSafety: SAFE
+
+  - id: TC-OBS-002
+    story: US-OBS-01
+    command: "vm status unknown-node; vm inspect unknown-node"
+    expectedExit: 3
+    assertions: ["error.code=UPMCTL_VM_NOT_FOUND", "no state writes"]
+    liveSafety: SAFE
+
+  - id: TC-OBS-003
+    story: US-OBS-01
+    command: "status and vm list with very small timeout"
+    expectedExit: 6
+    assertions: ["error.code=UPMCTL_INTERRUPTED", "no partial success envelope", "no control-state writes"]
+    liveSafety: SAFE
+
+  - id: TC-OBS-004
+    story: US-OBS-01
+    command: "status and vm list after a bound file digest is changed on a disposable copy"
+    expectedExit: 3
+    assertions: ["workspace becomes untrusted or managed state invalid", "Vagrantfile and kubeconfig are not executed"]
+    liveSafety: SAFE_ON_DISPOSABLE_COPY
+
+  - id: TC-PLAN-001
+    story: US-PLAN-01
+    command: "plan vm start --node RUNNING_NODE"
+    expectedExit: 0
+    assertions: ["disposition=NOOP", "valid planId and planDigest", "no Plan file", "no target mutation"]
+    liveSafety: SAFE
+
+  - id: TC-PLAN-002
+    story: US-PLAN-01
+    command: "plan vm start --node STOPPED_ISOLATED_WORKER"
+    setup: "A worker is intentionally stopped under a separate authorized fixture procedure."
+    expectedExit: 0
+    assertions: ["disposition=ACTION_REQUIRED", "risk=R1 for ordinary worker", "one immutable 0600 Plan file", "VM remains stopped"]
+    liveSafety: REQUIRES_AUTHORIZED_FIXTURE_STATE
+
+  - id: TC-PLAN-003
+    story: US-PLAN-01
+    command: "plan get; plan validate; preflight for ACTION_REQUIRED Plan"
+    assertions: ["get exit=0", "validate exit=0 when bindings match", "preflight kind=PreflightResult and exit=3", "applyDecision=BLOCKED", "executionAvailable=false"]
+    liveSafety: SAFE
+
+  - id: TC-PLAN-004
+    story: US-PLAN-01
+    command: "plan get/validate/preflight with missing, malformed, expired, and tampered Plan"
+    expectedExit: 3
+    assertions: ["stable error or blocker code", "no partial artifact accepted", "no target or control-state mutation"]
+    liveSafety: SAFE_ON_DISPOSABLE_COPY
+
+  - id: TC-APR-001
+    story: US-APR-01
+    command: "approval grant --plan-id PLAN_ID"
+    setup: "Human TTY and unexpired ACTION_REQUIRED Plan with PASSED read-only preflight."
+    expectedExit: 0
+    assertions: ["one immutable Approval", "actor/reason/challenge evidence present", "executionAvailable remains false"]
+    liveSafety: HUMAN_TTY
+
+  - id: TC-APR-002
+    story: US-APR-01
+    command: "approval get; approval list; approval list --plan-id"
+    expectedExit: 0
+    assertions: ["status=APPROVED before revocation", "stable ordering", "queries do not write state"]
+    liveSafety: SAFE
+
+  - id: TC-APR-003
+    story: US-APR-01
+    command: "approval revoke APPROVAL_ID"
+    setup: "Human TTY and non-expired Approval."
+    expectedExit: 0
+    assertions: ["Approval file unchanged", "one immutable Revocation is written", "get/list status=REVOKED"]
+    liveSafety: HUMAN_TTY
+
+  - id: TC-APR-004
+    story: US-APR-01
+    command: "grant/revoke through pipe, CI, agent, or without TTY"
+    expectedExit: 3
+    assertions: ["error.code=UPMCTL_HUMAN_TTY_REQUIRED", "no external observation and no control-state writes"]
+    liveSafety: SAFE
+
+  - id: TC-SAFE-001
+    story: US-SAFE-01
+    command: "apply and every unavailable VM, cluster, node, addon, operation, verify, and report command"
+    expectedExit: 3
+    assertions: ["error.code=UPMCTL_NOT_IMPLEMENTED", "no target command invoked", "no new .upmctl operation/claim/lock artifacts"]
+    liveSafety: SAFE
+
+  - id: TC-RESET-001
+    story: US-RESET-01
+    command: "Reset isolated test workspace between complete runs"
+    setup: "Snapshot or disposable copy; never clean a production workspace in place."
+    assertions: ["only test-created .upmctl artifacts are removed", "Vagrant metadata and target VMs are preserved", "next adopt begins from verified legacy state", "cleanup is recorded and independently reviewed"]
+    liveSafety: MANUAL_GUARDED_PROCEDURE_REQUIRED
+
+releaseGate:
+  verdict: NOT_READY_FOR_FULL_ADMINISTRATOR_OPERATIONS
+  reasons:
+    - "VM mutation, node add/remove, cluster lifecycle, Apply, Executor, Operation, and Addon management are unavailable."
+    - "Current live validation script does not cover help, vm status variants, human adopt/approval/revoke, read-only approval queries, negative parser cases, or the full fail-closed command tree."
+    - "An all-running environment cannot produce ACTION_REQUIRED and therefore cannot prove Plan/Approval lifecycle without an explicitly authorized stopped isolated worker."
+    - "There is no upmctl reset/unadopt command; repeatable cleanup requires a guarded disposable-workspace procedure outside the CLI."

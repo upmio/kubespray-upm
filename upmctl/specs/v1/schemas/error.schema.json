@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://upm.io/schemas/upmctl/v1alpha1/error.schema.json",
+  "title": "upmctl error envelope",
+  "type": "object",
+  "required": ["apiVersion", "kind", "requestId", "timestamp", "error"],
+  "properties": {
+    "apiVersion": { "const": "upmctl.upm.io/v1alpha1" },
+    "kind": { "const": "Error" },
+    "requestId": { "type": "string", "minLength": 1 },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "error": {
+      "type": "object",
+      "required": ["code", "message", "details", "remediation"],
+      "properties": {
+        "code": { "type": "string", "pattern": "^UPMCTL_[A-Z0-9_]+$" },
+        "message": { "type": "string", "minLength": 1 },
+        "details": { "type": "object" },
+        "remediation": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

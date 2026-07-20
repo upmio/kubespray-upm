@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://upm.io/schemas/upmctl/v1alpha1/approval-revocation.schema.json",
+  "title": "upmctl immutable approval revocation",
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "kind",
+    "revocationId",
+    "revocationDigest",
+    "approvalId",
+    "approvalDigest",
+    "planId",
+    "planDigest",
+    "environmentId",
+    "revokedAt",
+    "actor",
+    "humanPresence",
+    "reason",
+    "disposition"
+  ],
+  "properties": {
+    "apiVersion": { "const": "upmctl.upm.io/v1alpha1" },
+    "kind": { "const": "ApprovalRevocation" },
+    "revocationId": { "type": "string", "pattern": "^revocation-[0-9a-f]{64}$" },
+    "revocationDigest": { "$ref": "#/$defs/digest" },
+    "approvalId": { "type": "string", "pattern": "^approval-[0-9a-f]{64}$" },
+    "approvalDigest": { "$ref": "#/$defs/digest" },
+    "planId": { "type": "string", "pattern": "^plan-[0-9a-f]{64}$" },
+    "planDigest": { "$ref": "#/$defs/digest" },
+    "environmentId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "revokedAt": { "type": "string", "format": "date-time" },
+    "actor": { "$ref": "#/$defs/actor" },
+    "humanPresence": { "$ref": "#/$defs/humanPresence" },
+    "reason": { "type": "string", "minLength": 1, "maxLength": 2048 },
+    "disposition": { "const": "REVOKED" }
+  },
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "actor": {
+      "type": "object",
+      "required": ["subject", "uid", "username", "hostname", "source", "authMethod", "observedAt"],
+      "properties": {
+        "subject": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "uid": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "username": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "hostname": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "source": { "const": "human-cli" },
+        "authMethod": { "const": "interactive-tty" },
+        "observedAt": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    },
+    "humanPresence": {
+      "type": "object",
+      "required": ["method", "terminal", "challengeDigest", "confirmedAt"],
+      "properties": {
+        "method": { "const": "typed-challenge" },
+        "terminal": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "challengeDigest": { "$ref": "#/$defs/digest" },
+        "confirmedAt": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

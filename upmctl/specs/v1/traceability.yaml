@@ -1,0 +1,245 @@
+requirements:
+  UPMCTL-SCOPE-001:
+    status: specified
+    specifications: [master-spec.md]
+
+  UPMCTL-CTX-001:
+    status: in_progress
+    specifications: [architecture.md, cli-contract.md]
+    legacy_sources:
+      - file: vagrant_setup_scripts/README.md
+        section: 运行模型
+    implementation: [upmctl/internal/context/discover.go]
+    tests: [upmctl/internal/context/discover_test.go]
+
+  UPMCTL-CTX-002:
+    status: in_progress
+    specifications: [architecture.md, state-and-safety.md]
+    implementation: [upmctl/internal/context/discover.go]
+    tests: [upmctl/internal/context/discover_test.go]
+
+  UPMCTL-CTX-003:
+    status: verified
+    phase: 2b2a
+    specifications: [requirements.md, architecture.md, cli-contract.md, state-and-safety.md, acceptance.md, schemas/managed-environment.schema.json]
+    acceptance: [AC-CTX-002, AC-CTX-003, AC-CTX-004, AC-CTX-005]
+    implementation: [upmctl/internal/managedenv/model.go, upmctl/internal/managedenv/adopt.go, upmctl/internal/managedenv/store.go, upmctl/internal/context/discover.go, upmctl/internal/app/app.go, upmctl/internal/cli/cli.go]
+    tests: [upmctl/internal/managedenv/adopt_test.go, upmctl/internal/cli/environment_adopt_test.go, upmctl/internal/context/discover_test.go, upmctl/internal/contract/schema_contract_test.go]
+
+  UPMCTL-CFG-001:
+    status: in_progress
+    specifications: [master-spec.md, state-and-safety.md]
+    legacy_sources:
+      - file: vagrant_setup_scripts/libvirt_kubespray_setup.sh
+        symbol: load_existing_kubernetes_network_configuration
+
+  UPMCTL-CFG-002:
+    status: implemented
+    specifications: [cli-contract.md, architecture.md]
+    implementation: [upmctl/internal/config/parser.go, upmctl/internal/app/app.go]
+    tests: [upmctl/internal/config/parser_test.go, upmctl/internal/context/discover_test.go, upmctl/internal/cli/cli_test.go]
+
+  UPMCTL-CLI-001:
+    status: in_progress
+    specifications: [cli-contract.md]
+    implementation: [upmctl/internal/output/output.go, upmctl/internal/cli/cli.go]
+    tests: [upmctl/internal/output/output_test.go, upmctl/internal/cli/cli_test.go]
+
+  UPMCTL-CLI-002:
+    status: in_progress
+    specifications: [cli-contract.md]
+    implementation: [upmctl/internal/app/app.go, upmctl/internal/cli/cli.go]
+    tests: [upmctl/internal/cli/cli_test.go]
+
+  UPMCTL-OBS-001:
+    status: in_progress
+    specifications: [vm-lifecycle.md]
+    legacy_sources:
+      - file: vagrant_setup_scripts/Vagrantfile
+        line: 632
+    implementation: [upmctl/internal/vm/service.go]
+    tests: [upmctl/internal/vm/service_test.go, upmctl/internal/contract/schema_contract_test.go]
+
+  UPMCTL-OBS-002:
+    status: implemented
+    specifications: [cli-contract.md, implementation-plan.md]
+    implementation: [upmctl/internal/status/status.go, upmctl/internal/app/app.go]
+    tests: [upmctl/internal/status/status_test.go, upmctl/internal/cli/cli_test.go, upmctl/internal/contract/schema_contract_test.go]
+
+  UPMCTL-ERR-001:
+    status: in_progress
+    specifications: [cli-contract.md, schemas/error.schema.json]
+    implementation: [upmctl/internal/output/output.go, upmctl/internal/cli/cli.go]
+    tests: [upmctl/internal/output/output_test.go, upmctl/internal/cli/cli_test.go]
+
+  UPMCTL-PLAN-001:
+    status: in_progress
+    phase: 2a
+    implemented_scope: Phase 2a immutable Plan core and vm.start planner only
+    remaining_scope: V1-wide Plan coverage for VM, cluster, node, addon, deploy and destroy mutations
+    specifications: [state-and-safety.md, cli-contract.md, implementation-plan.md, acceptance.md, schemas/plan.schema.json]
+    acceptance: [AC-PLAN-001, AC-PLAN-002, AC-PLAN-003, AC-PLAN-004, AC-PLAN-005, AC-PLAN-006, AC-PLAN-007]
+    implementation: [upmctl/internal/digest/digest.go, upmctl/internal/plan/model.go, upmctl/internal/plan/planner.go, upmctl/internal/plan/contract.go, upmctl/internal/plan/store.go, upmctl/internal/app/app.go, upmctl/internal/cli/cli.go]
+    tests: [upmctl/internal/digest/digest_test.go, upmctl/internal/plan/planner_test.go, upmctl/internal/plan/contract_test.go, upmctl/internal/plan/store_test.go, upmctl/internal/app/app_test.go, upmctl/internal/cli/cli_test.go, upmctl/internal/contract/schema_contract_test.go]
+
+  UPMCTL-PLAN-002:
+    status: in_progress
+    phase: 2b1
+    specifications: [state-and-safety.md, cli-contract.md, implementation-plan.md, acceptance.md, schemas/plan.schema.json, schemas/plan-inspection.schema.json, schemas/plan-validation.schema.json, schemas/preflight-result.schema.json]
+    acceptance: [AC-PLAN-008, AC-PLAN-009, AC-PLAN-010, AC-PLAN-011, AC-PLAN-012, AC-PLAN-013, AC-PLAN-014, AC-PREFLIGHT-001, AC-PREFLIGHT-002, AC-PREFLIGHT-003, AC-PREFLIGHT-004, AC-PREFLIGHT-005, AC-PREFLIGHT-006, AC-PREFLIGHT-007, AC-PREFLIGHT-008, AC-PREFLIGHT-009, AC-PREFLIGHT-010]
+    implementation: [upmctl/internal/plan/model.go, upmctl/internal/plan/contract.go, upmctl/internal/plan/store.go, upmctl/internal/readiness/model.go, upmctl/internal/readiness/readiness.go, upmctl/internal/app/app.go, upmctl/internal/cli/cli.go]
+    tests: [upmctl/internal/plan/planner_test.go, upmctl/internal/plan/contract_test.go, upmctl/internal/plan/store_test.go, upmctl/internal/readiness/readiness_test.go, upmctl/internal/app/app_test.go, upmctl/internal/cli/cli_test.go, upmctl/internal/contract/schema_contract_test.go]
+
+  UPMCTL-SAFE-001:
+    status: in_progress
+    phase: 2b2a
+    verified_scope: Phase 2b2a human-TTY Approval and Revocation control-plane evidence
+    remaining_scope: Phase 2b2b Apply, Claim, Operation and Executor enforcement
+    specifications: [state-and-safety.md, cli-contract.md, architecture.md, codex-skill.md, mcp-reservation.md, implementation-plan.md, acceptance.md, schemas/approval.schema.json, schemas/approval-revocation.schema.json, schemas/plan-claim.schema.json, schemas/admission.schema.json, schemas/approval-status.schema.json, schemas/preflight-result.schema.json]
+    acceptance: [AC-SAFE-001, AC-APR-001, AC-APR-002, AC-APR-003, AC-APR-004, AC-APR-005, AC-APR-006, AC-APR-007, AC-APR-008, AC-APR-009, AC-APR-010]
+    implementation: [upmctl/internal/controlstate/store.go, upmctl/internal/approval/model.go, upmctl/internal/approval/store.go, upmctl/internal/admission/model.go, upmctl/internal/admission/validate.go, upmctl/internal/admission/artifact.go, upmctl/internal/admission/store.go, upmctl/internal/terminal/terminal.go, upmctl/internal/readiness/model.go, upmctl/internal/readiness/readiness.go, upmctl/internal/app/approval.go, upmctl/internal/app/app.go, upmctl/internal/cli/cli.go]
+    tests: [upmctl/internal/controlstate/store_test.go, upmctl/internal/approval/model_test.go, upmctl/internal/approval/store_test.go, upmctl/internal/admission/model_test.go, upmctl/internal/admission/store_test.go, upmctl/internal/terminal/terminal_test.go, upmctl/internal/readiness/readiness_test.go, upmctl/internal/app/approval_test.go, upmctl/internal/cli/cli_test.go, upmctl/internal/contract/schema_contract_test.go]
+
+  UPMCTL-SAFE-002:
+    status: specified
+    specifications: [master-spec.md, integrations.md]
+    legacy_sources:
+      - file: vagrant_setup_scripts/README.md
+        section: 默认集群
+
+  UPMCTL-OP-001:
+    status: specified
+    phase: 2b2b
+    specifications: [state-and-safety.md, implementation-plan.md, schemas/operation.schema.json]
+
+  UPMCTL-OP-002:
+    status: specified
+    phase: 2b2b
+    specifications: [state-and-safety.md, implementation-plan.md, schemas/operation.schema.json]
+
+  UPMCTL-VAGR-001:
+    status: in_progress
+    specifications: [vm-lifecycle.md]
+    implementation: [upmctl/internal/vm/service.go]
+    tests: [upmctl/internal/vm/service_test.go]
+
+  UPMCTL-VAGR-002:
+    status: specified
+    specifications: [vm-lifecycle.md, integrations.md]
+
+  UPMCTL-VAGR-003:
+    status: specified
+    specifications: [vm-lifecycle.md]
+
+  UPMCTL-VAGR-004:
+    status: specified
+    specifications: [vm-lifecycle.md]
+
+  UPMCTL-VAGR-005:
+    status: specified
+    specifications: [vm-lifecycle.md]
+
+  UPMCTL-VAGR-006:
+    status: specified
+    specifications: [vm-lifecycle.md, node-lifecycle.md]
+
+  UPMCTL-VAGR-007:
+    status: specified
+    specifications: [vm-lifecycle.md, codex-skill.md]
+
+  UPMCTL-NODE-001:
+    status: specified
+    specifications: [node-lifecycle.md]
+
+  UPMCTL-NODE-002:
+    status: specified
+    specifications: [node-lifecycle.md]
+
+  UPMCTL-NODE-003:
+    status: specified
+    specifications: [master-spec.md, node-lifecycle.md]
+
+  UPMCTL-NODE-004:
+    status: specified
+    specifications: [node-lifecycle.md, integrations.md]
+    legacy_sources:
+      - file: vagrant_setup_scripts/Vagrantfile
+        line: 891
+      - file: playbooks/scale.yml
+        line: 24
+
+  UPMCTL-NODE-005:
+    status: specified
+    specifications: [node-lifecycle.md, integrations.md]
+    legacy_sources:
+      - file: playbooks/remove_node.yml
+        line: 38
+      - file: roles/remove_node/pre_remove/tasks/main.yml
+        line: 12
+
+  UPMCTL-NODE-006:
+    status: specified
+    specifications: [node-lifecycle.md]
+
+  UPMCTL-NET-001:
+    status: specified
+    specifications: [master-spec.md, integrations.md]
+    legacy_sources:
+      - file: vagrant_setup_scripts/libvirt_kubespray_setup.sh
+        symbol: configure_vm_networking_interactive
+
+  UPMCTL-NET-002:
+    status: specified
+    specifications: [master-spec.md, integrations.md]
+    legacy_sources:
+      - file: vagrant_setup_scripts/libvirt_kubespray_setup.sh
+        symbol: validate_cilium_load_balancer_configuration
+
+  UPMCTL-NET-003:
+    status: specified
+    specifications: [master-spec.md, state-and-safety.md]
+
+  UPMCTL-ADDON-001:
+    status: specified
+    specifications: [master-spec.md, integrations.md]
+    legacy_sources:
+      - file: vagrant_setup_scripts/upm_setup.sh
+        symbols: [install_lvm_localpv, install_prometheus, install_upm_engine, install_upm_platform]
+
+  UPMCTL-ADDON-002:
+    status: specified
+    specifications: [master-spec.md, integrations.md]
+
+  UPMCTL-VERIFY-001:
+    status: specified
+    specifications: [master-spec.md, integrations.md, acceptance.md]
+
+  UPMCTL-SKILL-001:
+    status: verified
+    specifications: [codex-skill.md]
+    implementation: [upmctl/skills/upmctl-environment/SKILL.md, upmctl/skills/upmctl-environment/references/phase-2b2a-contract.md, upmctl/skills/upmctl-environment/agents/openai.yaml]
+    tests: [upmctl/internal/contract/schema_contract_test.go]
+
+  UPMCTL-SKILL-002:
+    status: verified
+    specifications: [codex-skill.md]
+    implementation: [upmctl/skills/upmctl-environment/SKILL.md]
+    tests: [upmctl/internal/contract/schema_contract_test.go]
+
+  UPMCTL-SKILL-003:
+    status: verified
+    specifications: [codex-skill.md]
+    implementation: [upmctl/skills/upmctl-environment/SKILL.md, upmctl/skills/upmctl-environment/references/phase-2b2a-contract.md]
+    tests: [upmctl/internal/contract/schema_contract_test.go]
+
+  UPMCTL-MCP-001:
+    status: specified
+    specifications: [architecture.md, mcp-reservation.md]
+
+  UPMCTL-MCP-002:
+    status: specified
+    specifications: [mcp-reservation.md]
+
+  UPMCTL-MCP-003:
+    status: specified
+    specifications: [mcp-reservation.md]

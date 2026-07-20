@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://upm.io/schemas/upmctl/v1alpha1/runtime-log-event.schema.json",
+  "title": "upmctl privacy-minimized runtime lifecycle event",
+  "type": "object",
+  "required": ["logVersion", "timestamp", "requestId", "command", "event", "exitCode", "errorCode"],
+  "properties": {
+    "logVersion": { "const": "upmctl.runtime/v1" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "requestId": { "type": "string", "minLength": 1 },
+    "command": {
+      "type": "string",
+      "enum": [
+        "unknown",
+        "help",
+        "help approval",
+        "help plan",
+        "help vm",
+        "help environment",
+        "version",
+        "capabilities",
+        "context discover",
+        "config validate",
+        "status",
+        "vm list",
+        "vm status",
+        "vm inspect",
+        "vm ssh",
+        "node list",
+        "node status",
+        "plan get",
+        "plan validate",
+        "plan vm start",
+        "plan vm stop",
+        "plan vm restart",
+        "plan cluster deploy",
+        "plan cluster start",
+        "plan cluster stop",
+        "plan cluster restart",
+        "plan cluster destroy",
+        "plan node add",
+        "plan node remove",
+        "plan addon install",
+        "preflight",
+        "approval grant",
+        "approval get",
+        "approval list",
+        "approval revoke",
+        "apply",
+        "operation get",
+        "operation cancel",
+        "operation resume",
+        "verify",
+        "report generate"
+      ]
+    },
+    "event": { "enum": ["start", "complete", "error"] },
+    "exitCode": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "integer", "minimum": 0, "maximum": 255 }
+      ]
+    },
+    "errorCode": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^UPMCTL_[A-Z0-9_]+$" }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "event": { "const": "start" } } },
+      "then": {
+        "properties": {
+          "exitCode": { "type": "null" },
+          "errorCode": { "type": "null" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "event": { "const": "complete" } } },
+      "then": {
+        "properties": {
+          "exitCode": { "type": "integer" },
+          "errorCode": { "type": "null" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "event": { "const": "error" } } },
+      "then": {
+        "properties": {
+          "exitCode": { "type": "integer" },
+          "errorCode": { "type": "string", "pattern": "^UPMCTL_[A-Z0-9_]+$" }
+        }
+      }
+    }
+  ],
+  "additionalProperties": false
+}

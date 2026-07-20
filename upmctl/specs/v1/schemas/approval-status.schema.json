@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://upm.io/schemas/upmctl/v1alpha1/approval-status.schema.json",
+  "title": "upmctl Plan-bound Approval inspection",
+  "oneOf": [
+    { "$ref": "#/$defs/inspection" },
+    { "$ref": "#/$defs/inspectionList" }
+  ],
+  "$defs": {
+    "inspection": {
+      "type": "object",
+      "required": [
+        "apiVersion",
+        "kind",
+        "checkedAt",
+        "approval",
+        "status",
+        "executionAvailable"
+      ],
+      "properties": {
+        "apiVersion": { "const": "upmctl.upm.io/v1alpha1" },
+        "kind": { "const": "ApprovalInspection" },
+        "checkedAt": { "type": "string", "format": "date-time" },
+        "approval": { "$ref": "approval.schema.json" },
+        "status": { "enum": ["APPROVED", "REVOKED", "EXPIRED", "INVALID"] },
+        "revocation": { "$ref": "approval-revocation.schema.json" },
+        "executionAvailable": { "const": false }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["status"],
+            "properties": { "status": { "const": "REVOKED" } }
+          },
+          "then": { "required": ["revocation"] }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "inspectionList": {
+      "type": "object",
+      "required": ["apiVersion", "kind", "checkedAt", "items", "executionAvailable"],
+      "properties": {
+        "apiVersion": { "const": "upmctl.upm.io/v1alpha1" },
+        "kind": { "const": "ApprovalInspectionList" },
+        "checkedAt": { "type": "string", "format": "date-time" },
+        "items": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": { "$ref": "#/$defs/inspection" }
+        },
+        "executionAvailable": { "const": false }
+      },
+      "additionalProperties": false
+    }
+  }
+}

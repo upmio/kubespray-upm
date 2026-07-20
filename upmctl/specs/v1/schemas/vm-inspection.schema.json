@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://upm.io/schemas/upmctl/v1alpha1/vm-inspection.schema.json",
+  "title": "upmctl VM inspection",
+  "type": "object",
+  "required": ["name", "expected", "managed", "role", "health", "consistency", "identity", "power", "network", "kubernetes", "resources", "sources"],
+  "properties": {
+    "name": { "type": "string", "pattern": "^k8s-[1-8]$" },
+    "index": { "type": "integer", "minimum": 1, "maximum": 8 },
+    "expected": { "type": "boolean" },
+    "managed": { "type": "boolean" },
+    "role": { "type": "string" },
+    "health": { "enum": ["RUNNING_HEALTHY", "RUNNING_DEGRADED", "STOPPED", "MISSING", "ORPHANED", "INCONSISTENT", "UNKNOWN"] },
+    "consistency": { "enum": ["consistent", "degraded", "inconsistent", "unknown"] },
+    "vagrantState": { "type": "string" },
+    "libvirtId": { "type": "string" },
+    "libvirtState": { "type": "string" },
+    "kubernetesState": { "type": "string" },
+    "identity": {
+      "type": "object",
+      "properties": {
+        "vagrantMachine": { "type": "string" },
+        "libvirtUUID": { "type": "string" },
+        "domainName": { "type": "string" },
+        "kubernetesNodeName": { "type": "string" },
+        "kubernetesNodeUID": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "power": {
+      "type": "object",
+      "required": ["desired", "vagrant", "libvirt"],
+      "properties": {
+        "desired": { "type": "string" },
+        "vagrant": { "type": "string" },
+        "libvirt": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "network": {
+      "type": "object",
+      "required": ["addresses", "sshState"],
+      "properties": {
+        "addresses": { "type": "array", "items": { "type": "string" } },
+        "internalIP": { "type": "string" },
+        "sshHost": { "type": "string" },
+        "sshPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "sshState": { "enum": ["unknown", "not-applicable", "endpoint-configured", "reachable", "unavailable"] }
+      },
+      "additionalProperties": false
+    },
+    "kubernetes": {
+      "type": "object",
+      "required": ["present", "ready", "unschedulable", "state"],
+      "properties": {
+        "present": { "type": "boolean" },
+        "ready": { "type": "boolean" },
+        "unschedulable": { "type": "boolean" },
+        "state": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "resources": {
+      "type": "object",
+      "required": ["cpu", "memoryMiB", "dataDisks", "observedDisks"],
+      "properties": {
+        "cpu": { "type": "integer", "minimum": 0 },
+        "memoryMiB": { "type": "integer", "minimum": 0 },
+        "dataDisks": { "type": "integer", "minimum": 0 },
+        "dataDiskSize": { "type": "string" },
+        "observedDisks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["type", "device", "target"],
+            "properties": {
+              "type": { "type": "string" },
+              "device": { "type": "string" },
+              "target": { "type": "string" },
+              "source": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "sources": {
+      "type": "object",
+      "additionalProperties": {
+        "enum": ["declared", "observed", "absent", "unavailable", "unknown", "not-applicable", "endpoint-configured"]
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "severity", "source", "message"],
+        "properties": {
+          "code": { "type": "string" },
+          "severity": { "enum": ["info", "warning", "error"] },
+          "source": { "type": "string" },
+          "resource": { "type": "string" },
+          "message": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

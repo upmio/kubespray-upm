@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://upm.io/schemas/upmctl/v1alpha1/operation.schema.json",
+  "title": "upmctl operation",
+  "type": "object",
+  "required": ["operationId", "planId", "status", "updatedAt", "observedStateDigest", "journal", "cancelRequested"],
+  "properties": {
+    "operationId": { "type": "string", "minLength": 1 },
+    "planId": { "type": "string", "minLength": 1 },
+    "status": {
+      "enum": ["PLANNED", "AWAITING_APPROVAL", "RUNNING", "SUCCEEDED", "NOOP", "PARTIAL", "BLOCKED", "FAILED", "INTERRUPTED", "CANCELLED"]
+    },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "observedStateDigest": { "type": "string", "minLength": 1 },
+    "lastCompletedStep": { "type": "string" },
+    "message": { "type": "string" },
+    "cancelRequested": { "type": "boolean" },
+    "recoveryObservation": { "type": "object" },
+    "failureEvidence": { "type": "array", "items": { "type": "string" } },
+    "journal": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["stepId", "status", "timestamp"],
+        "properties": {
+          "stepId": { "type": "string" },
+          "status": { "enum": ["PENDING", "RUNNING", "SUCCEEDED", "SKIPPED", "FAILED", "INTERRUPTED"] },
+          "timestamp": { "type": "string", "format": "date-time" },
+          "evidence": { "type": "array", "items": { "type": "string" } }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://upm.io/schemas/upmctl/v1alpha1/observed-state.schema.json",
+  "title": "upmctl environment observed state",
+  "type": "object",
+  "required": ["mode", "health", "observationComplete", "config", "managedState", "cluster", "vmSummary", "findings"],
+  "properties": {
+    "mode": { "enum": ["managed", "legacy-read-only", "invalid-managed", "unknown"] },
+    "health": { "enum": ["HEALTHY", "DEGRADED", "STOPPED", "INCONSISTENT", "UNKNOWN"] },
+    "observationComplete": { "type": "boolean" },
+    "repositoryRoot": { "type": "string" },
+    "workspace": { "type": "string" },
+    "config": {
+      "type": "object",
+      "required": ["present", "safe", "complete", "valid", "status"],
+      "properties": {
+        "present": { "type": "boolean" },
+        "safe": { "type": "boolean" },
+        "complete": { "type": "boolean" },
+        "valid": { "type": "boolean" },
+        "digest": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "managedState": {
+      "type": "object",
+      "required": ["present", "valid", "trust"],
+      "properties": {
+        "present": { "type": "boolean" },
+        "valid": { "type": "boolean" },
+        "trust": { "enum": ["MANAGED_VALID", "LEGACY_UNTRUSTED_READONLY", "INVALID", "UNKNOWN"] }
+      },
+      "additionalProperties": false
+    },
+    "cluster": {
+      "type": "object",
+      "required": ["apiState", "kubeconfigPresent", "expectedNodes", "vagrantMachines", "libvirtDomains", "kubernetesNodes"],
+      "properties": {
+        "apiState": { "enum": ["reachable", "unavailable", "unknown"] },
+        "kubeconfigPresent": { "type": "boolean" },
+        "expectedNodes": { "type": "integer", "minimum": 0 },
+        "vagrantMachines": { "type": "integer", "minimum": 0 },
+        "libvirtDomains": { "type": "integer", "minimum": 0 },
+        "kubernetesNodes": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "vmSummary": {
+      "type": "object",
+      "required": ["expected", "healthy", "degraded", "stopped", "missing", "orphaned", "inconsistent", "unknown"],
+      "properties": {
+        "expected": { "type": "integer", "minimum": 0 },
+        "healthy": { "type": "integer", "minimum": 0 },
+        "degraded": { "type": "integer", "minimum": 0 },
+        "stopped": { "type": "integer", "minimum": 0 },
+        "missing": { "type": "integer", "minimum": 0 },
+        "orphaned": { "type": "integer", "minimum": 0 },
+        "inconsistent": { "type": "integer", "minimum": 0 },
+        "unknown": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "severity", "scope", "message"],
+        "properties": {
+          "code": { "type": "string", "minLength": 1 },
+          "severity": { "enum": ["info", "warning", "error"] },
+          "scope": { "type": "string", "minLength": 1 },
+          "resource": { "type": "string" },
+          "message": { "type": "string", "minLength": 1 },
+          "evidence": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://upm.io/schemas/upmctl/v1alpha1/preflight-result.schema.json",
+  "title": "upmctl read-only preflight result",
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "kind",
+    "planId",
+    "planDigest",
+    "checkedAt",
+    "preflightStatus",
+    "applyDecision",
+    "executionAvailable",
+    "approvalStatus",
+    "basis",
+    "checks",
+    "blockers"
+  ],
+  "properties": {
+    "apiVersion": { "const": "upmctl.upm.io/v1alpha1" },
+    "kind": { "const": "PreflightResult" },
+    "planId": {
+      "type": "string",
+      "pattern": "^plan-[0-9a-f]{64}$"
+    },
+    "planDigest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "checkedAt": { "type": "string", "format": "date-time" },
+    "preflightStatus": { "enum": ["PASSED", "BLOCKED"] },
+    "applyDecision": { "const": "BLOCKED" },
+    "executionAvailable": { "const": false },
+    "approvalStatus": {
+      "enum": ["MISSING", "APPROVED", "REVOKED", "EXPIRED", "INVALID"]
+    },
+    "basis": {
+      "type": "object",
+      "required": ["config", "managedState", "observedState"],
+      "properties": {
+        "config": { "$ref": "#/$defs/basisComparison" },
+        "managedState": { "$ref": "#/$defs/basisComparison" },
+        "observedState": { "$ref": "#/$defs/basisComparison" }
+      },
+      "additionalProperties": false
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 10,
+      "maxItems": 10,
+      "prefixItems": [
+        { "$ref": "#/$defs/checkPlanIntegrity" },
+        { "$ref": "#/$defs/checkPlanTimeValid" },
+        { "$ref": "#/$defs/checkEnvironmentMatch" },
+        { "$ref": "#/$defs/checkConfigMatch" },
+        { "$ref": "#/$defs/checkManagedStateMatch" },
+        { "$ref": "#/$defs/checkObservationSafe" },
+        { "$ref": "#/$defs/checkObservedStateMatch" },
+        { "$ref": "#/$defs/checkExecutorCapability" },
+        { "$ref": "#/$defs/checkConcurrencyControl" },
+        { "$ref": "#/$defs/checkApprovalSubsystem" }
+      ],
+      "items": false
+    },
+    "blockers": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512
+      }
+    }
+  },
+  "$defs": {
+    "digestOrNull": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        { "type": "null" }
+      ]
+    },
+    "basisComparison": {
+      "type": "object",
+      "required": ["expected", "current", "status"],
+      "properties": {
+        "expected": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "current": { "$ref": "#/$defs/digestOrNull" },
+        "status": { "enum": ["MATCH", "DRIFT", "INVALID", "UNAVAILABLE"] }
+      },
+      "additionalProperties": false
+    },
+    "check": {
+      "type": "object",
+      "required": ["id", "status", "code", "message"],
+      "properties": {
+        "id": {
+          "enum": [
+            "PLAN_INTEGRITY",
+            "PLAN_TIME_VALID",
+            "ENVIRONMENT_MATCH",
+            "CONFIG_MATCH",
+            "MANAGED_STATE_MATCH",
+            "OBSERVATION_SAFE",
+            "OBSERVED_STATE_MATCH",
+            "EXECUTOR_CAPABILITY",
+            "CONCURRENCY_CONTROL",
+            "APPROVAL_SUBSYSTEM"
+          ]
+        },
+        "status": { "enum": ["PASS", "FAIL", "SKIPPED"] },
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,127}$"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      },
+      "additionalProperties": false
+    },
+    "checkPlanIntegrity": {
+      "allOf": [
+        { "$ref": "#/$defs/check" },
+        { "properties": { "id": { "const": "PLAN_INTEGRITY" } } }
+      ]
+    },
+    "checkPlanTimeValid": {
+      "allOf": [
+        { "$ref": "#/$defs/check" },
+        { "properties": { "id": { "const": "PLAN_TIME_VALID" } } }
+      ]
+    },
+    "checkEnvironmentMatch": {
+      "allOf": [
+        { "$ref": "#/$defs/check" },
+        { "properties": { "id": { "const": "ENVIRONMENT_MATCH" } } }
+      ]
+    },
+    "checkConfigMatch": {
+      "allOf": [
+        { "$ref": "#/$defs/check" },
+        { "properties": { "id": { "const": "CONFIG_MATCH" } } }
+      ]
+    },
+    "checkManagedStateMatch": {
+      "allOf": [
+        { "$ref": "#/$defs/check" },
+        { "properties": { "id": { "const": "MANAGED_STATE_MATCH" } } }
+      ]
+    },
+    "checkObservationSafe": {
+      "allOf": [
+        { "$ref": "#/$defs/check" },
+        { "properties": { "id": { "const": "OBSERVATION_SAFE" } } }
+      ]
+    },
+    "checkObservedStateMatch": {
+      "allOf": [
+        { "$ref": "#/$defs/check" },
+        { "properties": { "id": { "const": "OBSERVED_STATE_MATCH" } } }
+      ]
+    },
+    "checkExecutorCapability": {
+      "allOf": [
+        { "$ref": "#/$defs/check" },
+        { "properties": { "id": { "const": "EXECUTOR_CAPABILITY" } } }
+      ]
+    },
+    "checkConcurrencyControl": {
+      "allOf": [
+        { "$ref": "#/$defs/check" },
+        { "properties": { "id": { "const": "CONCURRENCY_CONTROL" } } }
+      ]
+    },
+    "checkApprovalSubsystem": {
+      "allOf": [
+        { "$ref": "#/$defs/check" },
+        { "properties": { "id": { "const": "APPROVAL_SUBSYSTEM" } } }
+      ]
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://upm.io/schemas/upmctl/v1alpha1/plan-inspection.schema.json",
+  "title": "upmctl plan inspection",
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "kind",
+    "plan",
+    "expired",
+    "executionAvailable",
+    "checkedAt"
+  ],
+  "properties": {
+    "apiVersion": { "const": "upmctl.upm.io/v1alpha1" },
+    "kind": { "const": "PlanInspection" },
+    "plan": { "$ref": "plan.schema.json" },
+    "expired": { "type": "boolean" },
+    "executionAvailable": { "const": false },
+    "checkedAt": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

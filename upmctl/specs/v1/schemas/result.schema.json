@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://upm.io/schemas/upmctl/v1alpha1/result.schema.json",
+  "title": "upmctl result envelope",
+  "type": "object",
+  "required": ["apiVersion", "kind", "requestId", "timestamp", "data"],
+  "properties": {
+    "apiVersion": { "const": "upmctl.upm.io/v1alpha1" },
+    "kind": { "type": "string", "minLength": 1 },
+    "requestId": { "type": "string", "minLength": 1 },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "data": {}
+  },
+  "additionalProperties": false
+}

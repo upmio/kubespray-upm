@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://upm.io/schemas/upmctl/v1alpha1/managed-environment.schema.json",
+  "title": "upmctl managed environment identity",
+  "type": "object",
+  "required": ["apiVersion", "kind", "environmentId", "workspace", "files", "machines", "adoption"],
+  "properties": {
+    "apiVersion": { "const": "upmctl.upm.io/v1alpha1" },
+    "kind": { "const": "ManagedEnvironment" },
+    "environmentId": {
+      "type": "string",
+      "pattern": "^env-[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+    },
+    "workspace": { "type": "string", "pattern": "^/", "maxLength": 4096 },
+    "files": {
+      "type": "object",
+      "required": ["Vagrantfile", "vagrant/config.rb"],
+      "minProperties": 2,
+      "maxProperties": 4,
+      "propertyNames": {
+        "enum": ["Vagrantfile", "vagrant/config.rb", "inventory/sample/artifacts/admin.conf", "artifacts/admin.conf"]
+      },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^sha256:[0-9a-f]{64}$"
+      }
+    },
+    "machines": {
+      "type": "object",
+      "minProperties": 3,
+      "maxProperties": 8,
+      "propertyNames": { "pattern": "^k8s-[1-8]$" },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+      }
+    },
+    "adoption": {
+      "type": "object",
+      "required": ["adoptedAt", "actor", "humanPresence", "reason", "requestId", "cliVersion"],
+      "properties": {
+        "adoptedAt": { "type": "string", "format": "date-time" },
+        "actor": {
+          "type": "object",
+          "required": ["subject", "uid", "username", "hostname", "source", "authMethod"],
+          "properties": {
+            "subject": { "type": "string", "minLength": 1, "maxLength": 1024 },
+            "uid": { "type": "string", "minLength": 1, "maxLength": 1024 },
+            "username": { "type": "string", "minLength": 1, "maxLength": 1024 },
+            "hostname": { "type": "string", "minLength": 1, "maxLength": 1024 },
+            "source": { "const": "human-cli" },
+            "authMethod": { "const": "interactive-tty" }
+          },
+          "additionalProperties": false
+        },
+        "humanPresence": {
+          "type": "object",
+          "required": ["method", "terminal", "challengeDigest", "confirmedAt"],
+          "properties": {
+            "method": { "const": "typed-challenge" },
+            "terminal": { "type": "string", "minLength": 1, "maxLength": 1024 },
+            "challengeDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+            "confirmedAt": { "type": "string", "format": "date-time" }
+          },
+          "additionalProperties": false
+        },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "requestId": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "cliVersion": { "type": "string", "minLength": 1, "maxLength": 1024 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

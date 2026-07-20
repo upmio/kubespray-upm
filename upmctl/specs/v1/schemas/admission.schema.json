@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://upm.io/schemas/upmctl/v1alpha1/admission.schema.json",
+  "title": "upmctl atomic admission slot",
+  "description": "The admissions/<planId>.json slot contains exactly one revocation or future internal plan claim.",
+  "oneOf": [
+    { "$ref": "approval-revocation.schema.json" },
+    { "$ref": "plan-claim.schema.json" }
+  ],
+  "unevaluatedProperties": false
+}

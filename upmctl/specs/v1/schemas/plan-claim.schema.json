@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://upm.io/schemas/upmctl/v1alpha1/plan-claim.schema.json",
+  "title": "upmctl immutable internal plan claim",
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "kind",
+    "claimId",
+    "claimDigest",
+    "planId",
+    "planDigest",
+    "approvalId",
+    "approvalDigest",
+    "environmentId",
+    "action",
+    "scope",
+    "basis",
+    "operationId",
+    "claimedAt",
+    "claimer",
+    "admissionBasis"
+  ],
+  "properties": {
+    "apiVersion": { "const": "upmctl.upm.io/v1alpha1" },
+    "kind": { "const": "PlanClaim" },
+    "claimId": { "type": "string", "pattern": "^claim-[0-9a-f]{64}$" },
+    "claimDigest": { "$ref": "#/$defs/digest" },
+    "planId": { "type": "string", "pattern": "^plan-[0-9a-f]{64}$" },
+    "planDigest": { "$ref": "#/$defs/digest" },
+    "approvalId": { "type": "string", "pattern": "^approval-[0-9a-f]{64}$" },
+    "approvalDigest": { "$ref": "#/$defs/digest" },
+    "environmentId": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "action": { "const": "vm.start" },
+    "scope": { "type": "string", "pattern": "^vm\\.start:k8s-[1-8]$" },
+    "basis": { "$ref": "#/$defs/basis" },
+    "operationId": { "type": "string", "pattern": "^operation-[0-9a-f]{64}$" },
+    "claimedAt": { "type": "string", "format": "date-time" },
+    "claimer": { "$ref": "#/$defs/actor" },
+    "admissionBasis": { "$ref": "#/$defs/admissionBasis" },
+    "lockFencing": { "$ref": "#/$defs/lockFencing" }
+  },
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "basis": {
+      "type": "object",
+      "required": ["configDigest", "managedStateDigest", "observedStateDigest"],
+      "properties": {
+        "configDigest": { "$ref": "#/$defs/digest" },
+        "managedStateDigest": { "$ref": "#/$defs/digest" },
+        "observedStateDigest": { "$ref": "#/$defs/digest" }
+      },
+      "additionalProperties": false
+    },
+    "actor": {
+      "type": "object",
+      "required": ["subject", "uid", "username", "hostname", "source", "authMethod", "observedAt"],
+      "properties": {
+        "subject": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "uid": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "username": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "hostname": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "source": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "authMethod": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "observedAt": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    },
+    "admissionBasis": {
+      "type": "object",
+      "required": ["planValidation", "approvalValidation", "environmentValidation", "driftValidation", "checkedAt"],
+      "properties": {
+        "planValidation": { "const": "VALID" },
+        "approvalValidation": { "const": "APPROVED" },
+        "environmentValidation": { "const": "MATCHED" },
+        "driftValidation": { "const": "MATCHED" },
+        "checkedAt": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    },
+    "lockFencing": {
+      "type": "object",
+      "required": ["lockId", "token"],
+      "properties": {
+        "lockId": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "token": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

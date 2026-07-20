@@ -1,0 +1,298 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://upm.io/schemas/upmctl/v1alpha1/plan.schema.json",
+  "title": "upmctl immutable plan",
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "kind",
+    "planId",
+    "planDigest",
+    "environmentId",
+    "action",
+    "disposition",
+    "createdAt",
+    "expiresAt",
+    "riskLevel",
+    "basis",
+    "target",
+    "affectedResources",
+    "preconditions",
+    "blockers",
+    "rejectionConditions",
+    "irreversibleActions",
+    "dataImpact",
+    "expectedDisruption",
+    "approvalScope",
+    "acceptanceRefs",
+    "steps"
+  ],
+  "properties": {
+    "apiVersion": { "const": "upmctl.upm.io/v1alpha1" },
+    "kind": { "const": "Plan" },
+    "planId": {
+      "type": "string",
+      "pattern": "^plan-[0-9a-f]{64}$"
+    },
+    "planDigest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "environmentId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "action": {
+      "enum": [
+        "vm.start",
+        "vm.stop",
+        "vm.restart",
+        "cluster.start",
+        "cluster.stop",
+        "cluster.restart"
+      ]
+    },
+    "disposition": {
+      "enum": ["ACTION_REQUIRED", "NOOP", "BLOCKED"]
+    },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "expiresAt": { "type": "string", "format": "date-time" },
+    "riskLevel": { "enum": ["R0", "R1", "R2", "R3"] },
+    "basis": {
+      "type": "object",
+      "required": [
+        "configDigest",
+        "managedStateDigest",
+        "observedStateDigest"
+      ],
+      "properties": {
+        "configDigest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "managedStateDigest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "observedStateDigest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "target": {
+      "type": "object",
+      "required": ["kind", "name"],
+      "properties": {
+        "kind": { "enum": ["VirtualMachine", "Cluster"] },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "additionalProperties": false
+    },
+    "affectedResources": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      }
+    },
+    "preconditions": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512
+      }
+    },
+    "rejectionConditions": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512
+      }
+    },
+    "irreversibleActions": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512
+      }
+    },
+    "dataImpact": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512
+      }
+    },
+    "expectedDisruption": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512
+      }
+    },
+    "approvalScope": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "acceptanceRefs": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "pattern": "^AC-[A-Z]+-[0-9]{3}$"
+      }
+    },
+    "steps": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "code",
+          "resource",
+          "postconditions",
+          "acceptanceRefs"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,127}$"
+          },
+          "resource": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "postconditions": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          },
+          "acceptanceRefs": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "items": {
+              "type": "string",
+              "pattern": "^AC-[A-Z]+-[0-9]{3}$"
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "action": { "pattern": "^vm\\." } },
+        "required": ["action"]
+      },
+      "then": {
+        "properties": {
+          "target": {
+            "properties": {
+              "kind": { "const": "VirtualMachine" },
+              "name": { "pattern": "^k8s-[1-8]$" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "action": { "pattern": "^cluster\\." } },
+        "required": ["action"]
+      },
+      "then": {
+        "properties": {
+          "target": {
+            "properties": {
+              "kind": { "const": "Cluster" },
+              "name": { "const": "cluster" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "disposition": { "const": "ACTION_REQUIRED" } },
+        "required": ["disposition"]
+      },
+      "then": {
+        "properties": {
+          "steps": { "minItems": 1 },
+          "blockers": { "maxItems": 0 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "disposition": { "const": "NOOP" } },
+        "required": ["disposition"]
+      },
+      "then": {
+        "properties": {
+          "riskLevel": { "const": "R0" },
+          "steps": { "maxItems": 0 },
+          "blockers": { "maxItems": 0 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "disposition": { "const": "BLOCKED" } },
+        "required": ["disposition"]
+      },
+      "then": {
+        "properties": {
+          "steps": { "maxItems": 0 },
+          "blockers": { "minItems": 1 }
+        }
+      }
+    }
+  ],
+  "additionalProperties": false
+}

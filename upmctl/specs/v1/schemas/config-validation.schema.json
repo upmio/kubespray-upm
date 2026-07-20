@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://upm.io/schemas/upmctl/v1alpha1/config-validation.schema.json",
+  "title": "upmctl config validation data",
+  "type": "object",
+  "required": ["context", "validation", "executable"],
+  "properties": {
+    "context": { "type": "object" },
+    "executable": { "type": "boolean" },
+    "validation": {
+      "type": "object",
+      "required": ["path", "digest", "status", "safe", "complete", "valid", "config", "findings"],
+      "properties": {
+        "path": { "type": "string" },
+        "digest": { "type": "string", "pattern": "^(|sha256:[0-9a-f]{64})$" },
+        "status": { "enum": ["SAFE_COMPLETE", "SAFE_INCOMPLETE", "INVALID", "UNSAFE"] },
+        "safe": { "type": "boolean" },
+        "complete": { "type": "boolean" },
+        "valid": { "type": "boolean" },
+        "config": { "type": "object" },
+        "findings": { "type": "array" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

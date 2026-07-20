@@ -1,0 +1,4 @@
+interface:
+  display_name: "UPMCTL Environment Manager"
+  short_description: "Inspect and safely plan Kubespray UPM environments"
+  default_prompt: "Use $upmctl-environment to inspect this managed environment and prepare a safe plan."
